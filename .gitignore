@@ -1,0 +1,18 @@
+# Entornos virtuales de Python (agent/.venv, server/.venv)
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Secretos -- NUNCA subir esto a GitHub
+server/.env
+agent/agent_credential.json
+
+# Archivos de prueba locales (no son parte del código de la tesis)
+agent/test_files/
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

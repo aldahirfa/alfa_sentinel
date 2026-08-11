@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="/detecciones" class="back-link">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    Detecciones
+</a>
+
+<div class="endpoint-detail-header">
+    <div class="endpoint-detail-avatar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    </div>
+    <div style="flex:1;">
+        <h1 class="endpoint-detail-title">DET-{{ "%05d"|format(d.id) }} · {{ d.title }}</h1>
+        <div class="endpoint-detail-meta">
+            <span class="badge badge-{{ d.severity }}">{{ d.severity_label }}</span>
+            {% if d.is_honeyfile %}
+            <span class="badge" style="background:rgba(220,38,38,0.1);color:var(--c-red);">Honeyfile</span>
+            {% endif %}
+            · {{ d.hostname }}
+            · {{ d.rule_label }}
+            · {{ d.created_at.strftime('%d/%m/%Y %H:%M:%S') }}
+        </div>
+    </div>
+</div>
+
+<div class="mini-grid-2">
+    <div class="card">
+        <div class="section-title-row"><h2>Información de la detección</h2></div>
+        <div class="detail-grid">
+            <div class="detail-row">
+                <div class="detail-label">Endpoint</div>
+                <div class="detail-value">{{ d.hostname }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Sistema operativo</div>
+                <div class="detail-value">{{ d.operating_system }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Regla heurística</div>
+                <div class="detail-value">{{ d.rule_label }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Puntaje de riesgo</div>
+                <div class="detail-value">{{ d.risk_score if d.risk_score is not none else "—" }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Archivos afectados</div>
+                <div class="detail-value">{{ d.details.file_count if d.details.file_count is defined else "—" }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Último archivo</div>
+                <div class="detail-value" style="word-break:break-all;">{{ d.details.last_file if d.details.last_file is defined else "—" }}</div>
+            </div>
+            <div class="detail-row full">
+                <div class="detail-label">Proceso relacionado</div>
+                <div class="detail-value muted">No disponible todavía -- el agente no reporta qué proceso originó la actividad (ver PENDIENTES.md)</div>
+            </div>
+            {% if d.description %}
+            <div class="detail-row full">
+                <div class="detail-label">Descripción</div>
+                <div class="detail-value">{{ d.description }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-title-row"><h2>Estado</h2></div>
+        <div class="mini-stat-row">
+            <span>Estado actual</span>
+            <div class="row-actions">
+                <button type="button" class="status-select-trigger" id="currentStatusLabel" onclick="toggleStatusMenu(this)" title="Clic para cambiar el estado">
+                    {{ d.status_label }}
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div class="row-actions-menu" style="top:100%;right:0;left:auto;margin-top:0.4rem;">
+                    {% for value, label in status_options.items() %}
+                    {% if value != d.status %}
+                    <button type="button" onclick="cambiarEstado('{{ value }}', this)">{{ label }}</button>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        {% if related_honeyfile %}
+        <div class="section-title-row" style="margin-top:1.6rem;"><h2>Honeyfile relacionado</h2></div>
+        <div class="mini-stat-row"><span>Archivo</span><strong>{{ related_honeyfile.file_name }}</strong></div>
+        <div class="mini-stat-row"><span>Estado del honeyfile</span><strong>{{ related_honeyfile.status }}</strong></div>
+        <a href="/honeyfiles?agent_id={{ d.agent_id }}" class="btn btn-secondary" style="margin-top:0.8rem;">Ver honeyfiles del endpoint</a>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:0.6rem;">Vinculado por coincidencia de ruta de archivo, no por un ID -- no hay una relación garantizada por la base de datos entre una alerta y un honeyfile.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="action-row" style="margin-bottom:1.5rem;">
+    {% if existing_incident_id %}
+    <a class="btn done" href="/incidentes">Incidente ya creado (#{{ existing_incident_id }})</a>
+    {% else %}
+    <button class="btn btn-primary" id="crearIncidenteBtn" onclick="crearIncidente({{ d.id }})">Crear incidente</button>
+    {% endif %}
+    <a class="btn btn-secondary" href="/respuesta">Ir a respuesta</a>
+</div>
+
+<div class="card">
+    <div class="section-title-row"><h2>Eventos relacionados</h2></div>
+    {% if related_events %}
+    <table>
+        <tr><th>Fecha / hora</th><th>Tipo</th><th>Archivo</th></tr>
+        {% for evt in related_events %}
+        <tr>
+            <td><a href="/eventos/{{ evt.id }}">{{ evt.detected_at.strftime('%d/%m/%Y %H:%M:%S') }}</a></td>
+            <td><span class="type-tag event">{{ evt.type_label }}</span></td>
+            <td>
+                {% if evt.file_path %}
+                <span class="file-path-text" title="{{ evt.file_path }}" style="display:inline;max-width:280px;">{{ evt.file_path.split('\\')[-1].split('/')[-1] }}</span>
+                {% else %}
+                <span class="empty">—</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% if related_events_total > related_events|length %}
+    <a href="/eventos?alert_id={{ d.id }}" class="btn btn-secondary" style="margin-top:1rem;">Ver los {{ related_events_total }} eventos relacionados</a>
+    {% endif %}
+    {% else %}
+    <p class="empty">No existen eventos relacionados registrados para esta detección.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="section-title-row"><h2>Notas del analista</h2></div>
+    <form id="noteForm" style="margin-bottom:1.2rem;">
+        <div class="form-group" style="max-width:none;">
+            <textarea id="noteText" rows="3" placeholder="Escribir observación..." style="width:100%;padding:0.65rem 0.8rem;border:1px solid var(--card-border);border-radius:var(--radius-sm);font-size:0.85rem;font-family:inherit;color:var(--text-dark);background:var(--surface);resize:vertical;"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" id="addNoteBtn">Agregar nota</button>
+        <div class="form-msg" id="noteMsg"></div>
+    </form>
+    <div id="notesList">
+        {% if notes %}
+        {% for n in notes %}
+        <div class="mini-activity-row" style="align-items:flex-start;">
+            <span class="mini-activity-time" style="width:110px;">{{ n.created_at.strftime('%d/%m %H:%M') }}</span>
+            <span class="mini-activity-desc"><strong>{{ n.author }}:</strong> {{ n.note }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="empty" id="emptyNotesMsg">Todavía no hay notas para esta detección.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    async function crearIncidente(alertId) {
+        const btn = document.getElementById("crearIncidenteBtn");
+        btn.disabled = true;
+        btn.textContent = "Creando...";
+
+        try {
+            const response = await fetch("/incidents", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ alert_id: alertId })
+            });
+
+            if (!response.ok) {
+                btn.disabled = false;
+                btn.textContent = "Crear incidente";
+                alert("No se pudo crear el incidente.");
+                return;
+            }
+
+            window.location.href = "/incidentes";
+        } catch (error) {
+            btn.disabled = false;
+            btn.textContent = "Crear incidente";
+        }
+    }
+
+    function toggleStatusMenu(btn) {
+        const menu = btn.nextElementSibling;
+        document.querySelectorAll(".row-actions-menu.open").forEach((m) => {
+            if (m !== menu) m.classList.remove("open");
+        });
+        menu.classList.toggle("open");
+    }
+
+    document.addEventListener("click", (event) => {
+        if (!event.target.closest(".row-actions")) {
+            document.querySelectorAll(".row-actions-menu.open").forEach((m) => m.classList.remove("open"));
+        }
+    });
+
+    async function cambiarEstado(newStatus, btn) {
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Guardando...";
+
+        try {
+            const response = await fetch("/alerts/{{ d.id }}/status", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: newStatus })
+            });
+
+            if (!response.ok) {
+                btn.disabled = false;
+                btn.textContent = original;
+                alert("No se pudo cambiar el estado.");
+                return;
+            }
+
+            window.location.reload();
+        } catch (error) {
+            btn.disabled = false;
+            btn.textContent = original;
+        }
+    }
+
+    document.getElementById("noteForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const textarea = document.getElementById("noteText");
+        const msg = document.getElementById("noteMsg");
+        const btn = document.getElementById("addNoteBtn");
+        const text = textarea.value.trim();
+
+        if (!text) return;
+
+        btn.disabled = true;
+        btn.textContent = "Guardando...";
+
+        try {
+            const response = await fetch("/alerts/{{ d.id }}/notes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ note: text })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                msg.textContent = data.detail || "No se pudo agregar la nota.";
+                msg.classList.add("show", "error");
+                btn.disabled = false;
+                btn.textContent = "Agregar nota";
+                return;
+            }
+
+            const emptyMsg = document.getElementById("emptyNotesMsg");
+            if (emptyMsg) emptyMsg.remove();
+
+            const row = document.createElement("div");
+            row.className = "mini-activity-row";
+            row.style.alignItems = "flex-start";
+            row.innerHTML = `
+                <span class="mini-activity-time" style="width:110px;">${data.note.created_at}</span>
+                <span class="mini-activity-desc"><strong>${data.note.author}:</strong> ${data.note.note}</span>
+            `;
+            document.getElementById("notesList").prepend(row);
+
+            textarea.value = "";
+            btn.disabled = false;
+            btn.textContent = "Agregar nota";
+        } catch (error) {
+            btn.disabled = false;
+            btn.textContent = "Agregar nota";
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">Administración</div>
+        <h1>Usuarios y roles</h1>
+        <div class="page-hero-subtitle">Las cuentas las crea un administrador</div>
+    </div>
+    <div class="page-hero-side">
+        <div class="page-hero-count">{{ users|length }}</div>
+        <div class="page-hero-count-label">usuarios</div>
+    </div>
+</div>
+
+<div class="card">
+    {% if users %}
+    <table>
+        <tr><th>Usuario</th><th>Nombre completo</th><th>Correo</th><th>Roles</th><th>Estado</th><th>Último acceso</th><th>Creado</th></tr>
+        {% for u in users %}
+        <tr>
+            <td>{{ u[1] }}</td>
+            <td>{{ u[2] }}</td>
+            <td>{{ u[3] or "—" }}</td>
+            <td>{{ u[4] or "—" }}</td>
+            <td><span class="badge badge-{{ 'active' if u[5] else 'inactive' }}">{{ "Activo" if u[5] else "Inactivo" }}</span></td>
+            <td>{{ u[6] or "Nunca" }}</td>
+            <td>{{ u[7] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay usuarios registrados.</p>
+    {% endif %}
+    <p style="margin-top:1rem;font-size:0.8rem;color:var(--muted);">
+        Por ahora la creación de usuarios se hace vía API (<code>POST /users</code>, solo administradores). Un formulario aquí mismo para crear usuarios desde la consola es un buen siguiente paso.
+    </p>
+</div>
+{% endblock %}

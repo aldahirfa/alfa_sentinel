@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">Seguridad</div>
+        <h1>Detecciones</h1>
+        <div class="page-hero-subtitle">Actividad sospechosa identificada por ALFA-Sentinel mediante análisis heurístico.</div>
+    </div>
+    <div class="page-hero-side page-hero-actions">
+        <a href="/detecciones" class="risk-banner-cta" title="Recargar la lista">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+            Actualizar
+        </a>
+    </div>
+</div>
+
+<div class="summary-grid">
+    <div class="stat-card accent-blue">
+        <div class="stat-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ total_alerts }}</div>
+            <div class="stat-label">Detecciones totales</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-red">
+        <div class="stat-icon red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 2.6 18a1.8 1.8 0 0 0 1.6 2.7h15.6a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ critical_alerts }}</div>
+            <div class="stat-label">Críticas</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-amber">
+        <div class="stat-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8l1-8Z"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ high_alerts }}</div>
+            <div class="stat-label">Altas</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-status-attention">
+        <div class="stat-icon status-attention">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ pending_alerts }}</div>
+            <div class="stat-label">Pendientes (nuevas)</div>
+        </div>
+    </div>
+</div>
+
+{% if filtered_agent_id %}
+<div class="filter-count">
+    Filtrando por endpoint: <strong>{{ filtered_hostname or ("#" ~ filtered_agent_id) }}</strong>
+    · <a href="/detecciones">Quitar filtro</a>
+</div>
+{% endif %}
+
+<div class="card">
+    <form class="endpoints-toolbar" method="get" action="/detecciones">
+        <input type="text" name="search" placeholder="Buscar por título, endpoint o ID..." value="{{ current_search }}" style="flex:1;min-width:200px;padding:0.6rem 0.85rem;border:1px solid var(--card-border);border-radius:var(--radius-sm);font-size:0.85rem;font-family:inherit;">
+        <select name="agent_id">
+            <option value="">Todos los endpoints</option>
+            {% for eid, hostname in endpoint_options %}
+            <option value="{{ eid }}" {{ "selected" if filtered_agent_id == eid }}>{{ hostname }}</option>
+            {% endfor %}
+        </select>
+        <select name="severity">
+            <option value="">Toda severidad</option>
+            {% for value, label in severity_options.items() %}
+            <option value="{{ value }}" {{ "selected" if current_severity == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="status">
+            <option value="">Todo estado</option>
+            {% for value, label in status_options.items() %}
+            <option value="{{ value }}" {{ "selected" if current_status == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="rule">
+            <option value="">Todo tipo</option>
+            {% for value, label in rule_options.items() %}
+            <option value="{{ value }}" {{ "selected" if current_rule == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="since">
+            <option value="">Todo el historial</option>
+            {% for value, (label, _) in since_options.items() %}
+            <option value="{{ value }}" {{ "selected" if current_since == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Buscar</button>
+        {% if current_search or current_severity or current_status or current_rule or current_since or filtered_agent_id %}
+        <a href="/detecciones" class="btn btn-secondary">Limpiar filtros</a>
+        {% endif %}
+    </form>
+
+    <div class="filter-count">Mostrando {{ alerts|length }} de {{ filtered_total }} detecciones{% if filtered_total != total_alerts %} (de {{ total_alerts }} en total){% endif %}</div>
+
+    {% if alerts %}
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Fecha / hora</th>
+            <th>Severidad</th>
+            <th>Tipo</th>
+            <th>Endpoint</th>
+            <th>Estado</th>
+        </tr>
+        {% for a in alerts %}
+        <tr>
+            <td><a href="/detecciones/{{ a.id }}">DET-{{ "%05d"|format(a.id) }}</a></td>
+            <td title="{{ a.created_at.strftime('%d/%m/%Y %H:%M:%S') }}">{{ a.created_at|timeago }}</td>
+            <td><span class="badge badge-{{ a.severity }}">{{ a.severity_label }}</span></td>
+            <td>{{ a.rule_label }}</td>
+            <td>{{ a.hostname }}</td>
+            <td>
+                <span class="badge {{ 'badge-status-offline' if a.status == 'NEW' else 'badge-status-attention' if a.status in ('ACKNOWLEDGED', 'ESCALATED') else 'badge-status-ok' }}">
+                    {{ a.status_label }}
+                </span>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div class="pagination">
+        <span>Página {{ current_page }} de {{ total_pages }}</span>
+        <div class="pagination-links">
+            {% if current_page > 1 %}
+            <a href="/detecciones?{{ filter_qs ~ '&' if filter_qs else '' }}page={{ current_page - 1 }}">‹ Anterior</a>
+            {% else %}
+            <span class="disabled">‹ Anterior</span>
+            {% endif %}
+            {% if current_page < total_pages %}
+            <a href="/detecciones?{{ filter_qs ~ '&' if filter_qs else '' }}page={{ current_page + 1 }}">Siguiente ›</a>
+            {% else %}
+            <span class="disabled">Siguiente ›</span>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <p class="empty">
+        {% if current_search or current_severity or current_status or current_rule or current_since or filtered_agent_id %}
+        Ninguna detección coincide con este filtro.
+        {% else %}
+        Todavía no hay detecciones. Una detección aparece aquí cuando el motor heurístico de un agente supera el umbral de riesgo configurado en alguna de sus reglas.
+        {% endif %}
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

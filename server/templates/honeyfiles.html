@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">Monitoreo</div>
+        <h1>Honeyfiles</h1>
+        <div class="page-hero-subtitle">Archivos señuelo registrados por endpoint</div>
+    </div>
+    <div class="page-hero-side">
+        <div class="page-hero-count">{{ honeyfiles|length }}</div>
+        <div class="page-hero-count-label">honeyfiles</div>
+    </div>
+</div>
+
+{% if filtered_agent_id %}
+<div class="filter-count">
+    Filtrando por endpoint: <strong>{{ filtered_hostname or ("#" ~ filtered_agent_id) }}</strong>
+    · <a href="/honeyfiles">Quitar filtro</a>
+</div>
+{% endif %}
+
+<div class="card">
+    {% if honeyfiles %}
+    <table>
+        <tr><th>Archivo</th><th>Ruta</th><th>Tipo</th><th>Agente</th><th>Estado</th><th>Última revisión</th></tr>
+        {% for h in honeyfiles %}
+        <tr>
+            <td>{{ h[1] }}</td>
+            <td>{{ h[2] }}</td>
+            <td>{{ h[3] or "—" }}</td>
+            <td>{{ h[4] }}</td>
+            <td><span class="badge badge-active">{{ h[5] }}</span></td>
+            <td>{{ h[6] or "Nunca" }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">
+        Todavía no hay honeyfiles registrados en la base de datos. Hoy cada agente reconoce sus honeyfiles por una ruta fija en su configuración local
+        (<code>agent/honeyfile_monitor.py</code>), pero ese registro no se envía al servidor todavía -- por eso la tabla <code>honeyfiles</code> está vacía
+        aunque la detección de acceso a honeyfiles sí funciona. El siguiente paso natural es que el agente registre sus honeyfiles contra el servidor al enrolarse.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

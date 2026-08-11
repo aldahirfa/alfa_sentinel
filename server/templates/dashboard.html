@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if not db_ok %}
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">ALFA-Sentinel · Consola de seguridad</div>
+        <h1>Panel de control</h1>
+        <div class="page-hero-subtitle">Vista general del entorno de seguridad</div>
+    </div>
+</div>
+<div class="db-error-banner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+    <div>
+        <strong>Base de datos no disponible.</strong> No se pudo conectar con Postgres, así que esta vista no puede mostrar datos reales ahora mismo. Verifica que el servidor de base de datos esté encendido y vuelve a cargar la página.
+    </div>
+</div>
+{% else %}
+
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">ALFA-Sentinel · Consola de seguridad</div>
+        <h1>Panel de control</h1>
+        <div class="page-hero-subtitle">Vista general del entorno de seguridad · Actualizado <span id="updatedAt">{{ summary.updated_at }}</span></div>
+    </div>
+</div>
+
+<!-- ===== 4 tarjetas de resumen: Riesgo global | Endpoints | Honeyfiles | Incidentes ===== -->
+<div class="summary-grid">
+    <div class="stat-card" id="riskCard" style="border-top-color: {{ '#dc2626' if summary.overall_risk == 'CRÍTICO' else '#ea580c' if summary.overall_risk == 'ALTO' else '#ca8a04' if summary.overall_risk == 'SOSPECHOSO' else '#16a34a' }};">
+        <div class="stat-icon" id="riskIcon" style="background: linear-gradient(135deg, {{ '#dc262633' if summary.overall_risk == 'CRÍTICO' else '#ea580c33' if summary.overall_risk == 'ALTO' else '#ca8a0433' if summary.overall_risk == 'SOSPECHOSO' else '#16a34a33' }}, transparent); color: {{ '#dc2626' if summary.overall_risk == 'CRÍTICO' else '#ea580c' if summary.overall_risk == 'ALTO' else '#ca8a04' if summary.overall_risk == 'SOSPECHOSO' else '#16a34a' }};">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg>
+        </div>
+        <div>
+            <div class="stat-value"><span id="globalRiskScore">{{ summary.global_risk_score }}</span><span style="font-size:0.85rem;color:var(--muted);font-weight:600;"> / 100</span></div>
+            <div class="stat-label">Riesgo global · <strong id="riskLevelLabel" style="color: {{ '#dc2626' if summary.overall_risk == 'CRÍTICO' else '#ea580c' if summary.overall_risk == 'ALTO' else '#ca8a04' if summary.overall_risk == 'SOSPECHOSO' else '#16a34a' }};">{{ summary.overall_risk }}</strong></div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-blue">
+        <div class="stat-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        </div>
+        <div>
+            <div class="stat-value" id="statConnected">{{ summary.connected_endpoints }}/{{ summary.total_endpoints }}</div>
+            <div class="stat-label">Endpoints en línea ({{ summary.disconnected_endpoints }} desconectados)</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-green">
+        <div class="stat-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ honeyfiles_total }}</div>
+            <div class="stat-label">Honeyfiles registrados{% if honeyfile_activations_24h > 0 %} · {{ honeyfile_activations_24h }} activados (24h){% endif %}</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-red">
+        <div class="stat-icon red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.6 18a1.8 1.8 0 0 0 1.6 2.7h15.6a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+        </div>
+        <div>
+            <div class="stat-value" id="statIncidentsActive">{{ summary.incidents_active }}</div>
+            <div class="stat-label">Incidentes activos ({{ summary.incidents_investigating }} en investigación)</div>
+        </div>
+    </div>
+</div>
+
+<p style="font-size:0.72rem;color:var(--muted);margin:-0.8rem 0 1.2rem 0;">"Riesgo global" es el puntaje real más alto entre las detecciones todavía abiertas (lo calcula el agente: 30 por ráfaga masiva + 60 por honeyfile, combinables) -- es el peor caso presente, no un promedio.</p>
+
+<!-- ===== Dos columnas: telemetría + feed vivo (izquierda) · vectores + endpoints + motor (derecha) ===== -->
+<div class="mini-grid-2">
+    <div>
+        <div class="card">
+            <div class="section-title-row">
+                <div class="section-title-with-icon">
+                    <span class="section-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+                    </span>
+                    <h2>Telemetría de archivos (24h)</h2>
+                </div>
+            </div>
+            {% if telemetry_buckets|selectattr("count", "gt", 0)|list %}
+            <div style="height:160px;"><canvas id="telemetryChart"></canvas></div>
+            {% else %}
+            <p class="empty">Sin eventos de archivo registrados en las últimas 24 horas.</p>
+            {% endif %}
+            <p style="font-size:0.72rem;color:var(--muted);margin-top:0.6rem;">Volumen de eventos de archivo (creado/modificado/eliminado/renombrado) por hora, sin distinguir severidad.</p>
+        </div>
+
+        <div class="card">
+            <div class="section-title-row">
+                <div class="section-title-with-icon">
+                    <span class="section-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    </span>
+                    <h2>Feed vivo de amenazas</h2>
+                </div>
+                <a href="/detecciones" class="updated-at" style="text-decoration:none;">Ver todas</a>
+            </div>
+            <div id="recentAlertsBox">
+                {% if recent_alerts %}
+                {% for a in recent_alerts %}
+                <div class="alert-row {{ a[1] }}">
+                    <span class="badge badge-{{ a[1] }}">{{ a[1] }}</span>
+                    <div class="alert-row-main">
+                        <div class="alert-row-title">{{ a[2] }}</div>
+                        <div class="alert-row-meta">{{ a[3] }} · {{ a[4]|timeago }}</div>
+                    </div>
+                    <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+                        <button class="btn btn-secondary" disabled title="El aislamiento todavía no está implementado -- el agente no tiene ninguna forma de ejecutarlo. Ver /respuesta.">Aislar red</button>
+                        <a class="btn btn-secondary" href="/detecciones/{{ a[0] }}">Investigar</a>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="empty">No hay alertas pendientes de revisión ahora mismo.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="card">
+            <div class="section-title-row">
+                <div class="section-title-with-icon">
+                    <span class="section-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>
+                    </span>
+                    <h2>Vectores de amenaza activos</h2>
+                </div>
+            </div>
+            {% if threat_vectors %}
+            <div class="risk-donut-row">
+                <div class="risk-donut-wrap">
+                    <canvas id="vectorsChart"></canvas>
+                    <div class="risk-donut-center">
+                        <span class="n">{{ threat_vectors|sum(attribute='count') }}</span>
+                        <span class="label">detecciones</span>
+                    </div>
+                </div>
+                <div class="risk-legend">
+                    {% for v in threat_vectors %}
+                    <div class="risk-legend-row">
+                        <span class="risk-bar-dot" style="background:{{ v.color }};"></span>
+                        <span class="risk-legend-name">{{ v.rule_label }}</span>
+                        <span class="risk-legend-pct">{{ v.pct }}%</span>
+                        <span class="risk-legend-count">{{ v.count }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <p class="empty">No hay detecciones abiertas ahora mismo.</p>
+            {% endif %}
+            <p style="font-size:0.72rem;color:var(--muted);margin-top:0.6rem;">Desglose por regla heurística de las detecciones abiertas -- las 2 únicas reglas que el agente implementa hoy.</p>
+        </div>
+
+        <div class="card">
+            <div class="section-title-row">
+                <div class="section-title-with-icon">
+                    <span class="section-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.6 18a1.8 1.8 0 0 0 1.6 2.7h15.6a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+                    </span>
+                    <h2>Endpoints con mayor riesgo</h2>
+                </div>
+            </div>
+            {% if top_risk_endpoints %}
+            <table>
+                <tr><th>Endpoint</th><th>IP</th><th>Riesgo</th><th>Acciones</th></tr>
+                {% for e in top_risk_endpoints %}
+                <tr>
+                    <td><a href="/endpoints/{{ e.agent_id }}">{{ e.hostname }}</a></td>
+                    <td style="font-family:'SFMono-Regular',Consolas,monospace;font-size:0.78rem;color:var(--muted);">{{ e.ip_address or "—" }}</td>
+                    <td><span class="badge badge-{{ e.severity }}">{{ e.severity }}</span></td>
+                    <td>
+                        <button class="btn btn-secondary" disabled title="El aislamiento todavía no está implementado -- el agente no tiene ninguna forma de ejecutarlo. Ver /respuesta.">Aislar red</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <p class="empty">Ningún endpoint tiene detecciones abiertas ahora mismo.</p>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="section-title-row">
+                <div class="section-title-with-icon">
+                    <span class="section-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 4.5v9L12 20l-9-4.5v-9L12 2Z"/><path d="M12 22V12M21 6.5 12 12 3 6.5"/></svg>
+                    </span>
+                    <h2>Motor heurístico</h2>
+                </div>
+            </div>
+            {% if heuristic_rules_status %}
+            {% for r in heuristic_rules_status %}
+            <div class="mini-stat-row">
+                <span><span class="badge badge-{{ r.severity }}">{{ r.severity_label }}</span> {{ r.rule_label }}</span>
+                <span style="font-size:0.78rem;color:var(--muted);">Umbral: {{ r.threshold }}{{ "/" ~ r.window_seconds ~ "s" if r.window_seconds else "" }}</span>
+            </div>
+            {% endfor %}
+            <div class="mini-stat-row"><span>Auto-aislamiento</span><strong>No</strong></div>
+            <p style="font-size:0.72rem;color:var(--muted);margin-top:0.6rem;">Ninguna regla tiene aislamiento automático activado -- y aunque lo tuviera, el sistema no tiene forma de ejecutarlo todavía. Ver <a href="/respuesta">Respuesta</a>.</p>
+            {% else %}
+            <p class="empty">No hay reglas heurísticas configuradas.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ===== Detalle adicional ===== -->
+<div class="mini-grid-2">
+    <div class="card">
+        <div class="section-title-row">
+            <div class="section-title-with-icon">
+                <span class="section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M12 8v5M12 16h.01"/></svg>
+                </span>
+                <h2>Distribución de riesgo por endpoint</h2>
+            </div>
+        </div>
+        <div class="risk-donut-row">
+            <div class="risk-donut-wrap">
+                <canvas id="riskDistChart"></canvas>
+                <div class="risk-donut-center">
+                    <span class="n">{{ summary.total_endpoints }}</span>
+                    <span class="label">endpoints</span>
+                </div>
+            </div>
+            <div class="risk-legend">
+                {% for r in risk_distribution %}
+                <div class="risk-legend-row">
+                    <span class="risk-bar-dot {{ r.key }}"></span>
+                    <span class="risk-legend-name">{{ r.label }}</span>
+                    <span class="risk-legend-pct">{{ r.pct }}%</span>
+                    <span class="risk-legend-count">{{ r.count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-title-row">
+            <div class="section-title-with-icon">
+                <span class="section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                </span>
+                <h2>Estado de agentes</h2>
+            </div>
+        </div>
+        <div class="agent-status-row">
+            <span class="agent-status-dot ok"></span>
+            <span class="agent-status-label">Funcionando correctamente</span>
+            <span class="agent-status-count">{{ agents_ok }}</span>
+        </div>
+        <div class="agent-status-row">
+            <span class="agent-status-dot attention"></span>
+            <span class="agent-status-label">Requieren atención</span>
+            <span class="agent-status-count">{{ agents_attention }}</span>
+        </div>
+        <div class="agent-status-row">
+            <span class="agent-status-dot offline"></span>
+            <span class="agent-status-label">Desconectados</span>
+            <span class="agent-status-count">{{ agents_offline }}</span>
+        </div>
+        <div style="margin-top:0.7rem;font-size:0.78rem;color:var(--muted);">
+            Último heartbeat: {{ last_heartbeat|timeago }}
+        </div>
+    </div>
+</div>
+
+<div class="mini-grid-3">
+    <div class="card">
+        <div class="section-title-row">
+            <div class="section-title-with-icon">
+                <span class="section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                </span>
+                <h2>Honeyfiles</h2>
+            </div>
+        </div>
+        <div class="mini-stat-row"><span>Registrados</span><strong>{{ honeyfiles_total }}</strong></div>
+        <div class="mini-stat-row"><span>Activados (24h)</span><strong>{{ honeyfile_activations_24h }}</strong></div>
+        {% if last_honeyfile %}
+        <div style="margin-top:0.7rem;font-size:0.82rem;">
+            <span style="color:var(--c-red);font-weight:650;">Última activación:</span>
+            {{ last_honeyfile.hostname }} · {{ last_honeyfile.created_at|timeago }}
+        </div>
+        {% endif %}
+        {% if honeyfiles_total == 0 %}
+        <div style="margin-top:0.7rem;font-size:0.76rem;color:var(--muted);">
+            Ningún honeyfile está registrado en la base de datos todavía (el agente no envía ese registro al servidor por ahora), aunque la detección de acceso a honeyfiles sí funciona.
+        </div>
+        {% endif %}
+        <a href="/honeyfiles" class="btn btn-secondary" style="margin-top:1rem;">Ver honeyfiles</a>
+    </div>
+
+    <div class="card">
+        <div class="section-title-row">
+            <div class="section-title-with-icon">
+                <span class="section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 2.6 18a1.8 1.8 0 0 0 1.6 2.7h15.6a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+                </span>
+                <h2>Incidentes</h2>
+            </div>
+        </div>
+        <div class="mini-stat-row"><span><span class="badge badge-CRITICAL">CRÍTICO</span></span><strong>{{ incident_severity.get("CRITICAL", 0) }}</strong></div>
+        <div class="mini-stat-row"><span><span class="badge badge-HIGH">ALTO</span></span><strong>{{ incident_severity.get("HIGH", 0) }}</strong></div>
+        <div class="mini-stat-row"><span><span class="badge badge-SUSPICIOUS">SOSPECHOSO</span></span><strong>{{ incident_severity.get("SUSPICIOUS", 0) }}</strong></div>
+        <a href="/incidentes" class="btn btn-secondary" style="margin-top:1rem;">Ver incidentes</a>
+    </div>
+
+    <div class="card">
+        <div class="section-title-row">
+            <div class="section-title-with-icon">
+                <span class="section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8l1-8Z"/></svg>
+                </span>
+                <h2>Respuesta</h2>
+            </div>
+        </div>
+        <div class="mini-stat-row"><span>Acciones pendientes</span><strong>{{ response_pending }}</strong></div>
+        <div class="mini-stat-row"><span>Acciones ejecutadas</span><strong>{{ response_executed }}</strong></div>
+        <div class="mini-stat-row"><span>Acciones fallidas</span><strong>{{ response_failed }}</strong></div>
+        {% if response_pending == 0 and response_executed == 0 and response_failed == 0 %}
+        <div style="margin-top:0.7rem;font-size:0.76rem;color:var(--muted);">
+            Sin acciones registradas todavía -- el módulo de respuesta (aislar un endpoint) aún no está implementado.
+        </div>
+        {% endif %}
+        <a href="/respuesta" class="btn btn-secondary" style="margin-top:1rem;">Ver acciones</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="section-title-row">
+        <div class="section-title-with-icon">
+            <span class="section-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            </span>
+            <h2>Actividad reciente</h2>
+        </div>
+    </div>
+    {% if activity_feed %}
+    <table>
+        <tr><th>Hora</th><th>Tipo</th><th>Descripción</th><th>Endpoint</th></tr>
+        <tbody id="activityFeedBody">
+        {% for item in activity_feed %}
+        <tr>
+            <td class="activity-time-cell" title="{{ item.ts.strftime('%d/%m/%Y %H:%M:%S') }}">
+                {{ item.ts|timeago }}
+                <span class="abs-time">{{ item.ts.strftime('%d/%m %H:%M') }}</span>
+            </td>
+            <td>
+                <span class="type-tag {{ 'alert ' ~ item.severity if item.kind == 'alert' else 'event' }}">
+                    {{ item.type_label }}
+                </span>
+            </td>
+            <td>
+                <span class="activity-desc">{{ item.description }}</span>
+                {% if item.kind == 'alert' and item.file_path %}
+                <span class="file-path-text" title="{{ item.file_path }}">{{ item.file_path }}</span>
+                {% endif %}
+            </td>
+            <td>{{ item.hostname }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Todavía no hay actividad registrada.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="section-title-row">
+        <div class="section-title-with-icon">
+            <span class="section-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 8h.01M7 18h.01"/></svg>
+            </span>
+            <h2>Estado del sistema</h2>
+        </div>
+    </div>
+    <div class="system-health-grid">
+        <div class="health-chip">
+            <span class="health-dot ok"></span>
+            <span class="health-label">API</span>
+            <span class="health-status">Operativa</span>
+        </div>
+        <div class="health-chip">
+            <span class="health-dot ok"></span>
+            <span class="health-label">Base de datos</span>
+            <span class="health-status">Operativa</span>
+        </div>
+        <div class="health-chip">
+            <span class="health-dot {{ 'ok' if agents_communicating > 0 else 'bad' }}"></span>
+            <span class="health-label">Comunicación con agentes</span>
+            <span class="health-status">{{ "Operativa" if agents_communicating > 0 else "Sin heartbeats recientes" }}</span>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+{% if db_ok %}
+<script>
+    const ISOLATE_TOOLTIP = "El aislamiento todavía no está implementado -- el agente no tiene ninguna forma de ejecutarlo. Ver /respuesta.";
+
+    function riskColor(level) {
+        if (level === "CRÍTICO") return "#dc2626";
+        if (level === "ALTO") return "#ea580c";
+        if (level === "SOSPECHOSO") return "#ca8a04";
+        return "#16a34a";
+    }
+
+    // ---- Gráficos (Chart.js) ----
+    // Colores leídos de las variables CSS reales en el momento de
+    // cargar la página -- si se cambia de tema claro/oscuro después,
+    // los gráficos no se recolorean solos (a diferencia del resto de
+    // la UI, que sí usa var() directo); habría que recargar la página.
+    const rootStyle = getComputedStyle(document.documentElement);
+    const mutedColor = rootStyle.getPropertyValue("--muted").trim() || "#6b7690";
+    const dividerColor = rootStyle.getPropertyValue("--divider-strong").trim() || "#eef0f6";
+    const tealColor = rootStyle.getPropertyValue("--teal").trim() || "#0d9488";
+
+    Chart.defaults.font.family = "Manrope, 'Segoe UI', sans-serif";
+
+    const telemetryCanvas = document.getElementById("telemetryChart");
+    if (telemetryCanvas) {
+        const buckets = {{ telemetry_buckets|tojson }};
+        new Chart(telemetryCanvas, {
+            type: "bar",
+            data: {
+                labels: buckets.map(b => b.hour),
+                datasets: [{
+                    data: buckets.map(b => b.count),
+                    backgroundColor: tealColor,
+                    borderRadius: 3,
+                    maxBarThickness: 14
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.parsed.y + (ctx.parsed.y === 1 ? " evento" : " eventos")
+                        }
+                    }
+                },
+                scales: {
+                    x: { ticks: { color: mutedColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 10 } }, grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { color: mutedColor, precision: 0 }, grid: { color: dividerColor } }
+                }
+            }
+        });
+    }
+
+    const vectorsCanvas = document.getElementById("vectorsChart");
+    if (vectorsCanvas) {
+        const vectors = {{ threat_vectors|tojson }};
+        new Chart(vectorsCanvas, {
+            type: "doughnut",
+            data: {
+                labels: vectors.map(v => v.rule_label),
+                datasets: [{
+                    data: vectors.map(v => v.count),
+                    backgroundColor: vectors.map(v => v.color),
+                    borderColor: getComputedStyle(document.body).backgroundColor,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: "72%",
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    const riskDistCanvas = document.getElementById("riskDistChart");
+    if (riskDistCanvas) {
+        const dist = {{ risk_distribution|tojson }};
+        new Chart(riskDistCanvas, {
+            type: "doughnut",
+            data: {
+                labels: dist.map(r => r.label),
+                datasets: [{
+                    data: dist.map(r => r.count),
+                    backgroundColor: dist.map(r => r.color),
+                    borderColor: getComputedStyle(document.body).backgroundColor,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: "72%",
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    async function refreshDashboard() {
+        try {
+            const response = await fetch("/dashboard/live");
+            if (!response.ok) return;
+            const data = await response.json();
+
+            document.getElementById("statConnected").textContent = data.connected_endpoints + "/{{ summary.total_endpoints }}";
+            document.getElementById("statIncidentsActive").textContent = data.incidents_active;
+            document.getElementById("updatedAt").textContent = data.updated_at;
+            document.getElementById("globalRiskScore").textContent = data.global_risk_score;
+
+            const color = riskColor(data.overall_risk);
+            document.getElementById("riskCard").style.borderTopColor = color;
+            document.getElementById("riskIcon").style.color = color;
+            const levelLabel = document.getElementById("riskLevelLabel");
+            levelLabel.textContent = data.overall_risk;
+            levelLabel.style.color = color;
+
+            const alertsBox = document.getElementById("recentAlertsBox");
+            if (data.recent_alerts.length === 0) {
+                alertsBox.innerHTML = '<p class="empty">No hay alertas pendientes de revisión ahora mismo.</p>';
+            } else {
+                alertsBox.innerHTML = data.recent_alerts.map(a => `
+                    <div class="alert-row ${a.severity}">
+                        <span class="badge badge-${a.severity}">${a.severity}</span>
+                        <div class="alert-row-main">
+                            <div class="alert-row-title">${a.title}</div>
+                            <div class="alert-row-meta">${a.hostname} · ${a.ago}</div>
+                        </div>
+                        <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+                            <button class="btn btn-secondary" disabled title="${ISOLATE_TOOLTIP}">Aislar red</button>
+                            <a class="btn btn-secondary" href="/detecciones/${a.id}">Investigar</a>
+                        </div>
+                    </div>
+                `).join("");
+            }
+
+            const feedBody = document.getElementById("activityFeedBody");
+            if (feedBody) {
+                if (data.activity_feed.length === 0) {
+                    feedBody.innerHTML = '<tr><td colspan="4" class="empty">Todavía no hay actividad registrada.</td></tr>';
+                } else {
+                    feedBody.innerHTML = data.activity_feed.map(item => `
+                        <tr>
+                            <td class="activity-time-cell">${item.ago}</td>
+                            <td><span class="type-tag ${item.kind === 'alert' ? 'alert ' + item.severity : 'event'}">${item.type_label}</span></td>
+                            <td>
+                                <span class="activity-desc">${item.description}</span>
+                                ${item.kind === 'alert' && item.file_path ? `<span class="file-path-text" title="${item.file_path}">${item.file_path}</span>` : ''}
+                            </td>
+                            <td>${item.hostname}</td>
+                        </tr>
+                    `).join("");
+                }
+            }
+        } catch (error) {
+            // Silencioso -- si falla el polling, se queda con el último dato bueno.
+        }
+    }
+
+    setInterval(refreshDashboard, 15000);
+</script>
+{% endif %}
+{% endblock %}

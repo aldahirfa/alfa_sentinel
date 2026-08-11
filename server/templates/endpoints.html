@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">Monitoreo</div>
+        <h1>Endpoints</h1>
+        <div class="page-hero-subtitle">Equipos protegidos por ALFA-Sentinel y estado de sus agentes.</div>
+    </div>
+    <div class="page-hero-side page-hero-actions">
+        <a href="/endpoints" class="risk-banner-cta" title="Recargar la lista">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+            Actualizar
+        </a>
+        <span class="risk-banner-cta" style="opacity:0.55;cursor:default;" title="La generación de tokens de enrolamiento existe como API (POST /enrollment-tokens, solo admin), pero todavía no tiene una pantalla dedicada -- por eso este botón no lleva a ningún lado todavía.">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Enrolar agente
+        </span>
+    </div>
+</div>
+
+<div class="summary-grid">
+    <div class="stat-card accent-blue">
+        <div class="stat-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ total_endpoints }}</div>
+            <div class="stat-label">Endpoints registrados</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-status-ok">
+        <div class="stat-icon status-ok">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17l9-10"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ endpoints_ok }}</div>
+            <div class="stat-label">Agentes comunicándose</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-status-offline">
+        <div class="stat-icon status-offline">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ endpoints_offline }}</div>
+            <div class="stat-label">Sin comunicación</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-amber">
+        <div class="stat-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M12 8v5M12 16h.01"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ endpoints_with_alerts }}</div>
+            <div class="stat-label">Con alertas activas</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="quick-filters">
+        <a href="/endpoints{{ '?' ~ qs_all if qs_all else '' }}" class="quick-filter-chip {{ 'active all' if not current_status }}">Todos</a>
+        <a href="/endpoints?{{ qs_ok }}" class="quick-filter-chip {{ 'active ok' if current_status == 'ok' }}">En línea</a>
+        <a href="/endpoints?{{ qs_attention }}" class="quick-filter-chip {{ 'active attention' if current_status == 'attention' }}">Advertencia</a>
+        <a href="/endpoints?{{ qs_offline }}" class="quick-filter-chip {{ 'active offline' if current_status == 'offline' }}">Desconectados</a>
+    </div>
+
+    <form class="endpoints-toolbar" method="get" action="/endpoints">
+        {% if current_status %}<input type="hidden" name="status" value="{{ current_status }}">{% endif %}
+        <input type="text" name="search" placeholder="Buscar por hostname, IP o ID de agente..." value="{{ current_search }}" style="flex:1;min-width:220px;padding:0.6rem 0.85rem;border:1px solid var(--card-border);border-radius:var(--radius-sm);font-size:0.85rem;font-family:inherit;">
+        <select name="os">
+            <option value="">Todos los sistemas</option>
+            {% for os_name in distinct_os %}
+            <option value="{{ os_name }}" {{ "selected" if current_os == os_name }}>{{ os_name }}</option>
+            {% endfor %}
+        </select>
+        <select name="risk">
+            <option value="">Cualquier riesgo</option>
+            {% for value, label in risk_options %}
+            <option value="{{ value }}" {{ "selected" if current_risk == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Buscar</button>
+        {% if current_search or current_os or current_status or current_risk %}
+        <a href="/endpoints" class="btn btn-secondary">Limpiar filtros</a>
+        {% endif %}
+    </form>
+
+    <div class="filter-count">Mostrando {{ endpoints|length }} de {{ filtered_total }} endpoints{% if filtered_total != total_endpoints %} (de {{ total_endpoints }} en total){% endif %}</div>
+
+    {% if endpoints %}
+    <table>
+        <tr>
+            <th>Estado</th>
+            <th>Endpoint</th>
+            <th>Sistema operativo</th>
+            <th>Riesgo</th>
+            <th>Agente</th>
+            <th>Último heartbeat</th>
+            <th></th>
+        </tr>
+        {% for e in endpoints %}
+        <tr>
+            <td>
+                <span class="status-dot-label">
+                    <span class="monitor-dot {{ e.status_bucket }}"></span>
+                    {{ "En línea" if e.status_bucket == "ok" else "Advertencia" if e.status_bucket == "attention" else "Desconectado" }}
+                </span>
+            </td>
+            <td><a href="/endpoints/{{ e.id }}">{{ e.hostname }}</a></td>
+            <td>{{ e.operating_system }}{% if e.os_version %} {{ e.os_version }}{% endif %}</td>
+            <td><span class="badge badge-{{ e.risk_bucket }}">{{ e.risk_label }}</span></td>
+            <td style="font-family:'SFMono-Regular',Consolas,monospace;font-size:0.78rem;color:var(--muted);">{{ e.agent_code }}</td>
+            <td title="{{ e.last_seen_at.strftime('%d/%m/%Y %H:%M:%S') if e.last_seen_at else 'Nunca se ha conectado' }}">
+                {{ e.last_seen_at|timeago if e.last_seen_at else "Nunca" }}
+            </td>
+            <td>
+                <div class="row-actions">
+                    <button type="button" class="row-actions-btn" onclick="toggleRowMenu(this)" aria-label="Acciones">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+                    </button>
+                    <div class="row-actions-menu">
+                        <a href="/endpoints/{{ e.id }}">Ver endpoint</a>
+                        <a href="/detecciones?agent_id={{ e.id }}">Ver detecciones</a>
+                        <a href="/eventos?agent_id={{ e.id }}">Ver eventos</a>
+                        <a href="/procesos">Ver procesos</a>
+                        <a href="/honeyfiles?agent_id={{ e.id }}">Ver honeyfiles</a>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div class="pagination">
+        <span>Página {{ current_page }} de {{ total_pages }}</span>
+        <div class="pagination-links">
+            {% if current_page > 1 %}
+            <a href="/endpoints?{{ filter_qs ~ '&' if filter_qs else '' }}page={{ current_page - 1 }}">‹ Anterior</a>
+            {% else %}
+            <span class="disabled">‹ Anterior</span>
+            {% endif %}
+            {% if current_page < total_pages %}
+            <a href="/endpoints?{{ filter_qs ~ '&' if filter_qs else '' }}page={{ current_page + 1 }}">Siguiente ›</a>
+            {% else %}
+            <span class="disabled">Siguiente ›</span>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <p class="empty">
+        {% if current_status or current_search or current_os or current_risk %}
+        Ningún endpoint coincide con este filtro.
+        {% else %}
+        Todavía no hay endpoints enrolados. Un endpoint aparece aquí en cuanto un agente completa el proceso de enrollment con un token válido.
+        {% endif %}
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function toggleRowMenu(btn) {
+        const menu = btn.nextElementSibling;
+        document.querySelectorAll(".row-actions-menu.open").forEach((m) => {
+            if (m !== menu) m.classList.remove("open");
+        });
+        menu.classList.toggle("open");
+    }
+
+    document.addEventListener("click", (event) => {
+        if (!event.target.closest(".row-actions")) {
+            document.querySelectorAll(".row-actions-menu.open").forEach((m) => m.classList.remove("open"));
+        }
+    });
+</script>
+{% endblock %}

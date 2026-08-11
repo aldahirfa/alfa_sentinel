@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+    <div class="page-hero-main">
+        <div class="page-hero-eyebrow">Monitoreo</div>
+        <h1>Eventos</h1>
+        <div class="page-hero-subtitle">Registro técnico de actividad reportada por los agentes -- todavía no es un juicio de seguridad, eso vive en Detecciones.</div>
+    </div>
+    <div class="page-hero-side page-hero-actions">
+        <a href="/eventos" class="risk-banner-cta" title="Recargar la lista">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+            Actualizar
+        </a>
+    </div>
+</div>
+
+<div class="summary-grid">
+    <div class="stat-card accent-blue">
+        <div class="stat-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ total_events }}</div>
+            <div class="stat-label">Eventos registrados</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-status-ok">
+        <div class="stat-icon status-ok">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ events_last_5min }}</div>
+            <div class="stat-label">Últimos 5 minutos</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-status-attention">
+        <div class="stat-icon status-attention">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ endpoints_with_activity }}</div>
+            <div class="stat-label">Endpoints con actividad</div>
+        </div>
+    </div>
+
+    <div class="stat-card accent-amber">
+        <div class="stat-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        </div>
+        <div>
+            <div class="stat-value">{{ renamed_24h }}</div>
+            <div class="stat-label">Renombrados (24h)</div>
+        </div>
+    </div>
+</div>
+
+{% if filtered_agent_id %}
+<div class="filter-count">
+    Filtrando por endpoint: <strong>{{ filtered_hostname or ("#" ~ filtered_agent_id) }}</strong>
+    · <a href="/eventos">Quitar filtro</a>
+</div>
+{% endif %}
+
+<div class="card">
+    <form class="endpoints-toolbar" method="get" action="/eventos">
+        <input type="text" name="search" placeholder="Buscar por archivo, descripción o endpoint..." value="{{ current_search }}" style="flex:1;min-width:220px;padding:0.6rem 0.85rem;border:1px solid var(--card-border);border-radius:var(--radius-sm);font-size:0.85rem;font-family:inherit;">
+        <select name="agent_id">
+            <option value="">Todos los endpoints</option>
+            {% for eid, hostname in endpoint_options %}
+            <option value="{{ eid }}" {{ "selected" if filtered_agent_id == eid }}>{{ hostname }}</option>
+            {% endfor %}
+        </select>
+        <select name="type">
+            <option value="">Todos los tipos</option>
+            {% for value, label in event_type_options.items() %}
+            <option value="{{ value }}" {{ "selected" if current_type == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="since">
+            <option value="">Todo el historial</option>
+            {% for value, (label, _) in since_options.items() %}
+            <option value="{{ value }}" {{ "selected" if current_since == value }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Buscar</button>
+        {% if current_search or current_type or current_since or filtered_agent_id %}
+        <a href="/eventos" class="btn btn-secondary">Limpiar filtros</a>
+        {% endif %}
+    </form>
+
+    <div class="filter-count">Mostrando {{ events|length }} de {{ filtered_total }} eventos{% if filtered_total != total_events %} (de {{ total_events }} en total){% endif %}</div>
+
+    {% if events %}
+    <table>
+        <tr>
+            <th>Fecha / hora</th>
+            <th>Tipo</th>
+            <th>Endpoint</th>
+            <th>Archivo</th>
+        </tr>
+        {% for evt in events %}
+        <tr>
+            <td title="{{ evt.detected_at.strftime('%d/%m/%Y %H:%M:%S') }}"><a href="/eventos/{{ evt.id }}">{{ evt.detected_at|timeago }}</a></td>
+            <td>
+                <span class="type-tag event">{{ evt.type_label }}</span>
+            </td>
+            <td>{{ evt.hostname }}</td>
+            <td>
+                {% if evt.file_path %}
+                <span class="file-path-text" title="{{ evt.file_path }}" style="display:inline;max-width:340px;">{{ evt.file_path.split('\\')[-1].split('/')[-1] }}</span>
+                {% else %}
+                <span class="empty">—</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div class="pagination">
+        <span>Página {{ current_page }} de {{ total_pages }}</span>
+        <div class="pagination-links">
+            {% if current_page > 1 %}
+            <a href="/eventos?{{ filter_qs ~ '&' if filter_qs else '' }}page={{ current_page - 1 }}">‹ Anterior</a>
+            {% else %}
+            <span class="disabled">‹ Anterior</span>
+            {% endif %}
+            {% if current_page < total_pages %}
+            <a href="/eventos?{{ filter_qs ~ '&' if filter_qs else '' }}page={{ current_page + 1 }}">Siguiente ›</a>
+            {% else %}
+            <span class="disabled">Siguiente ›</span>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <p class="empty">
+        {% if current_search or current_type or current_since or filtered_agent_id %}
+        Ningún evento coincide con este filtro.
+        {% else %}
+        Todavía no hay eventos. Los eventos se generan cada vez que un agente detecta actividad de archivos (creación, modificación, borrado o renombrado) en las rutas monitoreadas.
+        {% endif %}
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
