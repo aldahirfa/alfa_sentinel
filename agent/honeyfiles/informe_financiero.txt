@@ -1,3 +1,3 @@
 Este archivo es un señuelo (honeyfile) para pruebas del sistema de deteccion temprana de ransomware.
 Ningun proceso legitimo deberia leer, modificar o borrar este archivo.
-Cualquier actividad aqui se considera sospechosa. af
+Cualquier actividad aqui se considera sospechosa. afa

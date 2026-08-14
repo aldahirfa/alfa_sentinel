@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="pc-head">
+    <div>
+        <div class="pc-kicker">Auditoría</div>
+        <h1>Informes y Reportes</h1>
+        <div class="pc-head-meta" style="margin-top:4px;">
+            Generación, trazabilidad y auditoría de informes de seguridad.
+        </div>
+    </div>
+</div>
+
+<!-- Métricas de trazabilidad -->
+<div class="pc-strip" style="margin-bottom:22px;">
+    <div style="flex:1;display:grid;grid-template-columns:repeat(3,1fr);">
+        <div class="pc-stat" style="border-left:0;padding-left:0;">
+            <div class="pc-label">📄 Total Generados</div>
+            <div class="pc-stat-n" id="kpiTotalReports"><b>{{ total_reports }}</b></div>
+            <div class="pc-stat-sub">informe(s)</div>
+        </div>
+        <div class="pc-stat">
+            <div class="pc-label">⏱️ Último Generado</div>
+            <div class="pc-stat-n" style="font-size:16px;margin-top:12px;" id="kpiLastGenerated">
+                <b>{{ last_generated_at.strftime('%d/%m %H:%M') if last_generated_at else "Sin informes aún" }}</b>
+            </div>
+        </div>
+        <div class="pc-stat">
+            <div class="pc-label">👤 Generado Por</div>
+            <div class="pc-stat-n" style="font-size:16px;margin-top:12px;" id="kpiLastGeneratedBy">
+                <b>{{ last_generated_by or "—" }}</b>
+            </div>
+            <div class="pc-stat-sub">último analista</div>
+        </div>
+    </div>
+</div>
+
+<!-- Generar nuevo informe -->
+<div class="card" style="margin-bottom:22px;">
+    <div class="section-title-row"><h2>🛠️ Generar Nuevo Informe</h2></div>
+
+    <form id="reportForm">
+        <div class="form-group" style="max-width:none;">
+            <label for="reportType">Tipo de informe</label>
+            <select id="reportType" style="width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-size:13px;font-family:inherit;">
+                {% for value, label in report_type_options %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;">
+            <div class="form-group" style="flex:1;min-width:220px;max-width:none;">
+                <label for="reportPeriod">Período evaluado</label>
+                <select id="reportPeriod" style="width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-size:13px;font-family:inherit;">
+                    {% for value, label in period_options %}
+                    <option value="{{ value }}" {{ "selected" if value == "30d" }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="flex:1;min-width:220px;max-width:none;">
+                <label for="reportEndpoint">Endpoint objetivo</label>
+                <select id="reportEndpoint" style="width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-size:13px;font-family:inherit;">
+                    <option value="">🖥️ Todos los endpoints</option>
+                    {% for ep_id, hostname in endpoint_options %}
+                    <option value="{{ ep_id }}">{{ hostname }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group" style="max-width:none;margin-top:12px;">
+            <label>Formato de salida</label>
+            <div style="display:flex;gap:20px;margin-top:6px;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:400;">
+                    <input type="radio" name="reportFormat" value="PDF" checked> 📄 Documento PDF (.pdf)
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:400;">
+                    <input type="radio" name="reportFormat" value="XLSX"> 📊 Hoja de datos Excel (.xlsx)
+                </label>
+            </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:16px;">
+            <div class="form-msg" id="reportFormMsg"></div>
+            <button type="submit" class="btn btn-primary" id="generateReportBtn">🚀 Generar</button>
+        </div>
+    </form>
+
+    <p style="font-size:11px;color:var(--muted);margin-top:10px;">
+        La generación automática/programada de informes no está construida todavía -- cada informe queda registrado con el usuario que lo generó a mano (ver PENDIENTES.md).
+    </p>
+</div>
+
+<!-- Historial y registro de auditoría -->
+<div class="section-title-row" style="margin-bottom:10px;"><h2>📋 Historial y Registro de Auditoría de Informes</h2></div>
+
+{% if history %}
+<table class="pc-table" id="reportsHistoryTable">
+    <thead>
+        <tr>
+            <th>Título / ID</th>
+            <th>Tipo</th>
+            <th>Período</th>
+            <th>Endpoint</th>
+            <th>Generado por</th>
+            <th>Fecha</th>
+            <th>Formato</th>
+            <th style="text-align:right;">Acciones</th>
+        </tr>
+    </thead>
+    <tbody id="reportsHistoryBody">
+        {% for r in history %}
+        <tr>
+            <td>
+                <div style="font-weight:600;color:var(--text-dark);font-size:13px;">{{ r.title }}</div>
+                <div style="font-size:11px;color:var(--muted);font-family:monospace;">#{{ r.code }}</div>
+            </td>
+            <td>{{ r.report_type_label }}</td>
+            <td>{{ r.period_label }}</td>
+            <td>{{ r.endpoint }}</td>
+            <td>{{ r.generated_by }}</td>
+            <td>{{ r.created_at.strftime('%d/%m %H:%M') }}</td>
+            <td><span class="pc-tag" style="font-size:10px;">{{ r.format }}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+                <a href="/reportes/{{ r.id }}/archivo?disposition=inline" target="_blank" class="pc-btn" style="padding:5px 8px;" title="{{ 'Ver' if r.format == 'PDF' else 'Excel se descarga directo -- el navegador no previsualiza .xlsx' }}">👁️</a>
+                <a href="/reportes/{{ r.id }}/archivo?disposition=attachment" class="pc-btn" style="padding:5px 8px;" title="Descargar">📥</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<div class="pagination" style="margin-top:20px;">
+    <span>Página {{ current_page }} de {{ total_pages }}</span>
+    <div class="pagination-links">
+        {% if current_page > 1 %}
+        <a href="/reportes?page={{ current_page - 1 }}">‹ Anterior</a>
+        {% else %}
+        <span class="disabled">‹ Anterior</span>
+        {% endif %}
+        {% if current_page < total_pages %}
+        <a href="/reportes?page={{ current_page + 1 }}">Siguiente ›</a>
+        {% else %}
+        <span class="disabled">Siguiente ›</span>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% else %}
+<p class="empty">Todavía no se generó ningún informe. Usá el panel de arriba para crear el primero.</p>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.getElementById("reportForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const btn = document.getElementById("generateReportBtn");
+        const msg = document.getElementById("reportFormMsg");
+        const reportType = document.getElementById("reportType").value;
+        const period = document.getElementById("reportPeriod").value;
+        const endpointId = document.getElementById("reportEndpoint").value;
+        const format = document.querySelector('input[name="reportFormat"]:checked').value;
+
+        btn.disabled = true;
+        btn.textContent = "Generando...";
+        msg.classList.remove("show", "error");
+
+        try {
+            const response = await fetch("/reportes/generar", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    report_type: reportType,
+                    period: period,
+                    format: format,
+                    endpoint_id: endpointId ? parseInt(endpointId, 10) : null
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                msg.textContent = data.detail || "No se pudo generar el informe.";
+                msg.classList.add("show", "error");
+                return;
+            }
+
+            prependReportRow(data.report);
+            msg.textContent = "Informe generado.";
+            msg.classList.add("show");
+        } catch (error) {
+            msg.textContent = "No se pudo generar el informe.";
+            msg.classList.add("show", "error");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "🚀 Generar";
+        }
+    });
+
+    function prependReportRow(report) {
+        const emptyMsg = document.querySelector(".empty");
+        if (emptyMsg) emptyMsg.remove();
+
+        let table = document.getElementById("reportsHistoryTable");
+        if (!table) {
+            location.reload();
+            return;
+        }
+
+        const body = document.getElementById("reportsHistoryBody");
+        const row = document.createElement("tr");
+        const viewTitle = report.format === "PDF" ? "Ver" : "Excel se descarga directo -- el navegador no previsualiza .xlsx";
+        row.innerHTML = `
+            <td>
+                <div style="font-weight:600;color:var(--text-dark);font-size:13px;">${report.title}</div>
+                <div style="font-size:11px;color:var(--muted);font-family:monospace;">#${report.code}</div>
+            </td>
+            <td>${report.report_type_label}</td>
+            <td>${report.period_label}</td>
+            <td>${report.endpoint}</td>
+            <td>${report.generated_by}</td>
+            <td>${report.created_at}</td>
+            <td><span class="pc-tag" style="font-size:10px;">${report.format}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+                <a href="/reportes/${report.id}/archivo?disposition=inline" target="_blank" class="pc-btn" style="padding:5px 8px;" title="${viewTitle}">👁️</a>
+                <a href="/reportes/${report.id}/archivo?disposition=attachment" class="pc-btn" style="padding:5px 8px;" title="Descargar">📥</a>
+            </td>
+        `;
+        body.prepend(row);
+
+        const totalEl = document.getElementById("kpiTotalReports");
+        if (totalEl) {
+            const current = parseInt(totalEl.textContent.trim(), 10) || 0;
+            totalEl.innerHTML = `<b>${current + 1}</b>`;
+        }
+        const lastEl = document.getElementById("kpiLastGenerated");
+        if (lastEl) lastEl.innerHTML = `<b>${report.created_at}</b>`;
+        const lastByEl = document.getElementById("kpiLastGeneratedBy");
+        if (lastByEl) lastByEl.innerHTML = `<b>${report.generated_by}</b>`;
+    }
+</script>
+{% endblock %}

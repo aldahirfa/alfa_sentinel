@@ -44,7 +44,11 @@ def main():
 
     username = input("Usuario: ").strip()
     full_name = input("Nombre completo: ").strip()
-    email = input("Email (opcional, Enter para omitir): ").strip() or None
+    email = input("Email: ").strip()
+
+    if not email:
+        print("El email es obligatorio en la nueva estructura (users.email NOT NULL). No se creó nada.")
+        return
 
     password = getpass.getpass("Contraseña: ")
     password_confirm = getpass.getpass("Confirma la contraseña: ")

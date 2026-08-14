@@ -1,13 +1,11 @@
 import httpx
 
-from config import (
-    ENROLLMENT_URL,
-    AUTHENTICATION_URL,
-    HEARTBEAT_URL,
-    EVENTS_URL,
-    ALERTS_URL,
-    ENROLLMENT_TOKEN
-)
+import config
+# Se usa "import config" (no "from config import X") a propósito: si
+# main.py recibe --server y pisa config.SERVER_URL/config.EVENTS_URL/etc
+# en tiempo de ejecución (ver parse_args() en main.py), estas funciones
+# tienen que leer el valor actualizado, no el que tenía config.py al
+# momento de este import.
 
 
 def _warn_if_error(response, action):
@@ -33,14 +31,14 @@ def _warn_if_error(response, action):
 def enroll_agent(system_info):
 
     data = {
-        "token": ENROLLMENT_TOKEN,
+        "token": config.ENROLLMENT_TOKEN,
         **system_info
     }
 
     try:
 
         response = httpx.post(
-            ENROLLMENT_URL,
+            config.ENROLLMENT_URL,
             json=data,
             timeout=10
         )
@@ -62,7 +60,7 @@ def authenticate_agent(credential):
     try:
 
         response = httpx.get(
-            AUTHENTICATION_URL,
+            config.AUTHENTICATION_URL,
             headers={
                 "X-Agent-Credential": credential
             },
@@ -86,7 +84,7 @@ def send_heartbeat(credential):
     try:
 
         response = httpx.post(
-            HEARTBEAT_URL,
+            config.HEARTBEAT_URL,
             headers={
                 "X-Agent-Credential": credential
             },
@@ -110,7 +108,7 @@ def send_event(credential, event_data):
     try:
 
         response = httpx.post(
-            EVENTS_URL,
+            config.EVENTS_URL,
             json=event_data,
             headers={
                 "X-Agent-Credential": credential
@@ -130,12 +128,89 @@ def send_event(credential, event_data):
         return None
 
 
+def get_honeyfile_policy(credential):
+
+    try:
+
+        response = httpx.get(
+            config.HONEYFILE_POLICY_URL,
+            headers={
+                "X-Agent-Credential": credential
+            },
+            timeout=10
+        )
+
+        _warn_if_error(response, "pedir la política de honeyfiles")
+
+        return response
+
+    except httpx.RequestError as error:
+
+        print("No se pudo conectar con el servidor:")
+        print(error)
+
+        return None
+
+
+def report_honeyfile_policy(credential, results):
+
+    try:
+
+        response = httpx.post(
+            config.HONEYFILE_POLICY_REPORT_URL,
+            json={"results": results},
+            headers={
+                "X-Agent-Credential": credential
+            },
+            timeout=10
+        )
+
+        _warn_if_error(response, "reportar honeyfiles creados")
+
+        return response
+
+    except httpx.RequestError as error:
+
+        print("No se pudo conectar con el servidor:")
+        print(error)
+
+        return None
+
+
+def get_rule_policy(credential):
+    """Agregado 2026-08-12, mismo patrón que get_honeyfile_policy: pide
+    al servidor los valores reales de peso/umbral/ventana de cada
+    regla activa (GET /agent/rule-policy), para que FileActivityAnalyzer
+    ya no dependa de los valores hardcodeados en su __init__()."""
+
+    try:
+
+        response = httpx.get(
+            config.RULE_POLICY_URL,
+            headers={
+                "X-Agent-Credential": credential
+            },
+            timeout=10
+        )
+
+        _warn_if_error(response, "pedir la política de reglas")
+
+        return response
+
+    except httpx.RequestError as error:
+
+        print("No se pudo conectar con el servidor:")
+        print(error)
+
+        return None
+
+
 def send_alert(credential, alert_data):
 
     try:
 
         response = httpx.post(
-            ALERTS_URL,
+            config.ALERTS_URL,
             json=alert_data,
             headers={
                 "X-Agent-Credential": credential

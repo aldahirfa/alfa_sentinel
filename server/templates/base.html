@@ -961,6 +961,62 @@
 
         .bell-empty { padding: 1.4rem 1rem; text-align: center; color: var(--text-faint); font-size: 0.82rem; font-style: italic; }
 
+        /* ================= Ventana flotante de alerta (toast) =================
+           Aparece en cualquier pantalla -- vive en base.html, no en una vista
+           puntual -- cuando /alerts/open (el mismo endpoint de la campanita)
+           trae un id de alerta que este navegador todavía no vio (registro en
+           localStorage). No es un socket ni push real: se apoya en el mismo
+           polling que ya existía, solo que más seguido (ver loadOpenAlerts). */
+        .toast-container {
+            position: fixed;
+            top: 18px;
+            right: 18px;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 380px;
+            pointer-events: none;
+        }
+
+        .toast-alert {
+            pointer-events: auto;
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            border-left: 5px solid var(--c-red);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            padding: 14px 16px;
+            animation: toastSlideIn 0.25s ease-out;
+        }
+        .toast-alert.fade-out { animation: toastSlideOut 0.25s ease-in forwards; }
+        .toast-alert.SUSPICIOUS { border-left-color: var(--c-yellow); }
+        .toast-alert.HIGH { border-left-color: var(--c-orange); }
+        .toast-alert.CRITICAL { border-left-color: var(--c-red); }
+
+        @keyframes toastSlideIn {
+            from { transform: translateX(120%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes toastSlideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(120%); opacity: 0; }
+        }
+
+        .toast-alert-head { display: flex; align-items: flex-start; gap: 8px; }
+        .toast-alert-icon { font-size: 1.1rem; line-height: 1; flex-shrink: 0; }
+        .toast-alert-title { font-size: 0.85rem; font-weight: 700; color: var(--text-dark); flex: 1; }
+        .toast-alert-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0; }
+        .toast-alert-meta { font-size: 0.74rem; color: var(--muted); margin: 6px 0 10px 1.9rem; }
+        .toast-alert-actions { margin-left: 1.9rem; }
+        .toast-alert-actions a {
+            font-size: 0.76rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .toast-alert-actions a:hover { text-decoration: underline; }
+
         /* ================= Vista de detalle / incidentes ================= */
 
         .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.5rem; margin-bottom: 1.2rem; }
@@ -1247,10 +1303,15 @@
         .status-select-trigger:hover { background: var(--surface-hover); border-color: var(--card-border); }
         .status-select-trigger svg { color: var(--muted); flex-shrink: 0; }
     </style>
+
+    <link rel="stylesheet" href="/static/nocturne.css">
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     {% block extra_head %}{% endblock %}
 </head>
 <body>
+    <div class="toast-container" id="toastContainer"></div>
+
     <div class="sidebar">
         <div class="sidebar-brand">
             <img src="/static/logo-icon.png" alt="ALFA-Sentinel">
@@ -1403,6 +1464,75 @@
             }
         });
 
+        // Nombres/iconos por severidad para la ventana flotante -- las 3 que
+        // puede traer /alerts/open (NORMAL nunca genera alerta, ver el
+        // propio endpoint). Sigue la escala de color del resto de la app:
+        // Sospechoso=Amarillo, Alto=Naranja, Crítico=Rojo.
+        const TOAST_SEVERITY_LABEL = {
+            SUSPICIOUS: "Sospechoso",
+            HIGH: "Alto",
+            CRITICAL: "Crítico"
+        };
+        const TOAST_SEVERITY_ICON = {
+            SUSPICIOUS: "⚠️",
+            HIGH: "🟠",
+            CRITICAL: "🔴"
+        };
+
+        // IDs de alerta que este navegador ya mostró como ventana flotante,
+        // persistido en localStorage para no repetir el aviso al navegar
+        // entre pantallas o recargar (cada carga vuelve a pedir
+        // /alerts/open desde cero). Si ya había alertas NEW viejas en la
+        // base (de pruebas anteriores) la primera vez que se usa esto en
+        // este navegador, se avisan todas juntas una sola vez -- después,
+        // solo las nuevas.
+        const TOAST_SEEN_KEY = "alfa_seen_alert_ids";
+
+        function getSeenAlertIds() {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(TOAST_SEEN_KEY) || "[]"));
+            } catch (error) {
+                return new Set();
+            }
+        }
+
+        function saveSeenAlertIds(idsSet) {
+            try {
+                localStorage.setItem(TOAST_SEEN_KEY, JSON.stringify([...idsSet]));
+            } catch (error) {
+                // Silencioso: si localStorage no está disponible, la ventana
+                // flotante simplemente puede repetirse en la próxima carga.
+            }
+        }
+
+        function showRansomwareToast(alert) {
+            const container = document.getElementById("toastContainer");
+            if (!container) return;
+
+            const el = document.createElement("div");
+            el.className = `toast-alert ${alert.severity}`;
+            el.innerHTML = `
+                <div class="toast-alert-head">
+                    <span class="toast-alert-icon">${TOAST_SEVERITY_ICON[alert.severity] || "⚠️"}</span>
+                    <span class="toast-alert-title">${alert.title}</span>
+                    <button type="button" class="toast-alert-close" aria-label="Cerrar">✕</button>
+                </div>
+                <div class="toast-alert-meta">${alert.hostname} · ${TOAST_SEVERITY_LABEL[alert.severity] || alert.severity} · ${alert.created_at}</div>
+                <div class="toast-alert-actions"><a href="/detecciones/${alert.id}">Ver detalle →</a></div>
+            `;
+
+            function dismiss() {
+                el.classList.add("fade-out");
+                setTimeout(() => el.remove(), 250);
+            }
+
+            el.querySelector(".toast-alert-close").addEventListener("click", dismiss);
+
+            container.appendChild(el);
+
+            setTimeout(dismiss, 15000);
+        }
+
         async function loadOpenAlerts() {
             try {
                 const response = await fetch("/alerts/open");
@@ -1420,25 +1550,38 @@
                 const list = document.getElementById("bellList");
                 if (data.alerts.length === 0) {
                     list.innerHTML = '<div class="bell-empty">No hay alertas activas</div>';
-                    return;
+                } else {
+                    list.innerHTML = data.alerts.map(a => `
+                        <a class="bell-item" href="/detecciones/${a.id}">
+                            <div class="bell-item-top">
+                                <span class="bell-item-dot ${a.severity}"></span>
+                                <span class="bell-item-title">${a.title}</span>
+                            </div>
+                            <div class="bell-item-meta">${a.hostname} · ${a.severity} · ${a.created_at}</div>
+                        </a>
+                    `).join("");
                 }
 
-                list.innerHTML = data.alerts.map(a => `
-                    <a class="bell-item" href="/detecciones/${a.id}">
-                        <div class="bell-item-top">
-                            <span class="bell-item-dot ${a.severity}"></span>
-                            <span class="bell-item-title">${a.title}</span>
-                        </div>
-                        <div class="bell-item-meta">${a.hostname} · ${a.severity} · ${a.created_at}</div>
-                    </a>
-                `).join("");
+                const seenIds = getSeenAlertIds();
+                let sawNew = false;
+
+                data.alerts.forEach(a => {
+                    if (!seenIds.has(a.id)) {
+                        seenIds.add(a.id);
+                        sawNew = true;
+                        showRansomwareToast(a);
+                    }
+                });
+
+                if (sawNew) saveSeenAlertIds(seenIds);
             } catch (error) {
-                // Silencioso: si falla, el badge simplemente se queda en 0.
+                // Silencioso: si falla, el badge/ventana flotante simplemente
+                // se quedan como estaban en el último poll exitoso.
             }
         }
 
         loadOpenAlerts();
-        setInterval(loadOpenAlerts, 30000);
+        setInterval(loadOpenAlerts, 5000);
     </script>
     {% block extra_scripts %}{% endblock %}
 </body>

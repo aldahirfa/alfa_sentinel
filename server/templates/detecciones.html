@@ -96,7 +96,10 @@
             <option value="{{ value }}" {{ "selected" if current_since == value }}>{{ label }}</option>
             {% endfor %}
         </select>
-        <button type="submit" class="btn btn-primary">Buscar</button>
+        <button type="submit" class="btn btn-primary" title="Buscar" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            Buscar
+        </button>
         {% if current_search or current_severity or current_status or current_rule or current_since or filtered_agent_id %}
         <a href="/detecciones" class="btn btn-secondary">Limpiar filtros</a>
         {% endif %}

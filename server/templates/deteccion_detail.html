@@ -131,25 +131,10 @@
 
 <div class="card">
     <div class="section-title-row"><h2>Notas del analista</h2></div>
-    <form id="noteForm" style="margin-bottom:1.2rem;">
-        <div class="form-group" style="max-width:none;">
-            <textarea id="noteText" rows="3" placeholder="Escribir observación..." style="width:100%;padding:0.65rem 0.8rem;border:1px solid var(--card-border);border-radius:var(--radius-sm);font-size:0.85rem;font-family:inherit;color:var(--text-dark);background:var(--surface);resize:vertical;"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary" id="addNoteBtn">Agregar nota</button>
-        <div class="form-msg" id="noteMsg"></div>
-    </form>
-    <div id="notesList">
-        {% if notes %}
-        {% for n in notes %}
-        <div class="mini-activity-row" style="align-items:flex-start;">
-            <span class="mini-activity-time" style="width:110px;">{{ n.created_at.strftime('%d/%m %H:%M') }}</span>
-            <span class="mini-activity-desc"><strong>{{ n.author }}:</strong> {{ n.note }}</span>
-        </div>
-        {% endfor %}
-        {% else %}
-        <p class="empty" id="emptyNotesMsg">Todavía no hay notas para esta detección.</p>
-        {% endif %}
+    <div class="form-group" style="max-width:none;">
+        <textarea rows="3" disabled placeholder="Pendiente: no hay tabla 'alert_notes' en la estructura actual -- se sacó a propósito al adoptar alfa_sentinel tal cual (ver PENDIENTES.md)." style="width:100%;padding:0.65rem 0.8rem;border:1px solid var(--card-border);border-radius:var(--radius-sm);font-size:0.85rem;font-family:inherit;color:var(--muted);background:var(--surface-hover);resize:vertical;cursor:not-allowed;"></textarea>
     </div>
+    <button type="button" class="btn btn-secondary" disabled title="Pendiente -- ver PENDIENTES.md, 'Reestructuración de la base de datos'.">Agregar nota</button>
 </div>
 {% endblock %}
 
@@ -221,55 +206,5 @@
         }
     }
 
-    document.getElementById("noteForm").addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        const textarea = document.getElementById("noteText");
-        const msg = document.getElementById("noteMsg");
-        const btn = document.getElementById("addNoteBtn");
-        const text = textarea.value.trim();
-
-        if (!text) return;
-
-        btn.disabled = true;
-        btn.textContent = "Guardando...";
-
-        try {
-            const response = await fetch("/alerts/{{ d.id }}/notes", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ note: text })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                msg.textContent = data.detail || "No se pudo agregar la nota.";
-                msg.classList.add("show", "error");
-                btn.disabled = false;
-                btn.textContent = "Agregar nota";
-                return;
-            }
-
-            const emptyMsg = document.getElementById("emptyNotesMsg");
-            if (emptyMsg) emptyMsg.remove();
-
-            const row = document.createElement("div");
-            row.className = "mini-activity-row";
-            row.style.alignItems = "flex-start";
-            row.innerHTML = `
-                <span class="mini-activity-time" style="width:110px;">${data.note.created_at}</span>
-                <span class="mini-activity-desc"><strong>${data.note.author}:</strong> ${data.note.note}</span>
-            `;
-            document.getElementById("notesList").prepend(row);
-
-            textarea.value = "";
-            btn.disabled = false;
-            btn.textContent = "Agregar nota";
-        } catch (error) {
-            btn.disabled = false;
-            btn.textContent = "Agregar nota";
-        }
-    });
 </script>
 {% endblock %}

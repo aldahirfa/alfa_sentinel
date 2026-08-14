@@ -5,3 +5,5 @@ python-dotenv
 bcrypt
 itsdangerous
 jinja2
+reportlab
+openpyxl

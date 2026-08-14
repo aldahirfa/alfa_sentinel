@@ -1,38 +1,242 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-hero">
-    <div class="page-hero-main">
-        <div class="page-hero-eyebrow">Administración</div>
-        <h1>Usuarios y roles</h1>
-        <div class="page-hero-subtitle">Las cuentas las crea un administrador</div>
+<div class="pc-head">
+    <div>
+        <div class="pc-kicker">Sistema</div>
+        <h1>Usuarios y Roles</h1>
+        <div class="pc-head-meta" style="margin-top:4px;">
+            Cuentas con acceso a la consola y su rol asignado.
+        </div>
     </div>
-    <div class="page-hero-side">
-        <div class="page-hero-count">{{ users|length }}</div>
-        <div class="page-hero-count-label">usuarios</div>
+    <div>
+        {% if is_admin %}
+        <button type="button" class="pc-btn" id="btnOpenUserModal" style="background:var(--accent);color:#ffffff;border:0;padding:8px 16px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Nuevo Usuario
+        </button>
+        {% endif %}
     </div>
 </div>
 
-<div class="card">
-    {% if users %}
-    <table>
-        <tr><th>Usuario</th><th>Nombre completo</th><th>Correo</th><th>Roles</th><th>Estado</th><th>Último acceso</th><th>Creado</th></tr>
+<div class="detail-tabs" style="margin-bottom:22px;">
+    <a class="detail-tab" href="/configuracion?tab=deteccion">🛡️ Detección</a>
+    <a class="detail-tab" href="/configuracion?tab=agentes">💻 Agentes</a>
+    <a class="detail-tab active" href="/usuarios">👥 Usuarios y Roles</a>
+    <a class="detail-tab" href="/configuracion?tab=auditoria">📜 Auditoría</a>
+</div>
+
+<div style="background:var(--accent-tint);border-left:3px solid var(--accent);padding:10px 16px;border-radius:var(--radius-md);margin:0 0 18px 0;font-size:12px;color:var(--text-dark);line-height:1.5;">
+    ℹ️ Hoy solo existe el rol <b>admin</b> con permisos diferenciados de verdad, y en apenas 2 endpoints (crear usuarios y generar tokens de enrolamiento) -- el resto de la consola no distingue por rol, cualquier usuario logueado puede operar el resto del sistema. No se muestra una matriz de roles con permisos que todavía no se aplican.
+</div>
+
+{% if users %}
+<table class="pc-table">
+    <thead>
+        <tr>
+            <th>Usuario</th>
+            <th>Nombre completo</th>
+            <th>Correo</th>
+            <th>Rol</th>
+            <th>Estado</th>
+            <th>Último acceso</th>
+            <th>Creado</th>
+            {% if is_admin %}<th style="text-align:right;">Acciones</th>{% endif %}
+        </tr>
+    </thead>
+    <tbody>
         {% for u in users %}
         <tr>
-            <td>{{ u[1] }}</td>
-            <td>{{ u[2] }}</td>
-            <td>{{ u[3] or "—" }}</td>
-            <td>{{ u[4] or "—" }}</td>
-            <td><span class="badge badge-{{ 'active' if u[5] else 'inactive' }}">{{ "Activo" if u[5] else "Inactivo" }}</span></td>
-            <td>{{ u[6] or "Nunca" }}</td>
-            <td>{{ u[7] }}</td>
+            <td style="font-weight:600;color:var(--text-dark);">{{ u.username }}</td>
+            <td>{{ u.full_name }}</td>
+            <td>{{ u.email or "—" }}</td>
+            <td><span class="pc-tag" style="font-size:11px;">{{ u.roles or "sin rol" }}</span></td>
+            <td>
+                <span class="pc-tag {{ 'sev sev-NORMAL' if u.is_active else '' }}" style="font-size:11px;{{ '' if u.is_active else 'color:var(--muted);' }}">
+                    {{ "Activo" if u.is_active else "Inactivo" }}
+                </span>
+            </td>
+            <td style="font-size:12px;color:var(--muted);">{{ u.last_login_at.strftime('%d/%m/%Y %H:%M') if u.last_login_at else "Nunca" }}</td>
+            <td style="font-size:12px;color:var(--muted);">{{ u.created_at.strftime('%d/%m/%Y') }}</td>
+            {% if is_admin %}
+            <td style="text-align:right;">
+                <button type="button" class="pc-btn edit-user-btn" style="padding:5px 10px;"
+                    data-id="{{ u.id }}" data-full-name="{{ u.full_name }}" data-email="{{ u.email or '' }}"
+                    data-role="{{ u.roles or '' }}" data-active="{{ '1' if u.is_active else '0' }}">
+                    Editar
+                </button>
+            </td>
+            {% endif %}
         </tr>
         {% endfor %}
-    </table>
-    {% else %}
-    <p class="empty">No hay usuarios registrados.</p>
-    {% endif %}
-    <p style="margin-top:1rem;font-size:0.8rem;color:var(--muted);">
-        Por ahora la creación de usuarios se hace vía API (<code>POST /users</code>, solo administradores). Un formulario aquí mismo para crear usuarios desde la consola es un buen siguiente paso.
-    </p>
+    </tbody>
+</table>
+{% else %}
+<p class="empty">No hay usuarios registrados.</p>
+{% endif %}
+
+{% if is_admin %}
+<div class="ep-modal-backdrop" id="userModalBackdrop">
+    <div class="ep-modal">
+        <div class="ep-modal-header">
+            <div>
+                <div class="pc-kicker">Usuarios</div>
+                <h3 style="font-size:18px;margin:0;" id="userModalTitle">➕ Nuevo Usuario</h3>
+            </div>
+            <button type="button" class="ep-drawer-close" id="btnCloseUserModal">✕</button>
+        </div>
+
+        <div class="ep-modal-body">
+            <input type="hidden" id="userModalId" value="">
+
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px;">Usuario (login)</label>
+                <input type="text" id="userModalUsername" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-family:inherit;">
+            </div>
+
+            <div id="userModalPasswordGroup">
+                <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px;">Contraseña (mínimo 8 caracteres)</label>
+                <input type="password" id="userModalPassword" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-family:inherit;">
+            </div>
+
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px;">Nombre completo</label>
+                <input type="text" id="userModalFullName" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-family:inherit;">
+            </div>
+
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px;">Correo</label>
+                <input type="email" id="userModalEmail" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-family:inherit;">
+            </div>
+
+            <div>
+                <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px;">Rol</label>
+                <input type="text" id="userModalRole" value="admin" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:var(--radius-md);color:var(--text-dark);font-family:inherit;">
+                <p style="font-size:11px;color:var(--muted);margin-top:4px;">Si el rol no existe todavía, se crea. Hoy solo "admin" tiene permisos reales diferenciados (ver nota arriba).</p>
+            </div>
+
+            <div id="userModalActiveGroup" style="display:none;">
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="userModalActive" style="width:16px;height:16px;">
+                    <span style="font-size:13px;">Cuenta activa</span>
+                </label>
+            </div>
+
+            <div class="form-msg" id="userModalMsg"></div>
+        </div>
+
+        <div class="ep-modal-footer">
+            <button type="button" class="pc-btn" id="btnCancelUserModal">Cancelar</button>
+            <button type="button" class="pc-btn" id="btnSaveUserModal" style="background:var(--accent);color:#ffffff;border:0;">Guardar</button>
+        </div>
+    </div>
 </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const userModalBackdrop = document.getElementById("userModalBackdrop");
+
+    function openUserModal(mode, data) {
+        if (!userModalBackdrop) return;
+
+        document.getElementById("userModalMsg").classList.remove("show", "error");
+        document.getElementById("userModalId").value = data && data.id ? data.id : "";
+        document.getElementById("userModalTitle").textContent = mode === "edit" ? "✏️ Editar Usuario" : "➕ Nuevo Usuario";
+        document.getElementById("userModalUsername").value = data && data.username ? data.username : "";
+        document.getElementById("userModalUsername").disabled = mode === "edit";
+        document.getElementById("userModalPasswordGroup").style.display = mode === "edit" ? "none" : "block";
+        document.getElementById("userModalFullName").value = data && data.fullName ? data.fullName : "";
+        document.getElementById("userModalEmail").value = data && data.email ? data.email : "";
+        document.getElementById("userModalRole").value = data && data.role ? data.role : "admin";
+        document.getElementById("userModalActiveGroup").style.display = mode === "edit" ? "block" : "none";
+        document.getElementById("userModalActive").checked = !data || data.active !== "0";
+
+        userModalBackdrop.classList.add("active");
+    }
+
+    function closeUserModal() {
+        if (userModalBackdrop) userModalBackdrop.classList.remove("active");
+    }
+
+    const btnOpenUserModal = document.getElementById("btnOpenUserModal");
+    if (btnOpenUserModal) {
+        btnOpenUserModal.addEventListener("click", () => openUserModal("create", null));
+    }
+
+    document.querySelectorAll(".edit-user-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            openUserModal("edit", {
+                id: btn.dataset.id,
+                fullName: btn.dataset.fullName,
+                email: btn.dataset.email,
+                role: btn.dataset.role,
+                active: btn.dataset.active
+            });
+        });
+    });
+
+    const btnCloseUserModal = document.getElementById("btnCloseUserModal");
+    const btnCancelUserModal = document.getElementById("btnCancelUserModal");
+    if (btnCloseUserModal) btnCloseUserModal.addEventListener("click", closeUserModal);
+    if (btnCancelUserModal) btnCancelUserModal.addEventListener("click", closeUserModal);
+
+    const btnSaveUserModal = document.getElementById("btnSaveUserModal");
+    if (btnSaveUserModal) {
+        btnSaveUserModal.addEventListener("click", async () => {
+            const msg = document.getElementById("userModalMsg");
+            const id = document.getElementById("userModalId").value;
+            const isEdit = !!id;
+
+            msg.classList.remove("show", "error");
+            btnSaveUserModal.disabled = true;
+
+            try {
+                let response;
+
+                if (isEdit) {
+                    response = await fetch(`/users/${id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            full_name: document.getElementById("userModalFullName").value,
+                            email: document.getElementById("userModalEmail").value || null,
+                            role: document.getElementById("userModalRole").value,
+                            is_active: document.getElementById("userModalActive").checked
+                        })
+                    });
+                } else {
+                    const password = document.getElementById("userModalPassword").value;
+                    if (password.length < 8) {
+                        throw new Error("La contraseña debe tener al menos 8 caracteres.");
+                    }
+                    response = await fetch("/users", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            username: document.getElementById("userModalUsername").value,
+                            password: password,
+                            full_name: document.getElementById("userModalFullName").value,
+                            email: document.getElementById("userModalEmail").value || null,
+                            role: document.getElementById("userModalRole").value || "admin"
+                        })
+                    });
+                }
+
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "No se pudo guardar el usuario.");
+                }
+
+                window.location.reload();
+            } catch (error) {
+                msg.textContent = error.message;
+                msg.classList.add("show", "error");
+            } finally {
+                btnSaveUserModal.disabled = false;
+            }
+        });
+    }
+</script>
 {% endblock %}
