@@ -37,6 +37,44 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // PATCH/POST /incidents/... (drawer de Incidentes: cambiar
+      // estado, responsable, clasificación, escalar una alerta suelta)
+      // -- mismos endpoints reales que ya usa incidentes.html.
+      '/incidents': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // PATCH /rules/{id} (pantalla Reglas Heurísticas: peso/estado) --
+      // mismo endpoint real que ya usa configuracion.html.
+      '/rules': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // POST /reportes/generar y GET /reportes/{id}/archivo (pantalla
+      // Reports: generar y descargar) -- mismos endpoints reales que
+      // ya usa reportes.html.
+      '/reportes': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // POST /users, PATCH /users/{id} (Administración > Usuarios y
+      // Roles) -- mismos endpoints reales que ya usa usuarios.html.
+      '/users': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // PATCH /settings/{key} (Administración > Configuración) --
+      // mismo endpoint real que ya usa configuracion.html.
+      '/settings': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // POST /enrollment-tokens (Administración > Agentes: generar
+      // token de enrolamiento) -- endpoint real ya existente.
+      '/enrollment-tokens': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       // Reusa los logos reales del servidor (server/static/) en vez de
       // duplicarlos en el proyecto React -- un solo archivo fuente.
       '/static': {

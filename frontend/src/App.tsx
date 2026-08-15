@@ -5,6 +5,13 @@ import Topbar from "./components/Topbar";
 import LoginGate from "./components/LoginGate";
 import DashboardPage from "./pages/DashboardPage";
 import EndpointsPage from "./pages/EndpointsPage";
+import AlertsPage from "./pages/AlertsPage";
+import IncidentesPage from "./pages/IncidentesPage";
+import HoneyfilesPage from "./pages/HoneyfilesPage";
+import RulesPage from "./pages/RulesPage";
+import RespuestaPage from "./pages/RespuestaPage";
+import ReportsPage from "./pages/ReportsPage";
+import AdministracionPage from "./pages/AdministracionPage";
 import { ApiError, fetchDashboardOverview, fetchMe } from "./api/client";
 import type { DashboardOverview } from "./types/dashboard";
 
@@ -16,6 +23,13 @@ type Theme = "dark" | "light";
 const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
   dashboard: { title: "Panel de control", subtitle: "Resumen general de seguridad y estado de los endpoints" },
   endpoints: { title: "Endpoints", subtitle: "Equipos protegidos y estado de sus agentes" },
+  alerts: { title: "Alertas", subtitle: "Detecciones generadas por las reglas heurísticas" },
+  incidentes: { title: "Incidentes", subtitle: "Centro de investigación y respuesta" },
+  honeyfiles: { title: "Honeyfiles", subtitle: "Archivos señuelo desplegados y su estado" },
+  reglas: { title: "Reglas heurísticas", subtitle: "Qué detecta el sistema y con qué peso" },
+  respuesta: { title: "Acciones de respuesta", subtitle: "Contención de endpoints ante una amenaza" },
+  reportes: { title: "Reports", subtitle: "Informes de seguridad, endpoints e incidentes" },
+  administracion: { title: "Administración", subtitle: "Usuarios, agentes, configuración y auditoría" },
 };
 
 // No hay tabla de roles->etiqueta en el servidor (ver server/templates/
@@ -31,6 +45,7 @@ export default function App() {
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [userName, setUserName] = useState("Usuario");
   const [roleLabel, setRoleLabel] = useState("Usuario");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -63,6 +78,7 @@ export default function App() {
       .then((me) => {
         setUserName(me.full_name || me.username);
         setRoleLabel(roleLabelFrom(me.roles));
+        setIsAdmin(me.roles.includes("admin"));
       })
       .catch(() => {});
   }, []);
@@ -134,7 +150,25 @@ export default function App() {
           onLoggedOut={() => setNeedsLogin(true)}
         />
 
-        {page === "dashboard" ? <DashboardPage data={data} /> : <EndpointsPage />}
+        {page === "dashboard" ? (
+          <DashboardPage data={data} />
+        ) : page === "endpoints" ? (
+          <EndpointsPage />
+        ) : page === "alerts" ? (
+          <AlertsPage />
+        ) : page === "incidentes" ? (
+          <IncidentesPage />
+        ) : page === "honeyfiles" ? (
+          <HoneyfilesPage />
+        ) : page === "reglas" ? (
+          <RulesPage />
+        ) : page === "respuesta" ? (
+          <RespuestaPage />
+        ) : page === "reportes" ? (
+          <ReportsPage />
+        ) : (
+          <AdministracionPage isAdmin={isAdmin} />
+        )}
       </div>
     </div>
   );

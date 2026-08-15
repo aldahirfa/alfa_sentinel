@@ -1,11 +1,10 @@
 // Réplica del sidebar del mockup real (Panel de control AGETIC/...dc.html):
 // franja de bandera boliviana, logo, nav con badges de conteo real,
-// pie con identidad AGETIC. "Panel de control" y "Endpoints" tienen
-// pantalla real en React (ver App.tsx, navegación interna sin
-// recargar) -- el resto son enlaces reales a las rutas Jinja2
-// existentes (no hay pantallas muertas).
+// pie con identidad AGETIC. Todos los ítems tienen pantalla real en
+// React (ver App.tsx, navegación interna sin recargar) -- la
+// migración progresiva desde Jinja2 terminó acá (2026-08-15).
 
-export type Page = "dashboard" | "endpoints";
+export type Page = "dashboard" | "endpoints" | "alerts" | "incidentes" | "honeyfiles" | "reglas" | "respuesta" | "reportes" | "administracion";
 
 interface Props {
   alertsActive: number;
@@ -23,13 +22,13 @@ const NAV_ITEMS: {
 }[] = [
   { label: "Panel de control", icon: "ph-fill ph-squares-four", page: "dashboard" },
   { label: "Endpoints", icon: "ph ph-desktop-tower", page: "endpoints" },
-  { label: "Alertas", icon: "ph ph-warning", href: "/incidentes", badgeKey: "alerts" },
-  { label: "Incidentes", icon: "ph ph-siren", href: "/incidentes", badgeKey: "incidents" },
-  { label: "Honeyfiles", icon: "ph ph-file-lock", href: "/honeyfiles" },
-  { label: "Reglas heurísticas", icon: "ph ph-list-checks", href: "/configuracion?tab=deteccion" },
-  { label: "Acciones de respuesta", icon: "ph ph-lightning", href: "/incidentes" },
-  { label: "Reports", icon: "ph ph-chart-bar", href: "/reportes" },
-  { label: "Administración", icon: "ph ph-gear", href: "/configuracion" },
+  { label: "Alertas", icon: "ph ph-warning", page: "alerts", badgeKey: "alerts" },
+  { label: "Incidentes", icon: "ph ph-siren", page: "incidentes", badgeKey: "incidents" },
+  { label: "Honeyfiles", icon: "ph ph-file-lock", page: "honeyfiles" },
+  { label: "Reglas heurísticas", icon: "ph ph-list-checks", page: "reglas" },
+  { label: "Acciones de respuesta", icon: "ph ph-lightning", page: "respuesta" },
+  { label: "Reports", icon: "ph ph-chart-bar", page: "reportes" },
+  { label: "Administración", icon: "ph ph-gear", page: "administracion" },
 ];
 
 export default function Sidebar({ alertsActive, incidentsActive, page, onNavigate }: Props) {

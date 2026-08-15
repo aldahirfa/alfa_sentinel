@@ -276,6 +276,34 @@ Dos columnas nuevas, reales, que no existían en ninguna vista de endpoints hast
 
 ---
 
+## Prompt maestro de diseño para el resto de la interfaz React (2026-08-15)
+
+**Referencia viva.** El autor entregó un prompt maestro extenso que rige el diseño de las 7 pantallas que faltan en React (todo lo que no es Panel de Control ni Endpoints, que ya están hechos). Se resume acá para no perder las reglas -- cualquier pantalla nueva debe revisarse contra esto antes de construirse.
+
+**Regla de diseño:** una sola plataforma coherente -- reusar exactamente los tokens, tarjetas, tablas, badges, botones, iconos, drawers, filtros y jerarquía visual ya establecidos en Panel de Control/Endpoints. Consistencia por encima de creatividad. Nada de estética "hacker", neón, ni gráficos decorativos sin propósito.
+
+**Regla de datos (la más importante, ya veníamos siguiéndola):** el `schema.sql` real es la única fuente de verdad. No inventar tablas, columnas ni relaciones. No crear datos ficticios "temporales" para rellenar la interfaz -- si un dato no existe, se omite o se muestra un estado vacío honesto (ej. "Proceso no disponible", "Sin responsable asignado", "Sin activaciones"). Puntos ya confirmados por el autor sobre el estado real del sistema (coinciden con lo que esta sesión ya había encontrado por su cuenta):
+- `agent_rule` existe pero no tiene datos ni código que la use -- no mostrarla como si hubiera configuración por agente.
+- `host_isolations` es estructuralmente real pero el mecanismo de aislamiento es un placeholder -- la UI puede mostrar la estructura/concepto pero no fingir que la acción funciona.
+- `alerts` no tiene relación directa con `events` -- no inventar que una alerta siempre puede mostrar un proceso o archivo concreto.
+- `system_settings` solo tiene `agent_stale_seconds` como parámetro real editable -- no mostrar controles para heartbeat/sincronización de reglas como si fueran configurables.
+- Severidad: `severity_levels` con NORMAL (0-29.99) / SUSPICIOUS (30-59.99) / HIGH (60-79.99) / CRITICAL (80-100) -- son los únicos 4 niveles, mismos colores en toda la app.
+
+**Orden de construcción acordado (2026-08-15), siguiendo el propio flujo del autor (MONITOREAR → DETECTAR → ALERTAR → INVESTIGAR → RESPONDER → CONTENER → RESOLVER):**
+1. Alertas (tabla + drawer, con `alert_rule` para reglas asociadas)
+2. Incidentes (gestión de casos, la pantalla más completa: alertas relacionadas vía `incident_id`, timeline armada solo con datos temporales reales, `host_isolations`)
+3. Honeyfiles (honeyfiles reales + plantillas + asignaciones + activaciones -- explícitamente separados, no confundir plantilla con honeyfile instalado)
+4. Reglas Heurísticas (comprensible, no una consola técnica)
+5. Acciones de Respuesta (centrada en `host_isolations`, automático vs. manual)
+6. Reports (`reports`: SECURITY/ENDPOINTS/INCIDENTS, PDF/XLSX -- sin tipos inventados)
+7. Administración con 4 subsecciones: Usuarios y roles, Agentes, Configuración (solo `agent_stale_seconds`), Registro de actividad (`audit_logs`, dentro de Administración, no como módulo aparte del sidebar)
+
+**Drawers en todos lados donde tenga sentido** (Endpoints, Alertas, Incidentes, Honeyfiles, Acciones), consistente con el patrón ya construido en `EndpointDrawer.tsx` -- mismo comportamiento (overlay sutil, cierre por X/clic afuera/Escape, animación corta, sin navegar a otra página).
+
+**Consistencia entre módulos:** una misma entidad (ej. `PC-CONT-03`, un nivel de severidad, un estado, un usuario) debe verse exactamente igual en cualquier pantalla donde aparezca.
+
+---
+
 ## Módulo de Configuración: 4 pestañas reales (2026-08-12)
 
 **Qué se pidió:** un mockup detallado de 4 pestañas (Detección con sub-pestañas Reglas/Severidades, Agentes, Usuarios y Roles, Auditoría), incluyendo `agent_rule` (excepciones por agente), Severidades editables con "acción automatizada" (aislamiento automático en Crítico), Intervalo de Heartbeat / Tolerancia de Conexión / Sincronización de Reglas como parámetros de Agentes, y una matriz de roles Administrador/Analista SOC.
@@ -293,5 +321,115 @@ Dos columnas nuevas, reales, que no existían en ninguna vista de endpoints hast
 7. **Aislamiento automático en Crítico**: no se construyó -- ver "El agente no tiene canal de comandos remotos" en los hallazgos de investigación arriba. Sigue siendo el mismo pendiente que "Aislar Host" en Dashboard/Endpoints/Incidentes.
 
 **Verificado de punta a punta:** `py_compile` + barrido Jinja sobre todos los templates + `node --check` sobre los scripts de `configuracion.html`/`usuarios.html`/`endpoints.html`/`honeyfiles.html`/`reportes.html`, más una corrida real con Postgres (`pgserver`) y `TestClient`: login, las 5 combinaciones de pestaña/sub-pestaña de `/configuracion`, `PATCH /rules/1`, `PATCH /settings/agent_stale_seconds` (200) y `PATCH /settings/bogus_key` (404, confirma que la whitelist rechaza claves no soportadas), `POST /users`, `PATCH /users/{id}`, desasignar un incidente, cambiar estado de una alerta -- y se confirmó que las 6 acciones esperadas aparecen en `audit_logs` con la descripción correcta.
+
+---
+
+## Pantalla Alertas en React (2026-08-15)
+
+**Primera pantalla construida del orden de 7 acordado en el prompt maestro** (Alertas → Incidentes → Honeyfiles → Reglas Heurísticas → Acciones de Respuesta → Reports → Administración). Sigue el mismo patrón que Endpoints: resumen (5 tarjetas), búsqueda + filtros, tabla, paginación y un drawer lateral -- sin inventar un diseño nuevo.
+
+**Backend, todo reutilizado o extendido, nada duplicado:**
+- `GET /api/alerts` (nuevo, `server/main.py`): lista dedicada de alertas sueltas para React -- a diferencia de `/incidentes` (Jinja2), que unifica incidentes agrupados y alertas sueltas en un `COMBINED_CTE`, acá se listan filas de `alerts` tal cual. Mismas tablas y mismas etiquetas ES (`ALERT_STATUS_LABELS_ES`, `ALERT_SEVERITY_LABELS_ES`, `ALERT_RULE_LABELS_ES`) que el resto del sistema -- no es una fuente de verdad paralela. Devuelve resumen (total/activas/críticas/en investigación/resueltas), lista de reglas disponibles para el filtro como `{value, label}` (el valor crudo de `heuristic_rules.name` viaja aparte de la etiqueta en español, para que el filtro compare contra la columna real), y la página de alertas con paginación.
+- `GET /api/incidentes/alert/{id}/drawer`: no se creó un endpoint nuevo -- se extendió `get_incidente_drawer` (el mismo que ya usa `/incidentes` en Jinja2 para su panel lateral, que ya soportaba `kind="alert"`) con `incident_id`, `resolved_at` y `rules` (todas las filas de `alert_rule` con su peso y fecha, vía join a `heuristic_rules`). Extensión aditiva -- no se quitó ni renombró ningún campo que ya consumía `/incidentes`.
+- Detalle técnico: `DISTINCT ON (alerts.id)` obliga a que el `ORDER BY` de Postgres empiece por `alerts.id`, no por fecha -- se reordena la lista en Python después del fetch (`rows.sort(..., reverse=True)`) para mostrar lo más reciente primero, con un comentario en el código explicando por qué.
+
+**Frontend:** `types/alerts.ts`, `fetchAlerts`/`fetchAlertDrawer` en `api/client.ts`, `AlertsSummaryCards`, `AlertsFilters` (severidad, estado, periodo, tipo de detección), `AlertsTable`, `AlertsPagination`, `AlertDrawer.tsx` (mismo patrón de overlay/panel/animación que `EndpointDrawer.tsx`) y `AlertsPage.tsx`. Estado de la alerta (Nueva/En investigación/Confirmada/Cerrada/Falso positivo) usa una escala de color aparte (`--info`/`--brand`/`--off`, `lib/alertStatus.ts`) -- nunca los 4 colores de severidad, que quedan exclusivos al nivel de riesgo. "Alertas" pasó de enlace real a `/incidentes` a pantalla interna de React en `Sidebar.tsx`/`App.tsx` (`Page = "dashboard" | "endpoints" | "alerts"`); "Incidentes" sigue apuntando a la consola Jinja2 real hasta que se construya esa pantalla.
+
+**Actividad relacionada, honesto:** el drawer muestra el array `timeline` (correlación por ventana de tiempo, ya usada en `/incidentes`) con una aclaración explícita en la propia UI de que es una correlación aproximada, no un vínculo real alerta→evento (no existe esa FK en el schema). Sin incidente agrupado, el drawer dice explícitamente "Esta alerta no forma parte de un incidente agrupado" en vez de ocultar la sección.
+
+**Verificado:** `npx tsc -b --force` sin errores; todos los `.tsx` nuevos transformados sin error de sintaxis a través del dev server de Vite; corrida real end-to-end (`pgserver` + `uvicorn` + `vite`, proxy incluido) con login real y datos reales: resumen `{"total":2,"active":2,"critical":1,"investigating":0,"resolved":0}`, filtro `severity=CRITICAL` devolviendo 1 de 2, y el drawer de la alerta 1 devolviendo `rules` con el peso y fecha reales del `alert_rule` correspondiente.
+
+---
+
+## Pantalla Incidentes en React (2026-08-15)
+
+**Segunda pantalla del orden acordado.** "Incidentes" unifica, igual que `/incidentes` en Jinja2, incidentes ya agrupados (varias alertas relacionadas) y alertas sueltas sin escalar en una sola matriz (`COMBINED_CTE`) -- no se separó en dos listas para React, sería inconsistente con el modelo real.
+
+**Backend, todo reutilizado o extendido, nada duplicado:**
+- `GET /api/incidentes` (nuevo, `server/main.py`): versión JSON de `incidentes_page` -- mismo `COMBINED_CTE`, mismos filtros (estado unificado, severidad, regla, periodo, búsqueda) y mismos KPIs (incidentes críticos, alertas activas, hosts aislados vía `host_isolations` -- hoy siempre 0, de verdad, nada lo escribe todavía -- y MTTR promedio). Devuelve además las listas de opciones (`status_options`, `severity_options`, `rule_options`, `since_options`, `assignable_users`) para que los filtros y el selector de responsable del frontend no dupliquen esos vocabularios.
+- Acciones del drawer -- **ningún endpoint nuevo**, todos ya existían y los usaba `incidentes.html`: `PATCH /incidents/{id}/status`, `PATCH /incidents/{id}/assign`, `PATCH /incidents/{id}/classification`, y `POST /incidents` (escala una alerta suelta a incidente; si la alerta ya tenía incidente, devuelve ese en vez de crear uno duplicado).
+- `GET /api/incidentes/{kind}/{id}/drawer`: sin cambios en esta pasada -- ya soportaba `kind="incident"` desde antes (extendido para `kind="alert"` en la pantalla Alertas).
+- `vite.config.ts`: se agregó `/incidents` (sin la 'e', son las rutas de acción reales del servidor) a la lista de proxy -- si no, las llamadas `PATCH`/`POST` hubieran caído en el fallback de SPA de Vite, mismo bug ya visto tres veces antes con `/me`/`/logout`/`/alerts`. Esta vez se agregó de entrada, antes de necesitar depurarlo.
+
+**Frontend:** `types/incidentes.ts`, `lib/incidentStatus.ts` (traduce `IncidentStatus`/`IncidentClassification`, copia directa de las constantes del servidor -- no hay endpoint que las liste dinámicamente porque son vocabularios fijos del propio código), `fetchIncidentes`/`fetchIncidenteDrawer`/`updateIncidentStatus`/`assignIncident`/`classifyIncident`/`escalateAlertToIncident` en `api/client.ts`, `IncidentesSummaryCards` (4 tarjetas), `IncidentesFilters`, `IncidentesTable` (columna Código con ícono distinto para incidente/alerta suelta), `IncidentesPagination`, `IncidentDrawer.tsx` (generaliza el patrón de `AlertDrawer.tsx` para ambos `kind`) y `IncidentesPage.tsx`. "Incidentes" pasó de enlace real a pantalla interna (`Page = "dashboard" | "endpoints" | "alerts" | "incidentes"`).
+
+**`IncidentDrawer.tsx` es la primera pantalla con acciones editables reales** (no solo lectura): para un incidente agrupado, el estado, el responsable y la clasificación son selects que llaman a los endpoints reales de inmediato y refrescan tanto el propio drawer como la lista de fondo. Para una alerta suelta sin incidente, hay un botón real "Escalar a incidente" (`POST /incidents`). El botón "Aislar endpoint" reusa el mismo patrón honesto ya establecido en `EndpointDrawer.tsx` -- deshabilitado, con el mismo tooltip explicando que el agente no tiene canal de comandos remotos.
+
+**Verificado:** `npx tsc -b --force` sin errores; todos los `.tsx` nuevos transformados sin error de sintaxis vía Vite; corrida real end-to-end con login real: `GET /api/incidentes` devolviendo las 2 alertas sueltas reales; `POST /incidents` escalando una a incidente real (`INC-00001`); la lista recalculándose sola (una fila `kind:"incident"` nueva, la otra alerta se queda suelta); `PATCH status/assign/classification` aplicados en secuencia sobre ese incidente y confirmados releyendo el drawer (`IN_PROGRESS`, responsable `Aldahir Fernandez`, clasificación `Posible amenaza`).
+
+---
+
+## Pantalla Honeyfiles en React (2026-08-15)
+
+**Tercera pantalla del orden acordado.** A diferencia de Alertas/Incidentes, acá casi todo el backend ya existía y ya lo usaba `honeyfiles.html` -- el Wizard de Despliegue de 2 pasos (Parámetros de trampa / Agentes destino) se replicó casi literal desde el HTML real, mismos campos, mismas opciones, mismo texto explicativo, sin inventar un flujo nuevo.
+
+**Backend:**
+- `GET /api/honeyfiles` (nuevo, `server/main.py`): versión JSON de `honeyfiles_page` -- misma consulta, mismos KPIs, mismas listas para el wizard (`available_agents`, `distinct_os`). No pagina, igual que la versión Jinja2 (el inventario real hoy es chico).
+- **Corrección aplicada solo en este endpoint nuevo, documentada acá para que no se pierda:** `honeyfiles_page` (Jinja2) filtraba `status=TRIGGERED` directo contra la columna `honeyfiles.status`, pero esa columna nunca guarda literalmente `'TRIGGERED'` -- solo `ACTIVE`/`INACTIVE`. `TRIGGERED` es un estado calculado en Python (`ACTIVE` + `activations_count > 0`). Eso significa que en la consola Jinja2 real, filtrar por "🔴 Activados / Comprometidos" nunca devuelve nada, aunque sí haya honeyfiles activados -- un bug preexistente, no introducido en esta pasada. En `/api/honeyfiles` el filtro de estado se aplica en Python, después de calcular `TRIGGERED`, así que en React el filtro sí funciona. La plantilla Jinja2 no se tocó (migración progresiva) -- el bug ahí sigue, documentado acá para cuando se migre esa pantalla o se decida parchearla aparte.
+- **Sin endpoints nuevos para el resto:** `GET /api/honeyfiles/{id}/detail` (drawer), `POST /api/honeyfiles/{id}/toggle-status` (activar/desactivar) y `POST /api/honeyfiles/deploy` (crear plantilla + asignar a agentes) ya existían tal cual y ya los usaba `honeyfiles.html` -- se reusaron sin cambios.
+
+**Frontend:** `types/honeyfiles.ts`, `lib/honeyfileStatus.ts` (ACTIVE/INACTIVE/TRIGGERED reusan los extremos de la escala `--ok`/`--off`/`--crit`, mismo patrón ya establecido en `lib/endpointStatus.ts` para ONLINE/OFFLINE/ISOLATED -- un honeyfile activado es, en los hechos, tan grave como una alerta CRÍTICA, aunque no sea un valor de `severity_levels`), `fetchHoneyfiles`/`fetchHoneyfileDetail`/`toggleHoneyfileStatus`/`deployHoneyfile` en `api/client.ts`, `HoneyfilesSummaryCards` (5 tarjetas), `HoneyfilesFilters` (con el botón "Desplegar honeyfile"), `HoneyfilesTable`, `HoneyfileDrawer.tsx` (info del archivo + hash SHA-256 real + historial de activaciones + botón real activar/desactivar) y `DeployHoneyfileWizard.tsx` (modal centrado de 2 pasos, no un drawer lateral -- es un formulario de creación, no el detalle de algo existente). "Honeyfiles" pasó de enlace real a pantalla interna (`Page` ganó `"honeyfiles"`).
+
+**Verificado:** `npx tsc -b --force` sin errores; los 6 `.tsx` nuevos transformados sin error de sintaxis vía Vite; corrida real end-to-end con login real: `GET /api/honeyfiles` con el honeyfile real existente (`Presupuesto.xlsx`, `PC-CONT-03`) y los 3 agentes reales para el wizard; `GET /api/honeyfiles/1/detail` con hash y datos reales; `POST toggle-status` alternando `ACTIVE -> INACTIVE -> ACTIVE` y confirmado con el filtro `status=INACTIVE` encontrándolo en el paso intermedio (prueba de que la corrección del filtro funciona); `POST /api/honeyfiles/deploy` creando una plantilla real asignada a 2 agentes, con `pending_deployments` subiendo de 0 a 2 en el resumen.
+
+---
+
+## Pantalla Reglas Heurísticas en React (2026-08-15)
+
+**Cuarta pantalla del orden acordado.** Antes vivía como una sub-pestaña técnica dentro de Configuración (`/configuracion?tab=deteccion`); ahora es su propia pantalla, pensada para leerse de un vistazo ("comprensible, no una consola técnica", como pide el orden acordado) -- una tarjeta por regla en vez de una tabla densa de parámetros.
+
+**Backend:**
+- `GET /api/rules` (nuevo, `server/main.py`): misma consulta exacta que la sub-pestaña Detección > Reglas de `configuracion_page` (peso, umbral, ventana, tipo de evento, alertas de los últimos 30 días, última activación), envuelta en un resumen (total/activas/inactivas/alertas 30d).
+- Sin endpoint de escritura nuevo: `PATCH /rules/{id}` ya existía y ya lo usaba `configuracion.html`. Se agregó `/rules` a la lista de proxy de Vite (mismo bug que ya se vio con `/me`/`/logout`/`/alerts`/`/incidents` si no se agrega a tiempo).
+- Solo se exponen `weight` e `is_active` como editables en la UI -- son los únicos dos campos que la consola real también deja tocar (el propio código documenta que `threshold`/`window_seconds`, aunque reales y ya consumidos por el agente vía `GET /agent/rule-policy`, se muestran de solo lectura a propósito). Se preservó esa misma decisión de diseño en React, no se inventó edición nueva para campos que la consola real mantiene de solo lectura.
+
+**Frontend:** `types/rules.ts`, `fetchRules`/`updateRule` en `api/client.ts`, `RulesSummaryCards` (4 tarjetas), `RuleCard.tsx` (tarjeta por regla con el peso editable inline con botón "Guardar" que aparece solo si el valor cambió, y un toggle de estado que llama al PATCH de inmediato) y `RulesPage.tsx`. "Reglas heurísticas" pasó de enlace real a `/configuracion?tab=deteccion` a pantalla interna (`Page` ganó `"reglas"`).
+
+**Verificado:** `npx tsc -b --force` sin errores; los 3 `.tsx` nuevos sin error de sintaxis vía Vite; corrida real end-to-end: `GET /api/rules` con las 4 reglas reales (`mass_file_activity`, `honeyfile_access`, `ransomware_extension_rename`, `mass_deletion`) y sus alertas/pesos/umbrales reales; `PATCH /rules/1` cambiando peso a 75 y luego `is_active` a `false`, confirmado releyendo `/api/rules` (resumen `active` bajando de 4 a 3); revertido a los valores originales (peso 30, activa) al terminar la prueba para no dejar la base de prueba en un estado distinto al inicial.
+
+---
+
+## Pantalla Acciones de Respuesta en React (2026-08-15)
+
+**Quinta pantalla del orden acordado, la más chica de las 7.** `/respuesta` en Jinja2 hoy es directamente un `render_placeholder()` -- no hay ninguna funcionalidad real detrás, ni una tabla con datos, nada: solo un mensaje honesto explicando que el aislamiento automático no está implementado (`host_isolations` existe en el schema, pero el agente no tiene canal de comandos remotos, así que nada escribe ahí nunca). Construir esta pantalla en React con botones de "aislar" que no hacen nada real hubiera sido exactamente el tipo de fabricación que este proyecto evita a propósito -- así que en vez de eso, la pantalla muestra lo que sí es real y útil: qué incidentes necesitarían esa contención manual ahora mismo, y el historial real de `host_isolations` (vacío, con la razón explicada en la propia tabla en vez de solo un espacio en blanco).
+
+**Backend:** `GET /api/respuesta` (nuevo, `server/main.py`) -- tres cosas reales: (1) el conteo actual de hosts aislados (siempre 0 hoy, consulta real sobre `host_isolations`), (2) el historial completo de `host_isolations` (join a `endpoints`/`users`, hoy siempre vacío), y (3) los incidentes abiertos de severidad Alta o Crítica -- estos sí existen de verdad y son la razón por la que esta pantalla es útil aunque el aislamiento automático no lo esté. `isolation_type`/`status` de `host_isolations` se devuelven tal cual (sin traducir a español) porque son `VARCHAR` libres sin `CHECK constraint` y, al no haberse usado nunca, no existe ningún vocabulario fijo en el código para traducirlos -- inventar etiquetas para valores que nunca ocurrieron hubiera sido fabricar significado que no existe.
+
+**Frontend:** `types/respuesta.ts`, `fetchRespuesta` en `api/client.ts`, `RespuestaSummaryCards` (3 tarjetas), `CriticalIncidentsTable` (con estado vacío positivo: "No hay incidentes de alta o crítica severidad abiertos ahora mismo" + ícono de escudo, en vez de una tabla vacía sin explicación), `IsolationsHistoryTable` (estado vacío explicando por qué nunca hay filas) y `RespuestaPage.tsx`, que además reproduce el mismo texto honesto del placeholder real de `/respuesta` como banner fijo arriba de todo. "Acciones de respuesta" pasó de enlace placeholder (`/incidentes`, un parche temporal de una pasada anterior) a pantalla interna real (`Page` ganó `"respuesta"`).
+
+**Verificado:** `npx tsc -b --force` sin errores; los 4 `.tsx` nuevos sin error de sintaxis vía Vite; corrida real end-to-end: `GET /api/respuesta` devolviendo `isolated_now: 0` y `isolations: []` (honesto, tal como se esperaba) y **el incidente real creado durante la verificación de la pantalla Incidentes** (`INC-00001`, `PC-RRHH-02`, severidad Alta, en investigación, asignado a Aldahir Fernandez) apareciendo correctamente en `critical_incidents` -- confirma que el filtro de severidad Alta/Crítica sobre incidentes abiertos funciona con datos reales, no solo con la lista vacía.
+
+---
+
+## Pantalla Reports en React (2026-08-15)
+
+**Sexta pantalla del orden acordado.** A diferencia de Acciones de Respuesta, acá todo el backend ya era una funcionalidad completa y real (`/reportes` había dejado de ser un placeholder desde el 12/08) -- generación real de PDF/XLSX con `reportlab`/`openpyxl`, guardado en disco, y descarga del archivo exacto que quedó auditado.
+
+**Backend:**
+- `GET /api/reportes` (nuevo, `server/main.py`): versión JSON de `reportes_page` -- mismo historial, mismos KPIs (total de informes, último generado y por quién), mismas opciones (tipo/período/endpoint).
+- **Sin endpoints nuevos para generar ni descargar:** `POST /reportes/generar` (arma el PDF/XLSX en el momento con datos reales del período elegido y lo inserta en `reports`) y `GET /reportes/{id}/archivo` (sirve el archivo ya guardado en disco, no regenera -- así la copia descargada siempre coincide con la que quedó auditada) ya existían tal cual y ya los usaba `reportes.html`. Se agregó `/reportes` a la lista de proxy de Vite.
+- La descarga en React es un `<a href="/reportes/{id}/archivo">` real (no un `fetch`), igual que en la consola Jinja2 -- así el navegador maneja la descarga del binario (PDF/XLSX) directamente, sin pasarlo por JS.
+
+**Frontend:** `types/reports.ts`, `fetchReportes`/`generateReport` en `api/client.ts`, `ReportsSummaryCards` (2 tarjetas), `GenerateReportForm` (tipo/período/endpoint/formato, sin modal -- es la acción principal de la pantalla, no un detalle secundario), `ReportsHistoryTable` (con el link de descarga real), `ReportsPagination` y `ReportsPage.tsx`. "Reports" pasó de enlace real a `/reportes` a pantalla interna (`Page` ganó `"reportes"`).
+
+**Verificado:** `npx tsc -b --force` sin errores; los 5 `.tsx` nuevos sin error de sintaxis vía Vite; corrida real end-to-end con login real: `GET /api/reportes` con historial vacío inicial; `POST /reportes/generar` generando un Informe de Seguridad General real (`REP-2026-0001`); `GET /api/reportes` mostrando el informe recién creado con los datos correctos (`total_reports: 1`, último generado por Aldahir Fernandez); y la descarga real a través del proxy de Vite devolviendo un PDF válido de verdad (`PDF document, version 1.4, 1 pages`, confirmado con `file`), no solo un 200 vacío.
+
+---
+
+## Pantalla Administración en React -- séptima y última pantalla del orden acordado (2026-08-15)
+
+**Cierra la migración progresiva del prompt maestro.** Cuatro subsecciones dentro de una sola pantalla con tabs internos (estado de React, sin rutas separadas), mapeadas 1:1 a capacidades reales que ya existían repartidas en `/usuarios` y las pestañas `agentes`/`auditoria` de `/configuracion` -- ninguna es nueva, solo se reorganizaron bajo "Administración" como pidió el prompt maestro (Registro de actividad, en particular, deja de ser una pestaña más de Configuración y pasa a vivir ahí, no como módulo aparte del sidebar).
+
+**Backend, 3 endpoints JSON nuevos, todas las escrituras reutilizadas tal cual:**
+- `GET /api/users` -- versión JSON de `/usuarios`, misma consulta exacta. Igual que la página real, cualquier sesión válida puede leerla; el `is_admin` de la respuesta es lo que la UI usa para mostrar u ocultar los botones de crear/editar (el propio servidor sigue siendo la única barrera real -- `POST /users`/`PATCH /users/{id}` exigen rol admin de todas formas, ocultar el botón en el cliente es solo UX, no la validación de seguridad).
+- `GET /api/config/agentes` -- versión JSON de Configuración > Agentes, solo `agent_stale_seconds` (el único parámetro real).
+- `GET /api/audit-logs` -- versión JSON de Configuración > Auditoría, misma consulta paginada sobre `audit_logs`.
+- Sin endpoints de escritura nuevos: `POST /users`, `PATCH /users/{id}`, `PATCH /settings/{key}` y `POST /enrollment-tokens` ya existían tal cual y ya los usaban `usuarios.html`/`configuracion.html`. Se agregaron `/users`, `/settings` y `/enrollment-tokens` a la lista de proxy de Vite.
+
+**Frontend:** `types/admin.ts`, las funciones correspondientes en `api/client.ts`, `AdminTabs` (4 pestañas internas), `UsersPanel` + `UserFormModal` (crear/editar, con el aviso "hoy solo existe el rol `admin`" igual que en `usuarios.html`, y las acciones deshabilitadas de verdad -- no solo visualmente -- para quien no es admin), `AgentsPanel` (generación de token de enrolamiento con el token mostrado una sola vez y botón de copiar), `ConfigPanel` (mismo texto exacto de `configuracion.html` para los dos parámetros no aplicables -- Intervalo de Heartbeat y Sincronización de Reglas -- copiado literal, no resumido, para no perder matices ya documentados), `AuditLogPanel` (paginado) y `AdministracionPage.tsx`. `App.tsx` ahora calcula `isAdmin` desde `fetchMe().roles` (antes solo se usaba para la etiqueta de rol en el topbar) y se lo pasa a esta pantalla.
+
+**Con esta pantalla, las 9 rutas del sidebar tienen todas pantalla real en React** -- la migración progresiva acordada el 2026-08-15 ("Jinja2 puede mantenerse temporalmente para las vistas que ya existen... a medida que avancemos con los demás módulos del sistema, los iremos migrando a React") llegó a su fin para el sidebar principal. Las rutas Jinja2 siguen vivas y se siguen usando como destino de varios links cruzados reales (`/incidentes/{id}`, `/reportes/{id}/archivo`, etc.), pero ya no queda ningún ítem del menú que abra una pantalla Jinja2 completa.
+
+**Verificado:** `npx tsc -b --force` sin errores; los 7 `.tsx`/`.tsx` nuevos (más `App.tsx`/`Sidebar.tsx` modificados) sin error de sintaxis vía Vite; corrida real end-to-end con login real: `GET /api/users` con el usuario real (`aldahir`, admin); `POST /users` creando `analista_test` real; `PATCH /users/2` desactivándolo, confirmado en la relectura; `GET /api/config/agentes` con `120`, `PATCH /settings/agent_stale_seconds` a `180` y confirmado, revertido a `120`; `POST /enrollment-tokens` generando un token real de un solo uso; y `GET /api/audit-logs` devolviendo las **9 entradas reales** acumuladas por todas las acciones de prueba de las 6 pantallas anteriores de esta sesión (crear/editar regla, asignar incidente, cambiar su estado, crear/editar usuario, cambiar el parámetro de agentes) -- la mejor confirmación posible de que `audit_logs` es una fuente de verdad real y consistente en toda la aplicación, no datos de muestra aislados por pantalla.
 
 ---

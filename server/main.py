@@ -3013,6 +3013,159 @@ def honeyfiles_page(
     )
 
 
+@app.get("/api/honeyfiles")
+def api_honeyfiles(
+    agent_id: int | None = Query(None),
+    status: str = Query(""),
+    os_filter: str = Query("", alias="os"),
+    search: str = Query(""),
+    user: dict = Depends(get_current_user)
+):
+    """Versión JSON de /honeyfiles (Jinja2) para la pantalla Honeyfiles
+    en React -- misma consulta, mismos KPIs, mismo Wizard de Despliegue
+    (available_agents). No pagina, igual que honeyfiles.html (el
+    inventario real hoy es chico).
+
+    Nota: 'status' filtra sobre el estado ya calculado (ACTIVE ->
+    TRIGGERED cuando hay activaciones), no directo contra la columna
+    'honeyfiles.status' -- la columna en sí solo guarda ACTIVE/INACTIVE,
+    'TRIGGERED' es un estado derivado en Python. Filtrar antes de
+    calcularlo (como hacía el WHERE SQL de honeyfiles_page) nunca
+    hubiera encontrado nada con status=TRIGGERED; acá se filtra
+    después, sobre el mismo valor que ve el analista."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            where_clauses = []
+            params = {}
+
+            if agent_id:
+                where_clauses.append("honeyfiles.agent_id = %(agent_id)s")
+                params["agent_id"] = agent_id
+            if os_filter:
+                where_clauses.append("endpoints.os ILIKE %(os)s")
+                params["os"] = f"%{os_filter}%"
+            if search:
+                where_clauses.append("(honeyfiles.file_name ILIKE %(search)s OR honeyfiles.file_path ILIKE %(search)s OR endpoints.hostname ILIKE %(search)s)")
+                params["search"] = f"%{search}%"
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            cursor.execute(
+                f"""
+                SELECT honeyfiles.id, honeyfiles.file_name, honeyfiles.file_path,
+                       honeyfiles.file_type, honeyfiles.status, honeyfiles.created_at,
+                       honeyfiles.last_checked_at, agents.id AS agent_id, endpoints.hostname,
+                       endpoints.ip_address, endpoints.os, endpoints.os_version,
+                       agents.agent_version, agents.status AS agent_status,
+                       agents.last_seen_at
+                FROM honeyfiles
+                JOIN agents ON agents.id = honeyfiles.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                {where_sql}
+                ORDER BY honeyfiles.id DESC;
+                """,
+                params
+            )
+            rows = cursor.fetchall()
+
+            cursor.execute("SELECT honeyfile_id, COUNT(*) FROM honeyfile_activations GROUP BY honeyfile_id;")
+            activations_dict = dict(cursor.fetchall())
+
+            cursor.execute("SELECT COUNT(*) FROM honeyfiles;")
+            total_honeyfiles = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM honeyfiles WHERE status = 'ACTIVE';")
+            active_honeyfiles_raw = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(DISTINCT honeyfile_id) FROM honeyfile_activations "
+                "JOIN honeyfiles ON honeyfiles.id = honeyfile_activations.honeyfile_id "
+                "WHERE honeyfiles.status = 'ACTIVE';"
+            )
+            triggered_honeyfiles = cursor.fetchone()[0]
+            active_honeyfiles = active_honeyfiles_raw - triggered_honeyfiles
+
+            cursor.execute("SELECT COUNT(*) FROM agent_honeyfile_templates WHERE status = 'PENDING';")
+            pending_deployments = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM agent_honeyfile_templates WHERE status = 'FAILED';")
+            failed_deployments = cursor.fetchone()[0]
+
+            cursor.execute("SELECT DISTINCT os FROM endpoints ORDER BY os;")
+            distinct_os = [r[0] for r in cursor.fetchall()]
+
+            cursor.execute(
+                """
+                SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
+                       endpoints.ip_address, agents.status, agents.last_seen_at
+                FROM agents
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                ORDER BY agents.status DESC, endpoints.hostname ASC;
+                """
+            )
+            agent_rows = cursor.fetchall()
+            available_agents = [
+                {
+                    "id": r[0],
+                    "hostname": r[1],
+                    "operating_system": r[2],
+                    "os_version": r[3] or "",
+                    "ip_address": str(r[4]) if r[4] else "127.0.0.1",
+                    "status": r[5],
+                    "is_live": (r[5] == "ONLINE" and r[6] is not None and (datetime.now(r[6].tzinfo) - r[6]).total_seconds() < 30) if r[6] else False
+                }
+                for r in agent_rows
+            ]
+    finally:
+        connection.close()
+
+    honeyfiles_list = []
+    for r in rows:
+        hf_id = r[0]
+        act_cnt = activations_dict.get(hf_id, 0)
+        status_val = r[4]
+        if act_cnt > 0 and status_val == "ACTIVE":
+            status_val = "TRIGGERED"
+
+        last_seen = r[14]
+        is_agent_live = (r[13] == "ONLINE" and last_seen is not None and (datetime.now(last_seen.tzinfo) - last_seen).total_seconds() < 30) if last_seen else False
+
+        honeyfiles_list.append({
+            "id": hf_id,
+            "file_name": r[1],
+            "file_path": r[2],
+            "file_type": (r[3] or "FILE").upper(),
+            "status": status_val,
+            "created_at": r[5].strftime("%d/%m/%Y %H:%M:%S") if r[5] else None,
+            "last_checked_at": r[6].strftime("%d/%m/%Y %H:%M:%S") if r[6] else None,
+            "agent_id": r[7],
+            "hostname": r[8],
+            "ip_address": str(r[9]) if r[9] else "127.0.0.1",
+            "operating_system": r[10],
+            "os_version": r[11] or "",
+            "agent_version": r[12] or "v1.0.0",
+            "agent_status": r[13],
+            "is_agent_live": is_agent_live,
+            "activations_count": act_cnt
+        })
+
+    if status:
+        honeyfiles_list = [hf for hf in honeyfiles_list if hf["status"] == status]
+
+    return {
+        "summary": {
+            "total": total_honeyfiles,
+            "active": active_honeyfiles,
+            "triggered": triggered_honeyfiles,
+            "pending_deployments": pending_deployments,
+            "failed_deployments": failed_deployments,
+        },
+        "distinct_os": distinct_os,
+        "available_agents": available_agents,
+        "filtered_total": len(honeyfiles_list),
+        "honeyfiles": honeyfiles_list,
+    }
+
+
 @app.get("/api/honeyfiles/{honeyfile_id}/detail")
 def get_honeyfile_detail_api(honeyfile_id: int, request: Request):
     """API para obtener la información completa del Host Drawer de un Honeyfile."""
@@ -3485,6 +3638,51 @@ def detecciones_page(request: Request):
     sigue existiendo tal cual, sin cambios -- ver deteccion_detail_page."""
 
     return RedirectResponse(url="/incidentes", status_code=302)
+
+
+@app.get("/api/users")
+def api_users(user: dict = Depends(get_current_user)):
+    """Versión JSON de /usuarios (Jinja2) para la subsección Usuarios y
+    Roles de Administración en React -- misma consulta exacta. Igual
+    que la página real, cualquier sesión válida puede leer esta lista
+    (gap ya documentado: solo crear/editar exige rol admin, ver
+    POST /users y PATCH /users/{id})."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT users.id, users.username, users.full_name, users.email,
+                       STRING_AGG(roles.name, ', ' ORDER BY roles.name) AS roles,
+                       users.is_active, users.last_login_at, users.created_at
+                FROM users
+                LEFT JOIN user_roles ON user_roles.user_id = users.id
+                LEFT JOIN roles ON roles.id = user_roles.role_id
+                GROUP BY users.id
+                ORDER BY users.id;
+                """
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    return {
+        "is_admin": "admin" in user.get("roles", []),
+        "users": [
+            {
+                "id": r[0],
+                "username": r[1],
+                "full_name": r[2],
+                "email": r[3],
+                "roles": r[4],
+                "is_active": r[5],
+                "last_login_at": r[6].strftime("%d/%m/%Y %H:%M:%S") if r[6] else None,
+                "created_at": r[7].strftime("%d/%m/%Y %H:%M:%S") if r[7] else None,
+            }
+            for r in rows
+        ],
+    }
 
 
 @app.get("/usuarios")
@@ -4704,6 +4902,79 @@ def assign_incident(
         connection.close()
 
 
+@app.get("/api/rules")
+def api_rules(user: dict = Depends(get_current_user)):
+    """Versión JSON de la sub-pestaña Detección > Reglas de
+    /configuracion (Jinja2) para la pantalla Reglas Heurísticas en
+    React -- misma consulta exacta, mismos 4 campos editables después
+    (ver PATCH /rules/{rule_id})."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    heuristic_rules.id,
+                    heuristic_rules.name,
+                    heuristic_rules.description,
+                    heuristic_rules.weight,
+                    heuristic_rules.threshold,
+                    heuristic_rules.window_seconds,
+                    heuristic_rules.is_active,
+                    heuristic_rules.updated_at,
+                    event_types.name,
+                    (
+                        SELECT COUNT(*)
+                        FROM alert_rule
+                        JOIN alerts ON alerts.id = alert_rule.alert_id
+                        WHERE alert_rule.rule_id = heuristic_rules.id
+                          AND alerts.created_at >= NOW() - INTERVAL '30 days'
+                    ) AS alerts_30d,
+                    (
+                        SELECT MAX(alerts.created_at)
+                        FROM alert_rule
+                        JOIN alerts ON alerts.id = alert_rule.alert_id
+                        WHERE alert_rule.rule_id = heuristic_rules.id
+                    ) AS last_triggered_at
+                FROM heuristic_rules
+                LEFT JOIN event_types ON event_types.id = heuristic_rules.event_type_id
+                ORDER BY heuristic_rules.weight DESC, heuristic_rules.name ASC;
+                """
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    rules = [
+        {
+            "id": r[0],
+            "name": r[1],
+            "label": ALERT_RULE_LABELS_ES.get(r[1], r[1]),
+            "description": r[2],
+            "weight": float(r[3]),
+            "threshold": float(r[4]),
+            "window_seconds": r[5],
+            "is_active": r[6],
+            "updated_at": r[7].strftime("%d/%m/%Y %H:%M:%S") if r[7] else None,
+            "event_type_label": EVENT_TYPE_LABELS_ES.get(r[8], r[8]) if r[8] else "Cualquiera en la ventana",
+            "alerts_30d": r[9],
+            "last_triggered_at": r[10].strftime("%d/%m/%Y %H:%M:%S") if r[10] else None,
+        }
+        for r in rows
+    ]
+
+    return {
+        "summary": {
+            "total": len(rules),
+            "active": sum(1 for r in rules if r["is_active"]),
+            "inactive": sum(1 for r in rules if not r["is_active"]),
+            "alerts_30d_total": sum(r["alerts_30d"] for r in rules),
+        },
+        "rules": rules,
+    }
+
+
 @app.patch("/rules/{rule_id}")
 def update_rule(
     rule_id: int,
@@ -5384,6 +5655,159 @@ def incidentes_page(
     )
 
 
+@app.get("/api/incidentes")
+def api_incidentes(
+    agent_id: int | None = Query(None),
+    status_bucket: str = Query("", alias="status"),
+    severity: str = Query(""),
+    rule: str = Query(""),
+    since: str = Query(""),
+    search: str = Query(""),
+    page: int = Query(1, ge=1),
+    user: dict = Depends(get_current_user)
+):
+    """Versión JSON de /incidentes (Jinja2) para la pantalla Incidentes
+    en React -- misma consulta (COMBINED_CTE), mismos filtros, mismos
+    KPIs. No es una fuente de verdad paralela: se reusa la función de
+    armado de filtros/paginación tal cual la usa incidentes_page."""
+
+    status_bucket = status_bucket if status_bucket in STATUS_BUCKET_LABELS_ES else ""
+    severity = severity if severity in ALERT_SEVERITY_LABELS_ES else ""
+    rule = rule if rule in ALERT_RULE_LABELS_ES else ""
+    since = since if since in INCIDENTES_SINCE_OPTIONS else ""
+
+    where_clauses = []
+    params = {}
+
+    if agent_id:
+        where_clauses.append("agent_id = %(agent_id)s")
+        params["agent_id"] = agent_id
+    if status_bucket:
+        where_clauses.append("status_bucket = %(status_bucket)s")
+        params["status_bucket"] = status_bucket
+    if severity:
+        where_clauses.append("severity = %(severity)s")
+        params["severity"] = severity
+    if rule:
+        where_clauses.append("rule_names ILIKE %(rule)s")
+        params["rule"] = f"%{rule}%"
+    if since:
+        where_clauses.append("ts >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s")
+        params["since_interval"] = INCIDENTES_SINCE_OPTIONS[since][1]
+    if search:
+        where_clauses.append(
+            "(hostname ILIKE %(search)s OR CAST(ip_address AS TEXT) ILIKE %(search)s "
+            "OR rule_names ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
+        )
+        params["search"] = f"%{search}%"
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                COMBINED_CTE + "SELECT COUNT(*) FROM combined WHERE kind = 'incident' AND severity = 'CRITICAL' AND raw_status != 'CLOSED';"
+            )
+            critical_incidents = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM alerts WHERE status IN ('NEW', 'ACKNOWLEDGED');")
+            active_alerts = cursor.fetchone()[0]
+
+            # Ver incidentes_page: 'host_isolations' no lo escribe nada
+            # todavía, así que esto siempre da 0 hoy, de verdad.
+            cursor.execute("SELECT COUNT(*) FROM host_isolations WHERE released_at IS NULL;")
+            isolated_hosts = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))) FROM alerts WHERE resolved_at IS NOT NULL;"
+            )
+            mttr_row = cursor.fetchone()
+            mttr_seconds = mttr_row[0] if mttr_row else None
+            mttr_minutes = round(mttr_seconds / 60, 1) if mttr_seconds is not None else None
+
+            cursor.execute("SELECT id, full_name FROM users ORDER BY full_name;")
+            assignable_users = [{"id": r[0], "full_name": r[1]} for r in cursor.fetchall()]
+
+            count_params = dict(params)
+            cursor.execute(COMBINED_CTE + f"SELECT COUNT(*) FROM combined {where_sql};", count_params)
+            filtered_total = cursor.fetchone()[0]
+
+            total_pages = max(1, -(-filtered_total // INCIDENTES_PAGE_SIZE))
+            current_page = min(page, total_pages)
+            offset = (current_page - 1) * INCIDENTES_PAGE_SIZE
+
+            page_params = dict(params)
+            page_params["limit"] = INCIDENTES_PAGE_SIZE
+            page_params["offset"] = offset
+
+            cursor.execute(
+                COMBINED_CTE + f"""
+                SELECT kind, id, ts, raw_status, status_bucket, hostname, ip_address,
+                       agent_id, severity, risk_score, rule_names, detection_count,
+                       assigned_to, assigned_to_name
+                FROM combined
+                {where_sql}
+                ORDER BY ts DESC
+                LIMIT %(limit)s OFFSET %(offset)s;
+                """,
+                page_params
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    items = []
+    for row in rows:
+        (kind, item_id, ts, raw_status, bucket, hostname, ip_address, item_agent_id,
+         severity_val, risk_score, rule_names, detection_count, assigned_to, assigned_to_name) = row
+
+        items.append({
+            "kind": kind,
+            "id": item_id,
+            "code": f"INC-{item_id:05d}" if kind == "incident" else f"ALT-{item_id:05d}",
+            "created_at": ts.strftime("%d/%m/%Y %H:%M:%S"),
+            "raw_status": raw_status,
+            "status_bucket": bucket,
+            "status_label": (INCIDENT_STATUS_LABELS_ES.get(raw_status, raw_status) if kind == "incident"
+                              else ALERT_STATUS_LABELS_ES.get(raw_status, raw_status)),
+            "hostname": hostname,
+            "ip_address": str(ip_address) if ip_address else "127.0.0.1",
+            "agent_id": item_agent_id,
+            "severity": severity_val,
+            "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity_val, severity_val or "—"),
+            "risk_score": float(risk_score) if risk_score is not None else None,
+            "rule_label": " + ".join(
+                ALERT_RULE_LABELS_ES.get(n, n) for n in (rule_names or "").split(" + ") if n
+            ) or "—",
+            "detection_count": detection_count,
+            "assigned_to": assigned_to,
+            "assigned_to_name": assigned_to_name,
+        })
+
+    return {
+        "summary": {
+            "critical_incidents": critical_incidents,
+            "active_alerts": active_alerts,
+            "isolated_hosts": isolated_hosts,
+            "mttr_minutes": mttr_minutes,
+        },
+        "filters": {
+            "status_options": [{"value": k, "label": v} for k, v in STATUS_BUCKET_LABELS_ES.items()],
+            "severity_options": [{"value": k, "label": v} for k, v in ALERT_SEVERITY_LABELS_ES.items()],
+            "rule_options": [{"value": k, "label": v} for k, v in ALERT_RULE_LABELS_ES.items()],
+            "since_options": [{"value": k, "label": v[0]} for k, v in INCIDENTES_SINCE_OPTIONS.items()],
+            "assignable_users": assignable_users,
+        },
+        "page": current_page,
+        "page_size": INCIDENTES_PAGE_SIZE,
+        "total_pages": total_pages,
+        "filtered_total": filtered_total,
+        "items": items,
+    }
+
+
 @app.get("/api/incidentes/{kind}/{item_id}/drawer")
 def get_incidente_drawer(kind: str, item_id: int, request: Request):
     """Expediente para el panel lateral -- sirve tanto un incidente
@@ -5433,13 +5857,19 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 code = f"INC-{inc_id:05d}"
                 status_label = INCIDENT_STATUS_LABELS_ES.get(status, status)
 
+                # No aplican a un incidente agrupado -- son campos propios
+                # de una alerta suelta (kind == 'alert').
+                incident_id_val = None
+                resolved_at_val = None
+                matched_rules = []
+
             else:
 
                 cursor.execute(
                     """
                     SELECT alerts.id, alerts.title, alerts.description, alerts.status, alerts.created_at,
                            alerts.risk_score, severity_levels.name, heuristic_rules.name,
-                           alerts.agent_id
+                           alerts.agent_id, alerts.incident_id, alerts.resolved_at
                     FROM alerts
                     JOIN severity_levels ON severity_levels.id = alerts.severity_id
                     LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
@@ -5453,7 +5883,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                     return JSONResponse({"error": "Alerta no encontrada"}, status_code=404)
 
                 (alert_id, title_val, description_val, status, anchor_ts, risk_score, severity,
-                 rule_name, agent_id) = row
+                 rule_name, agent_id, incident_id_val, resolved_at_val) = row
 
                 code = f"ALT-{alert_id:05d}"
                 status_label = ALERT_STATUS_LABELS_ES.get(status, status)
@@ -5462,6 +5892,28 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 assigned_to = None
                 assigned_to_name = None
                 detection_count = 1
+
+                # Reglas asociadas (alert_rule) -- puede haber más de una
+                # regla contribuyendo a la misma alerta, por eso es una
+                # consulta aparte (el JOIN de arriba solo trae la primera).
+                cursor.execute(
+                    """
+                    SELECT heuristic_rules.name, alert_rule.weight_applied, alert_rule.matched_at
+                    FROM alert_rule
+                    JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                    WHERE alert_rule.alert_id = %s
+                    ORDER BY alert_rule.matched_at;
+                    """,
+                    (alert_id,)
+                )
+                matched_rules = [
+                    {
+                        "rule_name": ALERT_RULE_LABELS_ES.get(r[0], r[0]),
+                        "weight_applied": float(r[1]),
+                        "matched_at": r[2].strftime("%d/%m/%Y %H:%M:%S"),
+                    }
+                    for r in cursor.fetchall()
+                ]
 
             cursor.execute(
                 """
@@ -5560,7 +6012,149 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
         "agent_id": agent_id,
         "detection_count": detection_count,
         "is_honeyfile": is_honeyfile,
+        "incident_id": incident_id_val,
+        "resolved_at": resolved_at_val.strftime("%d/%m/%Y %H:%M:%S") if resolved_at_val else None,
+        "rules": matched_rules,
         "timeline": timeline
+    }
+
+
+@app.get("/api/alerts")
+def api_alerts(
+    search: str = "",
+    severity: str = Query("", pattern="^(SUSPICIOUS|HIGH|CRITICAL|)$"),
+    status: str = Query("", pattern="^(NEW|ACKNOWLEDGED|ESCALATED|CLOSED|FALSE_POSITIVE|)$"),
+    since: str = Query("", pattern="^(24h|7d|30d|)$"),
+    rule: str = "",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+    user: dict = Depends(get_current_user)
+):
+    """Lista dedicada de alertas para la pantalla Alertas en React --
+    a diferencia de /incidentes (Jinja2), que unifica incidentes
+    agrupados y alertas sueltas en un solo listado (COMBINED_CTE), acá
+    se listan únicamente filas de 'alerts' tal cual, sin agrupar. No
+    es una fuente de verdad paralela: mismas tablas, mismos nombres de
+    estado/severidad que el resto del sistema (ALERT_STATUS_LABELS_ES,
+    ALERT_SEVERITY_LABELS_ES).
+    """
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            where_clauses = []
+            params = {}
+
+            if search:
+                where_clauses.append("(endpoints.hostname ILIKE %(search)s OR alerts.title ILIKE %(search)s)")
+                params["search"] = f"%{search}%"
+            if severity:
+                where_clauses.append("severity_levels.name = %(severity)s")
+                params["severity"] = severity
+            if status:
+                where_clauses.append("alerts.status = %(status)s")
+                params["status"] = status
+            if since:
+                interval = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}[since]
+                where_clauses.append(f"alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'")
+            if rule:
+                where_clauses.append("heuristic_rules.name = %(rule)s")
+                params["rule"] = rule
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            base_from = """
+                FROM alerts
+                JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                JOIN agents ON agents.id = alerts.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
+                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+            """
+
+            # Resumen -- sin filtrar, para las 5 tarjetas de arriba.
+            cursor.execute(
+                f"""
+                SELECT
+                    COUNT(DISTINCT alerts.id) AS total_n,
+                    COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS active_n,
+                    COUNT(DISTINCT alerts.id) FILTER (WHERE severity_levels.name = 'CRITICAL' AND alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS critical_n,
+                    COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS investigating_n,
+                    COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status IN ('CLOSED', 'FALSE_POSITIVE')) AS resolved_n
+                {base_from};
+                """
+            )
+            total_n, active_n, critical_n, investigating_n, resolved_n = cursor.fetchone()
+
+            cursor.execute("SELECT DISTINCT name FROM heuristic_rules ORDER BY name;")
+            rule_names = [r[0] for r in cursor.fetchall()]
+
+            cursor.execute(
+                f"SELECT COUNT(DISTINCT alerts.id) {base_from} {where_sql};",
+                params
+            )
+            filtered_total = cursor.fetchone()[0]
+
+            total_pages = max(1, -(-filtered_total // page_size))
+            current_page = min(page, total_pages)
+            offset = (current_page - 1) * page_size
+
+            page_params = dict(params)
+            page_params["limit"] = page_size
+            page_params["offset"] = offset
+
+            cursor.execute(
+                f"""
+                SELECT DISTINCT ON (alerts.id)
+                    alerts.id, severity_levels.name, alerts.title, endpoints.hostname,
+                    alerts.risk_score, alerts.status, alerts.created_at, alerts.incident_id,
+                    heuristic_rules.name, alerts.agent_id
+                {base_from}
+                {where_sql}
+                ORDER BY alerts.id, alerts.created_at DESC
+                LIMIT %(limit)s OFFSET %(offset)s;
+                """,
+                page_params
+            )
+            rows = cursor.fetchall()
+
+            # DISTINCT ON reordena por alerts.id -- se reordena acá por
+            # fecha descendente, que es el orden real que ve el usuario.
+            rows.sort(key=lambda r: r[6], reverse=True)
+    finally:
+        connection.close()
+
+    alerts = [
+        {
+            "id": r[0],
+            "severity": r[1],
+            "severity_label": ALERT_SEVERITY_LABELS_ES.get(r[1], r[1]),
+            "title": r[2],
+            "hostname": r[3],
+            "risk_score": float(r[4]),
+            "status": r[5],
+            "status_label": ALERT_STATUS_LABELS_ES.get(r[5], r[5]),
+            "created_at": r[6].strftime("%d/%m/%Y %H:%M:%S"),
+            "incident_id": r[7],
+            "rule_name": ALERT_RULE_LABELS_ES.get(r[8], r[8]) if r[8] else None,
+            "agent_id": r[9],
+        }
+        for r in rows
+    ]
+
+    return {
+        "summary": {
+            "total": total_n,
+            "active": active_n,
+            "critical": critical_n,
+            "investigating": investigating_n,
+            "resolved": resolved_n,
+        },
+        "rules": [{"value": n, "label": ALERT_RULE_LABELS_ES.get(n, n)} for n in rule_names],
+        "page": current_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "filtered_total": filtered_total,
+        "alerts": alerts,
     }
 
 
@@ -6042,6 +6636,118 @@ def procesos_page(request: Request):
         "archivos. Falta correlacionar cada evento con el proceso responsable (vía Visor de "
         "Eventos de Windows o auditd en Linux) antes de que esta vista pueda mostrar algo real."
     )
+
+
+@app.get("/api/respuesta")
+def api_respuesta(user: dict = Depends(get_current_user)):
+    """Versión JSON de /respuesta (Jinja2, hoy un placeholder honesto)
+    para la pantalla Acciones de Respuesta en React. No hay respuesta
+    automática implementada -- el agente no tiene canal de comandos
+    remotos (agent/main.py es de una sola pasada, sin bucle ni forma de
+    recibir órdenes) -- así que esta pantalla no simula un botón de
+    aislamiento que funcione. Lo que sí es real:
+
+    1. El estado de 'host_isolations' (hoy siempre vacía -- ningún
+       endpoint del servidor escribe ahí todavía, ver schema.sql).
+    2. Los incidentes críticos abiertos ahora mismo, que son los que
+       de verdad requerirían contención manual fuera de la consola.
+    """
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED') AND released_at IS NULL;"
+            )
+            isolated_now = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM host_isolations;")
+            total_isolations = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT host_isolations.id, host_isolations.isolation_type, host_isolations.status,
+                       host_isolations.reason, host_isolations.requested_at, host_isolations.executed_at,
+                       host_isolations.released_at, host_isolations.result,
+                       endpoints.hostname, users.full_name, host_isolations.incident_id
+                FROM host_isolations
+                JOIN agents ON agents.id = host_isolations.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                LEFT JOIN users ON users.id = host_isolations.requested_by
+                ORDER BY host_isolations.requested_at DESC
+                LIMIT 50;
+                """
+            )
+            isolation_rows = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT incidents.id, incidents.title, incidents.status, incidents.opened_at,
+                       endpoints.hostname, incidents.assigned_to, assigned_user.full_name,
+                       (
+                           SELECT severity_levels.name FROM alerts
+                           JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                           WHERE alerts.incident_id = incidents.id
+                           ORDER BY CASE severity_levels.name WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'SUSPICIOUS' THEN 2 ELSE 1 END DESC
+                           LIMIT 1
+                       ) AS severity
+                FROM incidents
+                JOIN agents ON agents.id = incidents.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                LEFT JOIN users AS assigned_user ON assigned_user.id = incidents.assigned_to
+                WHERE incidents.status != 'CLOSED'
+                ORDER BY incidents.opened_at DESC;
+                """
+            )
+            incident_rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    critical_incidents = [
+        {
+            "id": r[0],
+            "code": f"INC-{r[0]:05d}",
+            "title": r[1],
+            "status": r[2],
+            "status_label": INCIDENT_STATUS_LABELS_ES.get(r[2], r[2]),
+            "opened_at": r[3].strftime("%d/%m/%Y %H:%M:%S") if r[3] else None,
+            "hostname": r[4],
+            "assigned_to": r[5],
+            "assigned_to_name": r[6],
+            "severity": r[7],
+            "severity_label": ALERT_SEVERITY_LABELS_ES.get(r[7], r[7] or "—"),
+        }
+        for r in incident_rows
+        if r[7] in ("HIGH", "CRITICAL")
+    ]
+
+    isolations = [
+        {
+            "id": r[0],
+            "isolation_type": r[1],
+            "status": r[2],
+            "reason": r[3],
+            "requested_at": r[4].strftime("%d/%m/%Y %H:%M:%S") if r[4] else None,
+            "executed_at": r[5].strftime("%d/%m/%Y %H:%M:%S") if r[5] else None,
+            "released_at": r[6].strftime("%d/%m/%Y %H:%M:%S") if r[6] else None,
+            "result": r[7],
+            "hostname": r[8],
+            "requested_by_name": r[9],
+            "incident_id": r[10],
+        }
+        for r in isolation_rows
+    ]
+
+    return {
+        "summary": {
+            "isolated_now": isolated_now,
+            "total_isolations": total_isolations,
+            "critical_incidents_open": len(critical_incidents),
+        },
+        "critical_incidents": critical_incidents,
+        "isolations": isolations,
+    }
 
 
 @app.get("/respuesta")
@@ -6695,6 +7401,87 @@ def generar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_us
     }
 
 
+@app.get("/api/reportes")
+def api_reportes(page: int = Query(1, ge=1), user: dict = Depends(get_current_user)):
+    """Versión JSON de /reportes (Jinja2) para la pantalla Reports en
+    React -- misma consulta exacta sobre 'reports'. La generación
+    (POST /reportes/generar) y la descarga (GET /reportes/{id}/archivo)
+    no se duplican acá -- se llaman tal cual desde React, mismos
+    endpoints reales que ya usa reportes.html."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM reports;")
+            total_reports = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT reports.created_at, users.full_name
+                FROM reports
+                LEFT JOIN users ON users.id = reports.generated_by
+                ORDER BY reports.created_at DESC
+                LIMIT 1;
+                """
+            )
+            last_row = cursor.fetchone()
+            last_generated_at, last_generated_by = last_row if last_row else (None, None)
+
+            cursor.execute("SELECT id, hostname FROM endpoints ORDER BY hostname;")
+            endpoint_options = [{"id": r[0], "hostname": r[1]} for r in cursor.fetchall()]
+
+            page_size = 20
+            total_pages = max(1, -(-total_reports // page_size))
+            current_page = min(page, total_pages)
+            offset = (current_page - 1) * page_size
+
+            cursor.execute(
+                """
+                SELECT reports.id, reports.title, reports.report_type, reports.format,
+                       reports.period_label, reports.created_at, endpoints.hostname,
+                       users.full_name
+                FROM reports
+                LEFT JOIN endpoints ON endpoints.id = reports.endpoint_id
+                LEFT JOIN users ON users.id = reports.generated_by
+                ORDER BY reports.created_at DESC
+                LIMIT %s OFFSET %s;
+                """,
+                (page_size, offset)
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    history = [
+        {
+            "id": r[0],
+            "code": f"REP-{r[5].year}-{r[0]:04d}",
+            "title": r[1],
+            "report_type": r[2],
+            "report_type_label": REPORT_TYPE_LABELS_ES.get(r[2], r[2]),
+            "format": r[3],
+            "period_label": r[4],
+            "created_at": r[5].strftime("%d/%m/%Y %H:%M"),
+            "endpoint": r[6] or "Todos los endpoints",
+            "generated_by": r[7] or "Usuario eliminado",
+        }
+        for r in rows
+    ]
+
+    return {
+        "total_reports": total_reports,
+        "last_generated_at": last_generated_at.strftime("%d/%m/%Y %H:%M") if last_generated_at else None,
+        "last_generated_by": last_generated_by,
+        "endpoint_options": endpoint_options,
+        "report_type_options": [{"value": k, "label": v} for k, v in REPORT_TYPE_LABELS_ES.items()],
+        "period_options": [{"value": k, "label": v} for k, v in REPORT_PERIOD_OPTIONS],
+        "history": history,
+        "page": current_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
+
 @app.get("/reportes")
 def reportes_page(request: Request, page: int = Query(1, ge=1)):
     """Reemplaza el placeholder anterior (2026-08-12): página real de
@@ -6852,6 +7639,82 @@ AUDIT_ACTION_LABELS_ES = {
 }
 
 CONFIGURACION_AUDIT_PAGE_SIZE = 30
+
+
+@app.get("/api/config/agentes")
+def api_config_agentes(user: dict = Depends(get_current_user)):
+    """Versión JSON de Configuración > Agentes (Jinja2) para la
+    subsección Configuración de Administración en React. Solo
+    'agent_stale_seconds' es un parámetro real editable (ver
+    PATCH /settings/{key}, whitelist KNOWN_SETTINGS) -- heartbeat e
+    intervalo de sincronización de reglas no son parámetros
+    configurables porque no existe ningún mecanismo que los consuma
+    (el agente es un script de una sola pasada, sin bucle)."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            agent_stale_seconds = get_agent_stale_seconds(cursor)
+    finally:
+        connection.close()
+
+    return {"agent_stale_seconds": agent_stale_seconds}
+
+
+@app.get("/api/audit-logs")
+def api_audit_logs(page: int = Query(1, ge=1), user: dict = Depends(get_current_user)):
+    """Versión JSON de Configuración > Auditoría (Jinja2) para la
+    subsección Registro de actividad de Administración en React --
+    misma consulta exacta sobre 'audit_logs', poblada desde 2026-08-12
+    por log_audit() en los puntos reales donde se llama (ver
+    AUDIT_ACTION_LABELS_ES para la lista completa de acciones que de
+    verdad quedan registradas)."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM audit_logs;")
+            audit_total = cursor.fetchone()[0]
+
+            total_pages = max(1, -(-audit_total // CONFIGURACION_AUDIT_PAGE_SIZE))
+            current_page = min(page, total_pages)
+            offset = (current_page - 1) * CONFIGURACION_AUDIT_PAGE_SIZE
+
+            cursor.execute(
+                """
+                SELECT audit_logs.created_at, users.full_name, audit_logs.action,
+                       audit_logs.entity_type, audit_logs.entity_id, audit_logs.description
+                FROM audit_logs
+                LEFT JOIN users ON users.id = audit_logs.user_id
+                ORDER BY audit_logs.created_at DESC
+                LIMIT %s OFFSET %s;
+                """,
+                (CONFIGURACION_AUDIT_PAGE_SIZE, offset)
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    entries = [
+        {
+            "created_at": r[0].strftime("%d/%m/%Y %H:%M:%S") if r[0] else None,
+            "user_name": r[1] or "Usuario eliminado",
+            "action": r[2],
+            "action_label": AUDIT_ACTION_LABELS_ES.get(r[2], r[2]),
+            "entity_type": r[3],
+            "entity_id": r[4],
+            "description": r[5],
+        }
+        for r in rows
+    ]
+
+    return {
+        "entries": entries,
+        "total": audit_total,
+        "page": current_page,
+        "page_size": CONFIGURACION_AUDIT_PAGE_SIZE,
+        "total_pages": total_pages,
+    }
 
 
 @app.get("/configuracion")
