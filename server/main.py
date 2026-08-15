@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Header, Request, Depends, Query
 from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -41,6 +42,24 @@ app = FastAPI()
 SESSION_SECRET = os.getenv("SESSION_SECRET", "cambia-esto-en-produccion")
 
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+
+# CORS solo para el nuevo frontend React (Vite corre en otro puerto,
+# distinto origen aunque sea el mismo host). allow_credentials=True es
+# necesario porque la sesión viaja como cookie -- sin esto, el navegador
+# no la manda entre orígenes distintos. La lista es explícita (no "*")
+# porque allow_credentials=True no funciona junto con un wildcard.
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["*"],
+)
 
 templates = Jinja2Templates(directory="templates")
 
@@ -1712,6 +1731,8 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+            stale_seconds = get_agent_stale_seconds(cursor)
+
             cursor.execute(
                 """
                 SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
@@ -1726,6 +1747,34 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             row = cursor.fetchone()
             if not row:
                 return JSONResponse({"error": "Endpoint no encontrado"}, status_code=404)
+
+            # Mismo cálculo que _endpoint_cte()/api_endpoints() (lista de
+            # Endpoints en React) -- Healthy/Warning/Offline según el
+            # último heartbeat contra el umbral configurado. No es un
+            # dato nuevo, es la misma fórmula real aplicada acá para
+            # que el drawer y la lista digan lo mismo.
+            if row[6] != "ONLINE":
+                agent_health = "OFFLINE"
+            elif row[7] and (datetime.now(row[7].tzinfo) - row[7]).total_seconds() <= stale_seconds:
+                agent_health = "HEALTHY"
+            else:
+                agent_health = "WARNING"
+
+            # Alertas activas e incidentes asociados a este endpoint --
+            # mismas tablas/columnas que ya usa el resto del sistema
+            # (alerts.status='NEW', incidents.status!='CLOSED'), sin
+            # estructuras nuevas.
+            cursor.execute(
+                "SELECT COUNT(*) FROM alerts WHERE agent_id = %s AND status = 'NEW';",
+                (agent_id,)
+            )
+            alerts_active = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE status != 'CLOSED') FROM incidents WHERE agent_id = %s;",
+                (agent_id,)
+            )
+            incidents_total, incidents_active = cursor.fetchone()
 
             # Nivel de riesgo
             cursor.execute(
@@ -1765,7 +1814,7 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
 
             cursor.execute(
                 """
-                SELECT file_path FROM events
+                SELECT file_path, detected_at FROM events
                 WHERE agent_id = %s AND (file_path ILIKE '%%honeyfile%%' OR file_path ILIKE '%%!0_%%')
                 ORDER BY id DESC LIMIT 1;
                 """,
@@ -1773,6 +1822,7 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             )
             violated_evt = cursor.fetchone()
             violated_file = violated_evt[0] if violated_evt else None
+            violated_at = violated_evt[1] if violated_evt else None
 
             # Último evento/alerta. 'alerts' ya no tiene 'file_path' ni
             # 'rule_name' como columnas propias (nunca las tuvo en
@@ -1812,14 +1862,20 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
                 "mac_address": None,
                 "agent_version": row[5] or "v1.0.0 (watchdog)",
                 "status": row[6],
+                "agent_health": agent_health,
                 "last_seen_at": row[7].strftime("%d/%m/%Y %H:%M:%S") if row[7] else "Nunca",
+                "last_seen_ago": time_ago(row[7]),
                 "enrolled_at": row[8].strftime("%d/%m/%Y") if row[8] else "",
                 "risk_bucket": risk_bucket,
                 "risk_score": risk_scores.get(risk_bucket, 0),
                 "risk_label": RISK_LABELS_ES.get(risk_bucket, "Normal"),
                 "is_isolated": is_isolated,
+                "alerts_active": alerts_active,
+                "incidents_total": incidents_total,
+                "incidents_active": incidents_active,
                 "honeyfiles_total": honeyfiles_total,
                 "honeyfiles_violated_file": violated_file,
+                "honeyfiles_violated_ago": time_ago(violated_at) if violated_at else None,
                 "latest_alert": latest_alert
             }
     finally:
@@ -3689,6 +3745,629 @@ def dashboard_live(user: dict = Depends(get_current_user)):
         "updated_at": datetime.now().strftime("%H:%M"),
         "recent_alerts": recent_alerts,
         "activity_feed": activity_feed
+    }
+
+
+# ============================================================
+# API JSON para el nuevo frontend React del Panel de Control
+# (2026-08-14). Devuelve exactamente los mismos datos reales que ya
+# calcula dashboard_page()/dashboard_live() para las plantillas
+# Jinja2 -- mismas consultas, mismo criterio de "abierto"/"en línea"
+# -- solo que como JSON en vez de HTML. No es una fuente de verdad
+# paralela: si mañana cambia una regla de negocio acá (por ejemplo,
+# qué cuenta como "endpoint en riesgo"), hay que replicar el cambio
+# en dashboard_page() y viceversa, porque hoy son dos caminos de
+# código separados que llegan a las mismas cifras.
+# ============================================================
+
+RISK_COLOR_HEX = {
+    "NORMAL": "#16a34a",
+    "SUSPICIOUS": "#ca8a04",
+    "HIGH": "#ea580c",
+    "CRITICAL": "#dc2626",
+}
+
+
+@app.get("/api/dashboard/overview")
+def api_dashboard_overview(user: dict = Depends(get_current_user)):
+    """Snapshot completo para el Panel de Control en React. Pensado
+    para pedirse en el primer render y volver a pedirse entero cada
+    tantos segundos (polling, igual que /dashboard/live) -- no hay
+    websockets ni push real desde el agente."""
+
+    try:
+        connection = get_connection()
+    except Exception:
+        return {"db_ok": False}
+
+    try:
+        with connection.cursor() as cursor:
+
+            # --- KPIs de endpoints ---
+            cursor.execute("SELECT COUNT(*) FROM agents;")
+            endpoints_total = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM agents WHERE status = 'ONLINE';")
+            endpoints_online = cursor.fetchone()[0]
+
+            # 'Aislados': ver el mismo comentario que dashboard_page --
+            # ningún endpoint escribe en host_isolations todavía, así
+            # que esto es 0 hoy. Es el dato real, no un placeholder:
+            # cuando el módulo de aislamiento exista, esta misma
+            # consulta ya lo va a reflejar sin tocar nada acá.
+            cursor.execute(
+                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE released_at IS NULL;"
+            )
+            endpoints_isolated = cursor.fetchone()[0]
+
+            endpoints_offline = max(endpoints_total - endpoints_online - endpoints_isolated, 0)
+
+            # --- Alertas activas + tendencia vs. periodo anterior (24h) ---
+            cursor.execute("SELECT COUNT(*) FROM alerts WHERE status = 'NEW';")
+            alerts_active = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM alerts WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';"
+            )
+            alerts_last_24h = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM alerts
+                WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '48 hours'
+                  AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours';
+                """
+            )
+            alerts_prev_24h = cursor.fetchone()[0]
+
+            alerts_trend_pct = (
+                round(((alerts_last_24h - alerts_prev_24h) / alerts_prev_24h) * 100, 1)
+                if alerts_prev_24h > 0 else None
+            )
+
+            # --- Incidentes activos ---
+            cursor.execute("SELECT COUNT(*) FROM incidents WHERE status = 'OPEN';")
+            incidents_active = cursor.fetchone()[0]
+
+            # --- Honeyfiles activados hoy (vía alerts+alert_rule, el
+            # mismo camino real que usa dashboard_page -- la tabla
+            # honeyfile_activations existe pero nada la escribe
+            # todavía, ver PENDIENTES.md) ---
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM alerts
+                JOIN alert_rule ON alert_rule.alert_id = alerts.id
+                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                WHERE heuristic_rules.name = 'honeyfile_access'
+                  AND alerts.created_at >= date_trunc('day', CURRENT_TIMESTAMP);
+                """
+            )
+            honeyfiles_activated_today = cursor.fetchone()[0]
+
+            # --- Distribución de riesgo por endpoint (mismo criterio
+            # que dashboard_page: peor severidad entre sus alertas
+            # abiertas; 'normal' = sin ninguna alerta abierta) ---
+            cursor.execute(
+                """
+                SELECT severity_levels.name, COUNT(DISTINCT alerts.agent_id)
+                FROM alerts
+                JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                WHERE alerts.status = 'NEW'
+                GROUP BY severity_levels.name;
+                """
+            )
+            severity_rows = dict(cursor.fetchall())
+            critical_n = severity_rows.get("CRITICAL", 0)
+            high_n = severity_rows.get("HIGH", 0)
+            suspicious_n = severity_rows.get("SUSPICIOUS", 0)
+
+            cursor.execute("SELECT COUNT(DISTINCT agent_id) FROM alerts WHERE status = 'NEW';")
+            agents_with_open_alerts = cursor.fetchone()[0]
+            normal_n = max(endpoints_total - agents_with_open_alerts, 0)
+
+            risk_distribution = [
+                {"level": "NORMAL", "label": "Normal", "count": normal_n, "color": RISK_COLOR_HEX["NORMAL"]},
+                {"level": "SUSPICIOUS", "label": "Sospechoso", "count": suspicious_n, "color": RISK_COLOR_HEX["SUSPICIOUS"]},
+                {"level": "HIGH", "label": "Alto", "count": high_n, "color": RISK_COLOR_HEX["HIGH"]},
+                {"level": "CRITICAL", "label": "Crítico", "count": critical_n, "color": RISK_COLOR_HEX["CRITICAL"]},
+            ]
+
+            # --- Endpoints que requieren atención ---
+            cursor.execute(
+                """
+                SELECT endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at,
+                       MAX(
+                           CASE severity_levels.name
+                               WHEN 'CRITICAL' THEN 4
+                               WHEN 'HIGH' THEN 3
+                               WHEN 'SUSPICIOUS' THEN 2
+                               ELSE 1
+                           END
+                       ) AS risk_rank,
+                       COUNT(*) AS alert_count
+                FROM alerts
+                JOIN agents ON agents.id = alerts.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                WHERE alerts.status = 'NEW'
+                GROUP BY endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at
+                ORDER BY risk_rank DESC, alert_count DESC
+                LIMIT 5;
+                """
+            )
+            rank_labels = {4: "CRITICAL", 3: "HIGH", 2: "SUSPICIOUS", 1: "NORMAL"}
+            endpoints_at_risk = [
+                {
+                    "hostname": r[0],
+                    "os": r[1],
+                    "status": r[2],
+                    "last_seen_ago": time_ago(r[3]),
+                    "severity": rank_labels[r[4]],
+                    "alerts_count": r[5],
+                }
+                for r in cursor.fetchall()
+            ]
+
+            # --- Alertas recientes. 'process' va explícitamente null:
+            # 'alerts' no tiene columna de proceso -- el agente no
+            # correla eventos con el proceso responsable todavía (ver
+            # PENDIENTES.md, "Atribución de proceso"). No se inventa. ---
+            cursor.execute(
+                """
+                SELECT alerts.id, severity_levels.name, alerts.title,
+                       endpoints.hostname, alerts.created_at, alerts.status
+                FROM alerts
+                JOIN agents ON agents.id = alerts.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                ORDER BY alerts.created_at DESC
+                LIMIT 6;
+                """
+            )
+            recent_alerts = [
+                {
+                    "id": r[0],
+                    "severity": r[1],
+                    "title": r[2],
+                    "hostname": r[3],
+                    "process": None,
+                    "time": r[4].strftime("%H:%M"),
+                    "status": ALERT_STATUS_LABELS_ES.get(r[5], r[5]),
+                }
+                for r in cursor.fetchall()
+            ]
+
+            # --- Honeyfiles: resumen + últimas activaciones. El
+            # nombre de archivo puntual no está disponible todavía: la
+            # alerta de honeyfile_access no incluye qué archivo fue
+            # (el agente no lo manda en el payload hoy), así que
+            # 'file_name' va null en vez de inventado -- ver
+            # PENDIENTES.md.
+            cursor.execute("SELECT COUNT(*) FROM honeyfiles WHERE status = 'ACTIVE';")
+            honeyfiles_active_total = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT endpoints.hostname, alerts.created_at
+                FROM alerts
+                JOIN alert_rule ON alert_rule.alert_id = alerts.id
+                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                JOIN agents ON agents.id = alerts.agent_id
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                WHERE heuristic_rules.name = 'honeyfile_access'
+                ORDER BY alerts.created_at DESC
+                LIMIT 5;
+                """
+            )
+            honeyfile_recent = [
+                {"hostname": r[0], "time": r[1].strftime("%H:%M"), "file_name": None}
+                for r in cursor.fetchall()
+            ]
+
+            # --- Estado de endpoints (online/offline/aislados) + salud
+            # de agentes, mismo criterio de conectividad que el resto
+            # de la consola (agents.status, no heartbeat exacto). ---
+            agent_health_pct = (
+                round((endpoints_online / endpoints_total) * 100, 1)
+                if endpoints_total > 0 else 100.0
+            )
+
+            # --- Principales tipos de detección (vectores) ---
+            cursor.execute(
+                """
+                SELECT heuristic_rules.name, COUNT(*) AS n
+                FROM alerts
+                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
+                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                WHERE heuristic_rules.name IS NOT NULL
+                GROUP BY heuristic_rules.name
+                ORDER BY n DESC;
+                """
+            )
+            top_detections = [
+                {"rule_name": r[0], "rule_label": ALERT_RULE_LABELS_ES.get(r[0], r[0]), "count": r[1]}
+                for r in cursor.fetchall()
+            ]
+
+            # --- Actividad reciente (feed unificado: alertas + eventos
+            # crudos). Solo tipos reales -- no se agregan entradas como
+            # "endpoint aislado" porque nada en el sistema genera eso
+            # todavía. ---
+            cursor.execute(
+                """
+                (
+                    SELECT 'alert' AS kind, severity_levels.name AS sev,
+                           alerts.title AS label, endpoints.hostname AS hostname,
+                           alerts.created_at AS ts
+                    FROM alerts
+                    JOIN agents ON agents.id = alerts.agent_id
+                    JOIN endpoints ON endpoints.id = agents.endpoint_id
+                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                    ORDER BY alerts.created_at DESC
+                    LIMIT 10
+                )
+                UNION ALL
+                (
+                    SELECT 'honeyfile_created' AS kind, NULL AS sev,
+                           honeyfiles.file_name AS label, endpoints.hostname AS hostname,
+                           honeyfiles.created_at AS ts
+                    FROM honeyfiles
+                    JOIN agents ON agents.id = honeyfiles.agent_id
+                    JOIN endpoints ON endpoints.id = agents.endpoint_id
+                    ORDER BY honeyfiles.created_at DESC
+                    LIMIT 5
+                )
+                UNION ALL
+                (
+                    SELECT 'endpoint_registered' AS kind, NULL AS sev,
+                           endpoints.hostname AS label, endpoints.hostname AS hostname,
+                           agents.enrolled_at AS ts
+                    FROM agents
+                    JOIN endpoints ON endpoints.id = agents.endpoint_id
+                    ORDER BY agents.enrolled_at DESC
+                    LIMIT 5
+                )
+                ORDER BY ts DESC
+                LIMIT 10;
+                """
+            )
+            RECENT_ACTIVITY_LABELS = {
+                "alert": "Nueva alerta",
+                "honeyfile_created": "Honeyfile creado",
+                "endpoint_registered": "Endpoint registrado",
+            }
+            recent_activity = [
+                {
+                    "kind": r[0],
+                    "severity": r[1],
+                    "type_label": RECENT_ACTIVITY_LABELS.get(r[0], r[0]),
+                    "label": r[2],
+                    "hostname": r[3],
+                    "time": r[4].strftime("%H:%M"),
+                    "ago": time_ago(r[4]),
+                }
+                for r in cursor.fetchall()
+            ]
+
+            # --- Estado del sistema. 'api_ok'/'db_ok' son ciertos por
+            # haber llegado hasta acá sin excepción. 'detection_engine_ok'
+            # es un proxy real (hay al menos una regla activa), no una
+            # métrica de salud del proceso del agente en sí -- eso no
+            # se puede ver desde el servidor. ---
+            cursor.execute("SELECT COUNT(*) FROM heuristic_rules WHERE is_active = TRUE;")
+            active_rules_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT MAX(last_seen_at) FROM agents;")
+            last_sync = cursor.fetchone()[0]
+
+    finally:
+        connection.close()
+
+    return {
+        "db_ok": True,
+        "generated_at": datetime.now().strftime("%H:%M:%S"),
+        "summary": {
+            "endpoints_total": endpoints_total,
+            "endpoints_online": endpoints_online,
+            "endpoints_offline": endpoints_offline,
+            "endpoints_isolated": endpoints_isolated,
+            "alerts_active": alerts_active,
+            "alerts_trend_pct": alerts_trend_pct,
+            "incidents_active": incidents_active,
+            "honeyfiles_activated_today": honeyfiles_activated_today,
+        },
+        "risk_distribution": risk_distribution,
+        "endpoints_at_risk": endpoints_at_risk,
+        "recent_alerts": recent_alerts,
+        "honeyfile_activity": {
+            "active_total": honeyfiles_active_total,
+            "activated_today": honeyfiles_activated_today,
+            "recent": honeyfile_recent,
+        },
+        "endpoint_status": {
+            "online": endpoints_online,
+            "offline": endpoints_offline,
+            "isolated": endpoints_isolated,
+            "agent_health_pct": agent_health_pct,
+        },
+        "top_detections": top_detections,
+        "recent_activity": recent_activity,
+        "system_status": {
+            "api_ok": True,
+            "db_ok": True,
+            "agents_comm_ok": endpoints_online > 0,
+            "detection_engine_ok": active_rules_count > 0,
+            "agents_connected": endpoints_online,
+            "agents_total": endpoints_total,
+            "last_sync_ago": time_ago(last_sync),
+        },
+    }
+
+
+@app.get("/api/dashboard/activity-series")
+def api_dashboard_activity_series(
+    period: str = Query("24h", pattern="^(24h|7d|30d)$"),
+    user: dict = Depends(get_current_user)
+):
+    """Serie de tiempo para el gráfico grande de 'Actividad de
+    seguridad'. Cuatro series, todas de tablas reales: alertas
+    (alerts.created_at), actividad de archivos en general
+    (events.detected_at -- volumen crudo, no solo lo sospechoso),
+    incidentes abiertos (incidents.opened_at) y activaciones de
+    honeyfile (mismo camino vía alert_rule que el resto del
+    dashboard). 24h se agrupa por hora, 7d/30d por día.
+
+    Nota: el parámetro se llama 'period', no 'range' -- 'range' tapa
+    la función builtin de Python del mismo nombre, que se usa más
+    abajo para armar los buckets (bug real, encontrado al probar esto
+    contra Postgres de verdad)."""
+
+    if period == "24h":
+        interval, trunc_unit, bucket_count, fmt = "24 hours", "hour", 24, "%H:00"
+    elif period == "7d":
+        interval, trunc_unit, bucket_count, fmt = "7 days", "day", 7, "%d/%m"
+    else:
+        interval, trunc_unit, bucket_count, fmt = "30 days", "day", 30, "%d/%m"
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                f"""
+                SELECT date_trunc('{trunc_unit}', created_at) AS bucket, COUNT(*)
+                FROM alerts
+                WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'
+                GROUP BY bucket;
+                """
+            )
+            alerts_by_bucket = dict(cursor.fetchall())
+
+            cursor.execute(
+                f"""
+                SELECT date_trunc('{trunc_unit}', detected_at) AS bucket, COUNT(*)
+                FROM events
+                WHERE detected_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'
+                GROUP BY bucket;
+                """
+            )
+            activity_by_bucket = dict(cursor.fetchall())
+
+            cursor.execute(
+                f"""
+                SELECT date_trunc('{trunc_unit}', opened_at) AS bucket, COUNT(*)
+                FROM incidents
+                WHERE opened_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'
+                GROUP BY bucket;
+                """
+            )
+            incidents_by_bucket = dict(cursor.fetchall())
+
+            cursor.execute(
+                f"""
+                SELECT date_trunc('{trunc_unit}', alerts.created_at) AS bucket, COUNT(*)
+                FROM alerts
+                JOIN alert_rule ON alert_rule.alert_id = alerts.id
+                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                WHERE heuristic_rules.name = 'honeyfile_access'
+                  AND alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'
+                GROUP BY bucket;
+                """
+            )
+            honeyfiles_by_bucket = dict(cursor.fetchall())
+
+    finally:
+        connection.close()
+
+    now = datetime.now()
+    if trunc_unit == "hour":
+        now_bucket = now.replace(minute=0, second=0, microsecond=0)
+        step = timedelta(hours=1)
+    else:
+        now_bucket = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        step = timedelta(days=1)
+
+    def _lookup(bucket_dict, ts):
+        for key, value in bucket_dict.items():
+            key_naive = key.replace(tzinfo=None) if key.tzinfo else key
+            if key_naive == ts:
+                return value
+        return 0
+
+    points = []
+    for i in range(bucket_count - 1, -1, -1):
+        ts = now_bucket - (step * i)
+        points.append({
+            "bucket": ts.strftime(fmt),
+            "alerts": _lookup(alerts_by_bucket, ts),
+            "activity": _lookup(activity_by_bucket, ts),
+            "incidents": _lookup(incidents_by_bucket, ts),
+            "honeyfiles": _lookup(honeyfiles_by_bucket, ts),
+        })
+
+    return {"range": period, "points": points}
+
+
+@app.get("/api/endpoints")
+def api_endpoints(
+    search: str = "",
+    status: str = Query("", pattern="^(ONLINE|OFFLINE|ISOLATED|)$"),
+    risk: str = Query("", pattern="^(NORMAL|SUSPICIOUS|HIGH|CRITICAL|)$"),
+    os_family: str = "",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    user: dict = Depends(get_current_user)
+):
+    """Lista de endpoints para la pantalla Endpoints en React. Mismas
+    tablas y el mismo _endpoint_cte() que ya usa /endpoints (Jinja2) --
+    no es una fuente de verdad paralela, cualquier cambio de regla de
+    negocio ahí hay que replicarlo acá.
+
+    Diferencia real a propósito: acá "Estado" tiene un solo valor de
+    cara al usuario (ONLINE/OFFLINE/ISOLATED, con ISOLATED con
+    prioridad sobre el estado de conexión crudo), en vez de las tres
+    categorías ok/attention/offline de /endpoints -- así se pidió esta
+    pantalla. El estado de conexión más fino (Healthy/Warning/Offline)
+    se conserva aparte como "agent_health", derivado de status_bucket
+    (ok->HEALTHY, attention->WARNING, offline->OFFLINE). Riesgo sigue
+    siendo un eje aparte (Normal/Sospechoso/Alto/Crítico) -- nunca se
+    mezcla con conectividad, igual que en el resto del sistema.
+    """
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            stale_seconds = get_agent_stale_seconds(cursor)
+
+            cte = _endpoint_cte(stale_seconds) + """
+            , endpoint_full AS (
+                SELECT
+                    endpoint_data.*,
+                    EXISTS (
+                        SELECT 1 FROM host_isolations hi
+                        WHERE hi.agent_id = endpoint_data.id
+                          AND hi.status IN ('REQUESTED', 'EXECUTED')
+                          AND hi.released_at IS NULL
+                    ) AS is_isolated,
+                    (
+                        SELECT COUNT(*) FROM alerts a
+                        WHERE a.agent_id = endpoint_data.id AND a.status = 'NEW'
+                    ) AS alerts_count,
+                    (
+                        SELECT MAX(e.detected_at) FROM events e
+                        WHERE e.agent_id = endpoint_data.id
+                    ) AS last_activity
+                FROM endpoint_data
+            ),
+            endpoint_view AS (
+                SELECT
+                    id, hostname, operating_system, os_version, ip_address,
+                    status, last_seen_at, status_bucket, risk_bucket,
+                    is_isolated, alerts_count, last_activity,
+                    CASE
+                        WHEN is_isolated THEN 'ISOLATED'
+                        WHEN status = 'ONLINE' THEN 'ONLINE'
+                        ELSE 'OFFLINE'
+                    END AS conn_status
+                FROM endpoint_full
+            )
+            """
+
+            # Resumen -- sin filtrar, para las 5 tarjetas de arriba.
+            cursor.execute(
+                cte + """
+                SELECT
+                    COUNT(*) AS total_n,
+                    COUNT(*) FILTER (WHERE conn_status = 'ONLINE') AS online_n,
+                    COUNT(*) FILTER (WHERE conn_status = 'OFFLINE') AS offline_n,
+                    COUNT(*) FILTER (WHERE conn_status = 'ISOLATED') AS isolated_n,
+                    COUNT(*) FILTER (WHERE risk_bucket = 'CRITICAL') AS critical_n
+                FROM endpoint_view;
+                """
+            )
+            total_n, online_n, offline_n, isolated_n, critical_n = cursor.fetchone()
+
+            cursor.execute("SELECT DISTINCT os FROM endpoints ORDER BY os;")
+            os_families = sorted({row[0].split(" ")[0] for row in cursor.fetchall() if row[0]})
+
+            where_clauses = []
+            params = {}
+            if search:
+                where_clauses.append("(hostname ILIKE %(search)s OR host(ip_address) ILIKE %(search)s)")
+                params["search"] = f"%{search}%"
+            if status:
+                where_clauses.append("conn_status = %(status)s")
+                params["status"] = status
+            if risk:
+                where_clauses.append("risk_bucket = %(risk)s")
+                params["risk"] = risk
+            if os_family:
+                where_clauses.append("operating_system ILIKE %(os_family)s")
+                params["os_family"] = f"{os_family}%"
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            cursor.execute(cte + f"SELECT COUNT(*) FROM endpoint_view {where_sql};", params)
+            filtered_total = cursor.fetchone()[0]
+
+            total_pages = max(1, -(-filtered_total // page_size))
+            current_page = min(page, total_pages)
+            offset = (current_page - 1) * page_size
+
+            page_params = dict(params)
+            page_params["limit"] = page_size
+            page_params["offset"] = offset
+
+            cursor.execute(
+                cte + f"""
+                SELECT id, hostname, operating_system, os_version, ip_address,
+                       conn_status, risk_bucket, status_bucket, last_seen_at,
+                       alerts_count, last_activity
+                FROM endpoint_view
+                {where_sql}
+                ORDER BY id DESC
+                LIMIT %(limit)s OFFSET %(offset)s;
+                """,
+                page_params
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    agent_health_map = {"ok": "HEALTHY", "attention": "WARNING", "offline": "OFFLINE"}
+
+    endpoints = [
+        {
+            "id": r[0],
+            "hostname": r[1],
+            "operating_system": r[2],
+            "os_version": r[3],
+            "ip_address": str(r[4]) if r[4] else "127.0.0.1",
+            "conn_status": r[5],
+            "risk": r[6],
+            "risk_label": RISK_LABELS_ES[r[6]],
+            "agent_health": agent_health_map[r[7]],
+            "last_seen_ago": time_ago(r[8]),
+            "alerts_count": r[9],
+            "last_activity_ago": time_ago(r[10]) if r[10] else None,
+        }
+        for r in rows
+    ]
+
+    return {
+        "summary": {
+            "total": total_n,
+            "online": online_n,
+            "offline": offline_n,
+            "isolated": isolated_n,
+            "critical": critical_n,
+        },
+        "os_families": os_families,
+        "page": current_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "filtered_total": filtered_total,
+        "endpoints": endpoints,
     }
 
 

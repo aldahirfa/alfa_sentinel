@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="es" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ALFA_SENTINEL · Panel de Control</title>
+
+    <!--
+      Tailwind vía CDN (Play), no vía plugin de Vite/PostCSS.
+
+      Motivo: el entorno de este sandbox tiene un directorio corrupto
+      en node_modules (node_modules/clsx) que bloquea CUALQUIER
+      instalación nueva de paquete npm (falla con ENOTEMPTY al
+      intentar renombrarlo), lo que impidió instalar @tailwindcss/vite
+      o @tailwindcss/postcss. El resto de las dependencias (React,
+      TypeScript, lucide-react, recharts) sí se instalaron bien.
+
+      En una máquina real sin este problema, reemplazar esto por:
+        npm install -D @tailwindcss/vite
+        // vite.config.ts: agregar tailwindcss() a plugins[]
+        // src/index.css: @import "tailwindcss";
+      Las clases usadas en los componentes no cambian.
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!--
+      Iconos Phosphor vía CDN, igual que el mockup real
+      (Panel de control AGETIC/...dc.html) que se está portando acá.
+      Se usan como clases <i class="ph ph-xxx"> / <i class="ph-fill ph-xxx">,
+      sin paquete npm -- mismo criterio que Tailwind CDN (ver más abajo),
+      y coincide exactamente con cómo el mockup original ya las cargaba.
+    -->
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css" />
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              base: {
+                950: "#0b0f19",
+                900: "#0f1420",
+                850: "#131926",
+                800: "#171f2e",
+                700: "#232c3d",
+                600: "#333f54",
+              },
+            },
+            // Mismas animaciones que server/templates/login.html
+            // (.pulse-line, .radar .pulse) -- se portan acá para que
+            // el login de React se vea igual, no una reinterpretación.
+            keyframes: {
+              travel: {
+                "0%": { strokeDashoffset: "226", opacity: "0" },
+                "8%": { opacity: "1" },
+                "50%": { opacity: "1" },
+                "60%": { opacity: "0" },
+                "100%": { strokeDashoffset: "0", opacity: "0" },
+              },
+              pulseRing: {
+                "0%": { transform: "scale(0.35)", opacity: "0.9" },
+                "80%": { transform: "scale(1.05)", opacity: "0" },
+                "100%": { transform: "scale(1.05)", opacity: "0" },
+              },
+            },
+            animation: {
+              travel: "travel 4.5s linear infinite",
+              "pulse-ring": "pulseRing 3.2s ease-out infinite",
+            },
+          },
+        },
+      };
+    </script>
+  </head>
+  <body class="bg-base-950 text-slate-200 antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

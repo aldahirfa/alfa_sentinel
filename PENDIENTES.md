@@ -170,6 +170,112 @@ Registro de trabajo identificado pero diferido a propósito, para no perderlo. C
 
 ---
 
+## Panel de Control en React (frontend/, 2026-08-15)
+
+**Qué se construyó:** un segundo frontend, aparte del Flask/Jinja2 existente, solo para el Panel de Control (Dashboard) -- React + TypeScript + Tailwind + Recharts + lucide-react, con datos 100% reales de PostgreSQL (nunca mock), vía dos endpoints JSON nuevos en `server/main.py`:
+
+- `GET /api/dashboard/overview`: snapshot completo (KPIs, distribución de riesgo, endpoints en riesgo, alertas recientes, honeyfiles, estado de endpoints, top detecciones, actividad reciente, estado del sistema). Mismas consultas y mismos criterios de negocio que ya usa `dashboard_page()`/`dashboard/live` para las plantillas Jinja2 -- son dos caminos de código separados que llegan a las mismas cifras, no una fuente de verdad paralela. Si se cambia una regla de negocio en uno, hay que replicarla en el otro.
+- `GET /api/dashboard/activity-series?period=24h|7d|30d`: la serie de tiempo del gráfico grande, 4 series reales (alertas, actividad de archivos, incidentes, honeyfiles), agrupadas por hora (24h) o por día (7d/30d).
+
+**Decisiones de "no fabricar" aplicadas acá:**
+- `endpoints_isolated` sale de `host_isolations` -- hoy siempre 0, porque nada escribe ahí todavía (el módulo de aislamiento automático es el próximo a construir, a pedido explícito del autor). La tarjeta "Endpoints Aislados" del Panel de Control está lista para mostrar un número real en cuanto ese módulo exista, sin tocar el frontend.
+- `recent_alerts[].process` siempre es `null` -- `alerts` no tiene columna de proceso (ver "Atribución de proceso en eventos de archivo", más arriba). La tabla del dashboard muestra "—" en vez de inventar un nombre de proceso.
+- `honeyfile_activity.recent[].file_name` siempre es `null` -- la alerta de `honeyfile_access` no incluye qué archivo fue (el agente no manda el `file_path` en el payload de la alerta, solo en el evento crudo). El panel muestra "archivo no identificado" en vez de inventar un nombre. Camino para resolverlo: agregar `file_path` al payload de `send_alert()` cuando la regla es `honeyfile_access` (agent/file_monitor.py) y resolverlo del lado del servidor contra `honeyfiles.file_path` del mismo agente -- no se hizo todavía, queda pendiente.
+- "Actividad de seguridad" (gráfico grande) usa `events.detected_at` como proxy real de "actividad sospechosa" -- es el volumen crudo de archivos, no una clasificación de "sospechoso" separada que no existe.
+
+**Bug real encontrado y corregido:** el parámetro de rango del segundo endpoint se llamaba `range`, igual que la función builtin de Python `range()` -- la sombreaba dentro de la misma función, y el armado de los buckets de tiempo (`for i in range(...)`) rompía con `TypeError: 'str' object is not callable`. Se renombró a `period` (parámetro interno y de la URL).
+
+**Arquitectura del proyecto nuevo:** `frontend/` (Vite + React + TypeScript), corre en `:5173` en desarrollo. `vite.config.ts` tiene un proxy de `/api` y `/login` hacia `:8000` (el servidor real), para que la cookie de sesión viaje same-origin sin depender de configuración de `SameSite` en el navegador. Del lado del servidor se agregó `CORSMiddleware` (`allow_credentials=True`, orígenes explícitos vía `CORS_ORIGINS`) como respaldo, por si se sirve el frontend sin el proxy de Vite en algún momento.
+
+**Limitación del entorno de este sandbox (no del código):** un directorio corrupto en `node_modules` bloquea cualquier instalación nueva de paquete npm (`ENOTEMPTY` al renombrar `node_modules/clsx`). Esto impidió instalar `@tailwindcss/vite` (la integración recomendada de Tailwind v4 con Vite) -- se usa en su lugar el CDN de Tailwind Play (`index.html`), que da las mismas clases utilitarias sin necesitar el paquete. En una máquina sin este problema, migrar a la integración real de Vite es directo (`npm install -D @tailwindcss/vite`, agregarlo a `plugins` en `vite.config.ts`) sin tocar ningún componente.
+
+**Fuera del alcance pedido, pero necesario para que la app funcione sola:** una pantalla de login (`LoginGate.tsx`) -- sin ella no hay forma de autenticar la sesión que exigen los endpoints `/api/dashboard/*`. Ver entrada siguiente: se rehizo para que sea una réplica fiel de `login.html`, no queda como placeholder básico.
+
+**Verificado de punta a punta (2026-08-15):** `npm run build` sin errores de TypeScript; prueba real con `pgserver` + `uvicorn` + el dev server de Vite corriendo juntos: login a través del proxy, `GET /api/dashboard/overview` y `/api/dashboard/activity-series` con cookie real (200, datos reales), sin cookie (401), contraseña incorrecta (401).
+
+---
+
+## Login del Panel de Control como réplica fiel del real (2026-08-15)
+
+**Qué se hizo:** `LoginGate.tsx` (la pantalla de login del `frontend/` en React, ver entrada anterior) dejó de ser un formulario mínimo genérico y pasó a ser una réplica fiel de `server/templates/login.html` -- mismos dos paneles (panel izquierdo con gradiente navy/índigo, diagrama de red SVG con las mismas coordenadas, animación de radar/pulso, logo real; panel derecho con la tarjeta de login blanca, mismo texto, mismos campos con íconos, mismo toggle de "¿Olvidaste tu contraseña?"), mismo logo real (`/static/logo-icon.png`, servido por el backend, no duplicado como archivo en `frontend/`) y mismo flujo de `POST /login`. No es una reinterpretación -- se leyó `login.html` completo y se tradujo su estructura/CSS a componentes React + clases Tailwind.
+
+**Cambios de soporte:**
+- `vite.config.ts`: se agregó `/static` al proxy hacia `:8000`, para que el logo real se sirva a través del dev server de React igual que `/api` y `/login`.
+- `index.html`: se agregaron las animaciones `travel` y `pulse-ring` al `tailwind.config` inline (vía CDN), portadas literalmente de los `@keyframes` de `login.html`.
+
+**Limitación real del entorno encontrada y resuelta (no es un problema del código):** la carpeta del proyecto (`detection_ransomware/`) vive en una carpeta de Windows montada dentro del sandbox de Linux. Ese tipo de montaje entre sistemas operativos no tolera bien el patrón de Vite para invalidar su caché de dependencias (borra y reescribe `node_modules/.vite/deps/_metadata.json` cada vez que cambia `vite.config.ts`) -- cualquier archivo dentro de esa caché queda bloqueado con `EPERM: operation not permitted` al intentar reescribirlo, sin importar el nombre de la carpeta de caché. Esto solo bloqueaba **levantar el servidor de desarrollo de Vite dentro de este sandbox** para poder probar en vivo -- no afecta el código entregado ni debería reproducirse en una máquina real (Windows puro, sin este montaje cruzado).
+
+**Cómo se verificó igual, de punta a punta (2026-08-15):** se copió `frontend/` a una carpeta nativa de Linux dentro del sandbox (fuera del montaje de Windows, solo para esta prueba), se reinstalaron los paquetes ahí (`npm install`, sin errores, algo que tampoco es posible de forma confiable directamente en la carpeta montada) y se corrió el flujo real completo: `pgserver` + `uvicorn` + el dev server de Vite juntos. Resultado: el logo real se sirve a través del proxy (`GET /static/logo-icon.png` → 200, PNG real de 100744 bytes, idéntico al archivo real en `server/static/`), el login funciona con un usuario real de la base (`POST /login` → 200, cookie de sesión), y con esa cookie `GET /api/dashboard/overview` responde 200 con datos reales. Los archivos entregados en `frontend/` (en la carpeta real del proyecto) no se tocaron para esta prueba -- la copia era solo para evitar la restricción del montaje al probar.
+
+---
+
+## Reskin del Panel de Control al diseño "Nocturne" + identidad AGETIC (2026-08-15)
+
+**Qué pasó:** el autor recibió un mockup completo del mismo Panel de Control (`Panel de control AGETIC/ALFA_SENTINEL Panel de Control.dc.html`), hecho con un sistema de diseño llamado "Nocturne": tema oscuro con toggle a claro, iconos Phosphor, franja con los colores de la bandera boliviana en el sidebar, pie "AGETIC · Estado Plurinacional de Bolivia", gráficos SVG a mano (curvas suaves y anillo de dona) en vez de una librería de gráficos. A pedido explícito ("quiero que lo copies tal cual"), se reconstruyeron todos los componentes del Panel de Control de React con ese diseño exacto -- mismos datos reales de antes, look nuevo.
+
+**Cambios de fondo, no solo visuales:**
+- Los tokens de color (`--bg`, `--surf`, `--ok/--warn/--high/--crit`, etc.) se copiaron literalmente del mockup a `src/index.css`, con bloques `[data-theme="dark"]` / `[data-theme="light"]`. Los 4 colores de severidad siguen siendo exclusivos de Normal/Sospechoso/Alto/Crítico -- se mantiene la convención de todo el proyecto.
+- `recharts` se sacó de `package.json` -- ya no se usa. `ActivityChart.tsx` y `RiskDonut.tsx` ahora son SVG a mano, con la misma lógica de interpolación Catmull-Rom que traía el mockup (portada de su `chart()`/`tip()` a un componente React), alimentada con los datos reales de `/api/dashboard/activity-series`, no con la data de ejemplo fija del mockup.
+- `lucide-react` se reemplazó por iconos Phosphor vía CDN (`<link>` en `index.html`, clases `<i class="ph ph-xxx">`) en todos los componentes del dashboard -- igual que el mockup original ya los cargaba, sin paquete npm nuevo. `LoginGate.tsx` sigue usando `lucide-react` (no es parte de este rediseño, sigue siendo réplica de `login.html`).
+- Toggle de tema claro/oscuro real (`App.tsx`, estado + `localStorage`), no estaba antes.
+- El nombre de usuario del topbar ahora sale de `GET /me` (endpoint que ya existía en el servidor, no se creó nada nuevo) en vez de un texto fijo "Analista".
+
+**Convención nueva de dato de prueba (a pedido explícito, reemplaza el "—" / "archivo no identificado" anterior):** donde el backend no tiene manera de conseguir un dato real todavía (no es un cero real, es un hueco estructural -- ver "Atribución de proceso en eventos de archivo" y "Panel de Control en React" más arriba), se muestra un valor obviamente de prueba: **99** para números faltantes, **"aquí va el dato"** para texto faltante (`src/lib/placeholder.ts`). Aplica hoy a `recent_alerts[].process`, `honeyfile_activity.recent[].file_name` y `summary.alerts_trend_pct` (cuando no hay datos de las 24h previas). No aplica a valores que son honestamente cero (ej. `endpoints_isolated`).
+
+**Bug real encontrado y corregido:** `vite.config.ts` no tenía `/me` en el proxy hacia `:8000` -- el pedido caía en el fallback de SPA de Vite y devolvía el `index.html` en vez de JSON (probado en vivo, `GET /me` devolvía 200 con HTML). Se agregó `/me` junto a `/api`, `/login` y `/static`.
+
+**Identidad AGETIC en el sidebar:** franja de bandera boliviana y el pie "AGETIC · Estado Plurinacional de Bolivia" son elementos de marca fijos (igual que el mockup), no datos del sistema -- no hay nada que verificar contra la base ahí.
+
+**Verificado de punta a punta (2026-08-15):** `tsc -b --force` sin errores; prueba real con `pgserver` + `uvicorn` + Vite juntos (desde una copia en disco nativo de Linux, mismo motivo que la entrada anterior -- el montaje de Windows no tolera la caché de dependencias de Vite): login real (200), `GET /me` con nombre real de usuario a través del proxy (200, `{"username":"aldahir","full_name":"Aldahir Fernandez",...}`), logo real a través del proxy (200, PNG real), `GET /api/dashboard/overview` con datos reales y los huecos esperados en `null` (200).
+
+---
+
+## Campana, menú de usuario, logo real + pantalla Endpoints en React (2026-08-15)
+
+**Arreglos sobre el reskin anterior (a pedido explícito, cosas que quedaron a medias):**
+- **Campana de notificaciones:** no hacía nada al hacer clic. Ahora `NotificationsBell.tsx` abre un dropdown real con las alertas `NEW` (`GET /alerts/open`, endpoint que ya existía en el servidor, pensado justo para esto -- no se creó nada nuevo). Se cierra al hacer clic afuera (`useClickOutside.ts`).
+- **Rol del usuario:** decía "Analista de seguridad" fijo. Ahora sale de `GET /me` → `roles` (real, de la sesión). Importante: **no existe ninguna tabla de traducción rol→español en el servidor** (confirmado en `server/templates/usuarios.html`: "Hoy solo existe el rol admin... no se muestra una matriz de roles con permisos") -- se capitaliza el valor real tal cual (`admin` → `Admin`), no se inventó una etiqueta.
+- **Menú de usuario:** el botón no desplegaba nada. Ahora `UserMenu.tsx` abre un dropdown real con "Mi perfil" (→ `/perfil`, página Jinja2 real) y "Cerrar sesión" (`POST /logout`, endpoint real que ya existía -- limpia la sesión de verdad, verificado en vivo: después de logout, `GET /me` pasa a devolver 401).
+- **Logo:** el sidebar tenía un ícono genérico de escudo (Phosphor) en vez del logo real. Ahora usa `/static/logo-icon.png` (el mismo archivo real que ya usa `login.html` y `LoginGate.tsx`, vía el proxy existente).
+
+**Cambios de soporte:** `vite.config.ts` sumó `/logout` y `/alerts` al proxy (antes solo tenía `/api`, `/login`, `/me`, `/static` -- sin esto, esos pedidos también hubieran caído en el fallback de SPA de Vite, el mismo bug que ya se había encontrado con `/me`).
+
+**Pantalla nueva: Endpoints (React).** Segunda pantalla real del panel (antes solo existía el Dashboard) -- navegación interna sin recargar la página (`App.tsx` ahora tiene un estado `page: "dashboard" | "endpoints"`, `Sidebar.tsx` cambia sus dos primeros ítems de `<a href>` reales a botones que cambian ese estado; el resto de los ítems del menú siguen siendo enlaces reales a Jinja2, sin cambios). Mismo sistema de diseño exacto del Panel de Control -- ningún token, componente base ni patrón visual nuevo, a pedido explícito ("no rediseñes el sistema visual").
+
+**Backend nuevo:** `GET /api/endpoints` (`server/main.py`), con paginación y filtros (`search`, `status`, `risk`, `os_family`). Reutiliza `_endpoint_cte()`, la misma función que ya usa `/endpoints` (Jinja2) -- no es una fuente de verdad paralela. Diferencia real a propósito: esta pantalla pidió un solo valor de "Estado" (Online/Offline/Aislado, con Aislado con prioridad sobre el estado de conexión crudo), mientras que `/endpoints` (Jinja2) usa tres categorías de conectividad más finas (ok/attention/offline) sin conjunto "aislado" propio. Se conservó esa distinción más fina aparte, como "Agente" (Healthy/Warning/Offline, derivado 1:1 de `status_bucket`). Riesgo (Normal/Sospechoso/Alto/Crítico) sigue siendo un eje totalmente aparte, igual que en el resto del sistema -- nunca se mezcla con conectividad.
+
+Dos columnas nuevas, reales, que no existían en ninguna vista de endpoints hasta ahora:
+- **Alertas:** cuenta de alertas `NEW` por agente (subquery real contra `alerts`).
+- **Última actividad:** `MAX(events.detected_at)` por agente (real, de la tabla `events` ya poblada por el agente). Cuando un endpoint no tiene ningún evento registrado todavía, se muestra "Sin actividad registrada" -- esto es honesto (`NULL` genuino porque no pasó nada, no un hueco estructural), así que **no** usa la convención de placeholder "99"/"aquí va el dato".
+
+**Bug real encontrado y corregido:** ninguno nuevo en el backend (probado en vivo con filtros reales antes de tocar el frontend). El único bug de esta sesión fue el de proxy (`/logout`, `/alerts`) mencionado arriba.
+
+**Verificado de punta a punta (2026-08-15):** `tsc -b --force` sin errores; con `pgserver` + `uvicorn` + Vite corriendo juntos (misma copia en disco nativo de Linux por el mismo motivo de siempre): login (200), `GET /alerts/open` a través del proxy con alertas reales, `GET /api/endpoints` a través del proxy con filtros (`search`, paginación) devolviendo datos reales, `POST /logout` a través del proxy invalidando la sesión de verdad (confirmado con `GET /me` → 401 después).
+
+---
+
+## Drawer de detalles de endpoint en React (2026-08-15)
+
+**Qué se pidió:** al hacer clic en "Detalles" de un endpoint (pantalla Endpoints, React), abrir un panel lateral desde la derecha sin salir de la página, usando exclusivamente información real ya disponible -- nada de tablas nuevas, columnas nuevas ni datos ficticios.
+
+**Investigación previa (antes de construir nada):** ya existía `GET /api/endpoints/{agent_id}/drawer` en `server/main.py`, construido para el mismo propósito y **ya en uso hoy** por `server/templates/endpoints.html` (Jinja2) -- no es un endpoint nuevo, es el mismo que ya alimenta el drawer de la consola vieja. Se reutilizó tal cual, extendiéndolo (sin romper el contrato que ya consume `endpoints.html`) con campos que faltaban para cubrir el pedido, todos derivados de datos/fórmulas que el sistema ya calcula en otro lado:
+- `agent_health` -- misma fórmula de `_endpoint_cte()` (Healthy/Warning/Offline según último heartbeat vs. el umbral configurado), para que el drawer diga lo mismo que la lista.
+- `last_seen_ago`, `honeyfiles_violated_ago` -- mismo `time_ago()` que usa el resto de la consola.
+- `alerts_active` -- mismo criterio que `/api/endpoints` (`alerts.status = 'NEW'` por agente).
+- `incidents_total` / `incidents_active` -- `COUNT(*)` real sobre `incidents` por `agent_id` (columna que ya existe, nunca se había expuesto contada por endpoint).
+
+**Lo que NO se hizo, a propósito:**
+- **Aislar endpoint:** el botón existe en el drawer pero queda deshabilitado con el mismo texto honesto que ya usa `endpoints.html` ("ALFA-Sentinel no puede aislar un host todavía: el agente no tiene forma de recibir ni ejecutar un comando remoto") -- confirmado que no existe ningún endpoint que escriba en `host_isolations`, ni función de liberar aislamiento. No se construyó un flujo de confirmación falso para una acción que no existe de verdad.
+- **Actividad reciente:** no hay un log unificado de eventos por endpoint (heartbeats, cambios de estado y aislamientos no se registran como eventos discretos). La timeline del drawer es intencionalmente mínima -- solo 3 entradas posibles, cada una atada a un dato 100% real ya presente en la respuesta (última alerta, honeyfile violado si existe, fecha de registro). No se inventó un sistema de eventos nuevo para llenarla.
+- **MAC address / arquitectura:** el drawer las trae como `null` (el agente nunca las recolecta) -- se omiten en la UI en vez de mostrar un campo vacío o inventado.
+- **Alertas:** el drawer solo trae la última alerta (no una lista completa) -- en vez de duplicar toda la sección Alertas, se muestra esa última alerta como resumen y un enlace real a `/detecciones?agent_id={id}` (el mismo patrón de filtro por agente que ya usa `endpoints.html` con su botón "Ver Incidentes").
+
+**Componentes nuevos:** `EndpointDrawer.tsx` (panel con overlay, animación de entrada/salida por transform+opacity, cierre por X/clic afuera/Escape), reemplaza el clic de fila que antes navegaba a `/endpoints/{id}` -- ahora `EndpointsTable.tsx` tiene un botón "Detalles" explícito por fila que abre el drawer sin recargar la página. Mismo sistema visual de la pantalla Endpoints -- ningún token, color ni componente base nuevo.
+
+**Verificado de punta a punta (2026-08-15):** `tsc -b --force` sin errores; con `pgserver` + `uvicorn` + Vite corriendo juntos (misma copia en disco nativo de Linux, mismo motivo de siempre): login (200), `GET /api/endpoints/{id}/drawer` a través del proxy para un endpoint con alertas/honeyfiles (200, datos reales) y para uno sin actividad (200, campos en `null`/0 honestos), 404 real para un id inexistente.
+
+---
+
 ## Módulo de Configuración: 4 pestañas reales (2026-08-12)
 
 **Qué se pidió:** un mockup detallado de 4 pestañas (Detección con sub-pestañas Reglas/Severidades, Agentes, Usuarios y Roles, Auditoría), incluyendo `agent_rule` (excepciones por agente), Severidades editables con "acción automatizada" (aislamiento automático en Crítico), Intervalo de Heartbeat / Tolerancia de Conexión / Sincronización de Reglas como parámetros de Agentes, y una matriz de roles Administrador/Analista SOC.
