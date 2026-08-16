@@ -20,39 +20,36 @@ function titleColor(item: RecentActivityItem): string {
 export default function RecentActivityTimeline({ items }: Props) {
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 shadow-sm flex flex-col h-full"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <h2 className="text-[14.5px] font-semibold m-0" style={{ color: "var(--tx)" }}>Actividad reciente</h2>
+      <h2 className="text-[14px] font-bold tracking-tight m-0" style={{ color: "var(--tx)" }}>Actividad reciente</h2>
 
       {items.length === 0 ? (
         <p className="text-[12.5px] py-6 text-center" style={{ color: "var(--tx-mute)" }}>
           Sin actividad todavía.
         </p>
       ) : (
-        <div className="flex flex-col mt-3.5">
-          {items.map((item, i) => {
-            const isLast = i === items.length - 1;
-            return (
-              <div key={i} className="flex gap-3">
-                <div className="w-[38px] shrink-0 text-right text-[11.5px] tabular-nums pt-px" style={{ color: "var(--tx-mute)" }}>
-                  {item.time}
+        <div className="flex flex-col gap-0 relative mt-4 before:absolute before:inset-y-2 before:left-[59px] before:w-px before:bg-[var(--line)]">
+        <div className="flex flex-col h-full relative mt-auto pl-2">
+          {/* Línea vertical de tiempo */}
+          <div className="absolute left-[13px] top-2 bottom-2 w-px" style={{ background: "var(--line)" }} />
+          {items.map((item, i) => (
+            <div key={i} className="flex gap-4 relative py-2.5">
+              <div className="w-[45px] shrink-0 text-right text-[11.5px] font-bold mt-0.5" style={{ color: "var(--tx-mute)" }}>
+                {item.time}
+              </div>
+              <div className="w-[11px] h-[11px] rounded-full mt-1.5 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: dotColor(item) }} />
+              <div className="min-w-0 pb-1">
+                <div className="text-[13px] font-bold tracking-tight" style={{ color: titleColor(item) }}>
+                  {item.type_label}
                 </div>
-                <div className="w-[9px] shrink-0 flex flex-col items-center">
-                  <span className="w-[9px] h-[9px] rounded-full mt-1.5" style={{ background: dotColor(item) }} />
-                  {!isLast && <span className="flex-1 w-px" style={{ background: "var(--line)" }} />}
-                </div>
-                <div className={isLast ? "" : "pb-4"}>
-                  <div className="text-[12.5px] font-medium" style={{ color: titleColor(item) }}>
-                    {item.type_label}
-                  </div>
-                  <div className="text-[11.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>
-                    {item.hostname} · {item.label}
-                  </div>
+                <div className="text-[11.5px] mt-0.5 font-medium truncate" style={{ color: "var(--tx-mute)" }}>
+                  {item.hostname} · {item.label}
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
     </section>

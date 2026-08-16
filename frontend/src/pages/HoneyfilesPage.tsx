@@ -6,6 +6,7 @@ import HoneyfileDrawer from "../components/HoneyfileDrawer";
 import DeployHoneyfileWizard from "../components/DeployHoneyfileWizard";
 import { fetchHoneyfiles } from "../api/client";
 import type { HoneyfileStatus, HoneyfilesResponse } from "../types/honeyfiles";
+import { useRowFlash } from "../hooks/useRowFlash";
 
 const DEBOUNCE_MS = 300;
 
@@ -19,6 +20,7 @@ export default function HoneyfilesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const flashId = useRowFlash(selectedId);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -99,6 +101,8 @@ export default function HoneyfilesPage() {
           loading={loading}
           hasFilters={hasFilters}
           onSelect={setSelectedId}
+          selectedId={selectedId}
+          flashId={flashId}
         />
       )}
 

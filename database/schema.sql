@@ -212,6 +212,26 @@ CREATE TABLE honeyfile_activations (
 );
 
 -- ============================================================
+-- 12B. METRIC TYPES
+--
+-- Agregada junto con la reescritura del motor heurístico
+-- (2026-08-16, ver PENDIENTES.md) para separar "qué ocurrió"
+-- (event_types: file_created/modified/deleted/renamed) de "qué se
+-- está midiendo" (metric_types: MODIFICACIONES_ARCHIVOS, CPU_PROCESO,
+-- etc.) -- varias reglas heurísticas comparten el mismo event_type
+-- pero miden cosas distintas (ej. HR-01 y HR-04 usan ambas
+-- file_modified, pero HR-01 cuenta archivos únicos y HR-04 cuenta
+-- operaciones totales). 'unit' vive acá y no se duplica en
+-- heuristic_rules -- la UI la resuelve a través de esta tabla.
+-- ============================================================
+CREATE TABLE metric_types (
+    id              BIGSERIAL PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL UNIQUE,
+    description     TEXT,
+    unit            VARCHAR(50)
+);
+
+-- ============================================================
 -- 13. HEURISTIC RULES
 -- ============================================================
 CREATE TABLE heuristic_rules (
@@ -219,14 +239,19 @@ CREATE TABLE heuristic_rules (
     name            VARCHAR(150) NOT NULL UNIQUE,
     description     TEXT,
     event_type_id   BIGINT,
+    metric_type_id  BIGINT,
     weight          NUMERIC(6,2) NOT NULL,
     threshold       NUMERIC(6,2) NOT NULL,
     window_seconds  INTEGER,
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_heuristic_rules_event_type
         FOREIGN KEY (event_type_id)
         REFERENCES event_types(id),
+    CONSTRAINT fk_heuristic_rules_metric_type
+        FOREIGN KEY (metric_type_id)
+        REFERENCES metric_types(id),
     CONSTRAINT chk_heuristic_rule_weight
         CHECK (weight >= 0),
     CONSTRAINT chk_heuristic_rule_threshold
@@ -637,53 +662,150 @@ INSERT INTO event_types (name, description, category) VALUES
     ('file_deleted',  'Archivo eliminado',           'file'),
     ('file_renamed',  'Archivo renombrado o movido', 'file');
 
--- Bandas de severidad ancladas a los umbrales reales de
--- agent/heuristic_engine.py (FileActivityAnalyzer.get_risk_level()):
--- score < 30 -> NORMAL, 30-59 -> SUSPICIOUS, 60-79 -> HIGH, 80+ -> CRITICAL.
--- El motor nunca envía una alerta con score < 30 (is_suspicious()
--- filtra eso), así que NORMAL no se ve nunca en 'alerts' en la
--- práctica -- se siembra igual porque el CHECK de heuristic_rules
--- y el resto del sistema pueden necesitar referenciarla.
+-- Bandas de severidad reescritas 2026-08-16 junto con el motor
+-- heurístico definitivo (ver PENDIENTES.md, "Motor de reglas
+-- heurísticas -- especificación definitiva"): rangos 0-24.99 /
+-- 25-49.99 / 50-74.99 / 75-100, tal como pide la especificación
+-- (BAJO/MEDIO/ALTO/CRÍTICO). Los valores de 'name' (NORMAL/
+-- SUSPICIOUS/HIGH/CRITICAL) NO se renombran -- son el identificador
+-- interno usado como literal de texto en decenas de consultas y en
+-- todo severity.ts/severity_levels del frontend; renombrarlos sería
+-- un cambio de arquitectura no necesario para cumplir el pedido. Lo
+-- que pide la especificación (que el usuario vea "Bajo/Medio/Alto/
+-- Crítico") se resuelve en la capa de traducción (RISK_LABELS_ES /
+-- ALERT_SEVERITY_LABELS_ES en server/main.py y SEVERITY_LABEL en
+-- frontend/src/lib/severity.ts), no acá.
 INSERT INTO severity_levels (name, min_score, max_score) VALUES
-    ('NORMAL',     0.00,  29.99),
-    ('SUSPICIOUS', 30.00, 59.99),
-    ('HIGH',       60.00, 79.99),
-    ('CRITICAL',   80.00, 100.00);
+    ('NORMAL',     0.00,  24.99),
+    ('SUSPICIOUS', 25.00, 49.99),
+    ('HIGH',       50.00, 74.99),
+    ('CRITICAL',   75.00, 100.00);
 
--- Primer par de reglas del motor heurístico (2 más se agregan más
--- abajo). weight/threshold/window_seconds son los valores por defecto
--- reales de FileActivityAnalyzer.__init__() (agent/heuristic_engine.py):
--- mass_activity_score=30/threshold=20 archivos/window=10s;
--- honeyfile_score=60/window=60s. honeyfile_access no tiene un
--- "threshold" real (se dispara con un solo toque al señuelo) -- se
--- guarda como 1 para respetar el NOT NULL de la columna sin inventar
--- un umbral que el agente no aplica. event_type_id queda NULL en
--- ambas: ninguna de las dos reglas depende de un único tipo de
--- evento (mass_file_activity mira cualquier combinación dentro de la
--- ventana; honeyfile_access mira cualquier operación sobre el señuelo).
-INSERT INTO heuristic_rules (name, description, event_type_id, weight, threshold, window_seconds) VALUES
-    ('mass_file_activity', 'Modificación masiva de archivos en una ventana corta', NULL, 30.00, 20.00, 10),
-    ('honeyfile_access',   'Actividad detectada sobre un archivo señuelo (honeyfile)', NULL, 60.00, 1.00, 60);
+-- ------------------------------------------------------------
+-- METRIC TYPES -- qué mide cada regla (ver sección "12B" arriba).
+-- Los 12 tipos de la especificación definitiva del motor heurístico.
+-- ------------------------------------------------------------
+INSERT INTO metric_types (name, description, unit) VALUES
+    ('MODIFICACIONES_ARCHIVOS',        'Cantidad de archivos únicos modificados en la ventana', 'archivos'),
+    ('RENOMBRADOS_ARCHIVOS',              'Cantidad de renombrados con patrón/extensión anómala', 'archivos'),
+    ('ACCESO_HONEYFILE',          'Interacción detectada sobre un archivo señuelo', 'eventos'),
+    ('ESCRITURAS_ARCHIVOS',               'Cantidad total de operaciones de escritura/modificación', 'operaciones'),
+    ('PROCESOS_SOSPECHOSOS',      'Procesos con características sospechosas detectados', 'procesos'),
+    ('CPU_PROCESO',               'Consumo de CPU sostenido por un proceso', '%'),
+    ('ACCESO_RECURSOS_COMPARTIDOS',        'Operaciones sobre archivos en rutas/recursos compartidos', 'archivos'),
+    ('CREACION_ARCHIVOS_TEMPORALES',        'Creación de archivos temporales', 'archivos'),
+    ('ELIMINACIONES_ARCHIVOS',            'Cantidad de archivos eliminados en la ventana', 'archivos'),
+    ('ACTIVIDAD_ARCHIVOS_USUARIO',        'Actividad repetitiva sobre archivos de carpetas de usuario', 'operaciones'),
+    ('ACTIVIDAD_AUTOMATIZADA_ARCHIVOS',   'Operaciones repetitivas realizadas por un mismo proceso', 'operaciones'),
+    ('CORRELACION_MULTIPLES_INDICADORES', 'Cantidad de reglas distintas activadas en el mismo episodio', 'reglas');
 
--- Dos reglas agregadas 2026-08-12 (agent/heuristic_engine.py,
--- FileActivityAnalyzer): ambas se apoyan solo en lo que watchdog
--- puede ver (tipo de evento + ruta/extensión), no en proceso ni
--- contenido del archivo -- ver PENDIENTES.md sobre esa limitación.
--- event_type_id sí queda seteado acá (a diferencia de las dos de
--- arriba) porque estas dos reglas evalúan un único tipo de evento
--- cada una: renombrados para la primera, borrados para la segunda.
-INSERT INTO heuristic_rules (name, description, event_type_id, weight, threshold, window_seconds) VALUES
+-- ------------------------------------------------------------
+-- HEURISTIC RULES -- las 12 reglas de la especificación definitiva
+-- (2026-08-16, reemplaza el set anterior de 4 reglas). Se reutilizan
+-- los nombres 'modificacion_masiva_archivos', 'acceso_honeyfile',
+-- 'renombrado_extension_anomala' y 'eliminacion_anomala_archivos' donde el concepto
+-- ya existía 1:1 (HR-01, HR-03, HR-02, HR-09 respectivamente) para no
+-- romper referencias sin necesidad; el resto son reglas nuevas.
+--
+-- HR-05 (proceso_sospechoso), HR-06 (consumo_cpu_elevado) y HR-11
+-- (actividad_repetitiva_automatizada) se siembran con is_active=FALSE:
+-- requieren datos que el agente hoy NO recopila (atribución de
+-- proceso a evento de archivo, y muestreo de CPU por proceso -- ver
+-- agent/file_monitor.py, que solo reporta ruta/tipo de evento, nunca
+-- process_id/process_name en eventos de archivo). Se documentan acá
+-- con su descripción explicando qué falta, en vez de simular el dato
+-- (sección 40 de la especificación). weight/threshold/window quedan
+-- con los valores que la especificación propone, listos para
+-- activarse el día que el agente reporte esa información.
+-- ------------------------------------------------------------
+
+-- HR-01: event_type_id = file_modified (a diferencia de la versión
+-- anterior, que no distinguía tipo de evento) porque la especificación
+-- la define específicamente como "modificación masiva de archivos".
+INSERT INTO heuristic_rules (name, description, event_type_id, metric_type_id, weight, threshold, window_seconds, is_active) VALUES
     (
-        'ransomware_extension_rename',
-        'Archivo renombrado a una extensión asociada a ransomware conocido (.locked, .encrypted, etc.)',
-        (SELECT id FROM event_types WHERE name = 'file_renamed'),
-        70.00, 1.00, 30
+        'modificacion_masiva_archivos',
+        'HR-01 -- Modificación masiva de archivos: 20 o más archivos únicos modificados dentro de una ventana de 10 segundos.',
+        (SELECT id FROM event_types WHERE name = 'file_modified'),
+        (SELECT id FROM metric_types WHERE name = 'MODIFICACIONES_ARCHIVOS'),
+        25.00, 20.00, 10, TRUE
     ),
     (
-        'mass_deletion',
-        'Ráfaga de borrados de archivos en una ventana corta',
+        'renombrado_extension_anomala',
+        'HR-02 -- Renombrado/extensión anómala: 5 o más renombrados con patrón sospechoso (ej. cambio a extensión asociada a ransomware conocido) dentro de una ventana de 15 segundos.',
+        (SELECT id FROM event_types WHERE name = 'file_renamed'),
+        (SELECT id FROM metric_types WHERE name = 'RENOMBRADOS_ARCHIVOS'),
+        20.00, 5.00, 15, TRUE
+    ),
+    (
+        'acceso_honeyfile',
+        'HR-03 -- Acceso/activación de honeyfile: cualquier interacción detectada sobre un archivo señuelo lleva el risk_score inmediatamente a 100 (CRÍTICO), sin esperar otras reglas ni acumular progresivamente.',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'ACCESO_HONEYFILE'),
+        100.00, 1.00, NULL, TRUE
+    ),
+    (
+        'escritura_intensiva_archivos',
+        'HR-04 -- Escritura intensiva: 50 o más operaciones de escritura/modificación dentro de una ventana de 10 segundos. Puede solaparse con HR-01; peso menor a propósito para no duplicar artificialmente el riesgo.',
+        (SELECT id FROM event_types WHERE name = 'file_modified'),
+        (SELECT id FROM metric_types WHERE name = 'ESCRITURAS_ARCHIVOS'),
+        15.00, 50.00, 10, TRUE
+    ),
+    (
+        'proceso_sospechoso',
+        'HR-05 -- Proceso sospechoso (DIFERIDA): requiere atribuir un proceso (process_id/process_name) a cada evento de archivo, dato que el agente no recopila hoy (watchdog solo entrega ruta y tipo de evento). No se simula: se activará cuando el agente reporte esa atribución.',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'PROCESOS_SOSPECHOSOS'),
+        10.00, 1.00, 30, FALSE
+    ),
+    (
+        'consumo_cpu_elevado',
+        'HR-06 -- Consumo elevado de CPU por proceso (DIFERIDA): requiere que el agente muestree y reporte consumo de CPU por proceso, algo que no hace hoy. No se simula: se activará cuando exista esa fuente de datos. Señal secundaria -- nunca debe llevar por sí sola a CRÍTICO.',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'CPU_PROCESO'),
+        5.00, 80.00, 10, FALSE
+    ),
+    (
+        'acceso_recursos_compartidos',
+        'HR-07 -- Acceso masivo a recursos compartidos: 20 o más operaciones sobre archivos en rutas compartidas/remotas dentro de una ventana de 15 segundos.',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'ACCESO_RECURSOS_COMPARTIDOS'),
+        15.00, 20.00, 15, TRUE
+    ),
+    (
+        'creacion_masiva_temporales',
+        'HR-08 -- Creación masiva de archivos temporales: 30 o más archivos temporales creados dentro de una ventana de 15 segundos. Señal secundaria.',
+        (SELECT id FROM event_types WHERE name = 'file_created'),
+        (SELECT id FROM metric_types WHERE name = 'CREACION_ARCHIVOS_TEMPORALES'),
+        5.00, 30.00, 15, TRUE
+    ),
+    (
+        'eliminacion_anomala_archivos',
+        'HR-09 -- Eliminación anómala: 20 o más archivos eliminados dentro de una ventana de 15 segundos. Especialmente relevante combinada con modificación/renombrado.',
         (SELECT id FROM event_types WHERE name = 'file_deleted'),
-        40.00, 15.00, 10
+        (SELECT id FROM metric_types WHERE name = 'ELIMINACIONES_ARCHIVOS'),
+        15.00, 20.00, 15, TRUE
+    ),
+    (
+        'actividad_archivos_usuario',
+        'HR-10 -- Actividad repetitiva sobre archivos de usuario: 30 o más operaciones dentro de una ventana de 20 segundos sobre rutas de usuario (Documents, Desktop, Downloads, Pictures, etc.).',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'ACTIVIDAD_ARCHIVOS_USUARIO'),
+        10.00, 30.00, 20, TRUE
+    ),
+    (
+        'actividad_repetitiva_automatizada',
+        'HR-11 -- Actividad repetitiva automatizada (DIFERIDA): requiere identificar que las operaciones repetitivas provienen del MISMO proceso, lo que exige atribución de proceso a evento de archivo -- el agente no la recopila hoy. No se simula.',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'ACTIVIDAD_AUTOMATIZADA_ARCHIVOS'),
+        10.00, 40.00, 15, FALSE
+    ),
+    (
+        'correlacion_multiples_indicadores',
+        'HR-12 -- Correlación de múltiples indicadores: bonificación de score (no una regla de conteo) cuando coinciden reglas distintas en el mismo episodio -- 2 reglas -> +5, 3 reglas -> +10, 4 o más -> +15. El peso acá (15.00) es el máximo posible, documental; el valor real aplicado (weight_applied en alert_rule) lo calcula el servidor según cuántas reglas distintas participaron.',
+        NULL,
+        (SELECT id FROM metric_types WHERE name = 'CORRELACION_MULTIPLES_INDICADORES'),
+        15.00, 2.00, NULL, TRUE
     );
 
 -- Único parámetro global real hoy (ver sección 23, SYSTEM SETTINGS).

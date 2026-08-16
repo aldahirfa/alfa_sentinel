@@ -48,8 +48,8 @@ export default function UserMenu({ userName, roleLabel, onLoggedOut, onOpenProfi
 
       {open && (
         <div
-          className="absolute right-0 top-[42px] w-[200px] rounded-[10px] border z-30 overflow-hidden"
-          style={{ background: "var(--surf3)", borderColor: "var(--line)", boxShadow: "0 16px 40px rgba(0,0,0,.35)" }}
+          className="absolute right-0 top-[48px] w-[220px] rounded-xl border z-30 overflow-hidden"
+          style={{ background: "var(--surf)", borderColor: "var(--line-soft)", boxShadow: "var(--shadow-lg)" }}
         >
           <div className="px-3.5 py-3 border-b" style={{ borderColor: "var(--line-soft)" }}>
             <div className="text-[12.5px] font-semibold" style={{ color: "var(--tx)" }}>{userName}</div>
@@ -60,7 +60,7 @@ export default function UserMenu({ userName, roleLabel, onLoggedOut, onOpenProfi
               setOpen(false);
               onOpenProfile();
             }}
-            className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] w-full text-left bg-transparent border-0 cursor-pointer"
+            className="flex items-center gap-2.5 px-4 py-3 text-[13px] font-medium w-full text-left bg-transparent border-0 cursor-pointer transition-colors hover:bg-[var(--surf2)]"
             style={{ color: "var(--tx-dim)" }}
           >
             <i className="ph ph-user-circle" style={{ fontSize: "15px" }} />
@@ -68,7 +68,7 @@ export default function UserMenu({ userName, roleLabel, onLoggedOut, onOpenProfi
           </button>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] w-full text-left bg-transparent border-0 cursor-pointer border-t"
+            className="flex items-center gap-2.5 px-4 py-3 text-[13px] font-medium w-full text-left bg-transparent border-0 cursor-pointer border-t transition-colors hover:bg-[var(--crit-soft)]"
             style={{ color: "var(--crit)", borderColor: "var(--line-soft)" }}
           >
             <i className="ph ph-sign-out" style={{ fontSize: "15px" }} />

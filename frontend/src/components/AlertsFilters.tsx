@@ -1,6 +1,7 @@
 import type { Severity } from "../types/dashboard";
 import type { AlertStatus, RuleOption } from "../types/alerts";
 import { SEVERITY_LABEL } from "../lib/severity";
+import { STATUS_LABEL } from "../lib/alertStatus";
 
 interface Props {
   search: string;
@@ -18,13 +19,6 @@ interface Props {
 
 const SEVERITY_OPTIONS: (Severity | "")[] = ["", "SUSPICIOUS", "HIGH", "CRITICAL"];
 const STATUS_OPTIONS: (AlertStatus | "")[] = ["", "NEW", "ACKNOWLEDGED", "ESCALATED", "CLOSED", "FALSE_POSITIVE"];
-const STATUS_LABEL: Record<AlertStatus, string> = {
-  NEW: "Nueva",
-  ACKNOWLEDGED: "En investigación",
-  ESCALATED: "Confirmada",
-  CLOSED: "Cerrada",
-  FALSE_POSITIVE: "Falso positivo",
-};
 const SINCE_OPTIONS: { value: "24h" | "7d" | "30d" | ""; label: string }[] = [
   { value: "", label: "Todo" },
   { value: "24h", label: "24 h" },

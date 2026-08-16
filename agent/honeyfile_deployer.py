@@ -63,7 +63,7 @@ def apply_honeyfile_policy(credential):
                 # elegida -- no es un .xlsx/.docx/.pdf válido de
                 # verdad (ver database/schema.sql, tabla
                 # honeyfile_templates). Alcanza para que watchdog y la
-                # detección de honeyfile_access reaccionen, que es lo
+                # detección de acceso_honeyfile reaccionen, que es lo
                 # único que este proyecto necesita de él.
                 with open(full_path, "w", encoding="utf-8") as f:
                     f.write(item.get("content") or "")

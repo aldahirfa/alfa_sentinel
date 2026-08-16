@@ -26,10 +26,10 @@ function Card({
 }) {
   return (
     <div
-      className="rounded-[10px] border p-4 relative overflow-hidden"
+      className="rounded-xl border p-5 relative overflow-hidden transition-premium hover:-translate-y-1"
       style={{
         background: "var(--surf)",
-        borderColor: highlighted ? "var(--crit)" : "var(--line)",
+        borderColor: highlighted ? "var(--crit)" : "var(--line-soft)",
         boxShadow: highlighted ? "0 0 0 3px var(--crit-soft)" : "var(--shadow)",
       }}
     >
@@ -37,14 +37,14 @@ function Card({
         <div className="absolute inset-y-0 left-0 w-[3px]" style={{ background: accent }} />
       )}
       <div
-        className="flex items-center gap-2 text-[10.5px] tracking-wider uppercase font-semibold"
+        className="flex items-center gap-2 text-[11px] tracking-widest uppercase font-bold"
         style={{ color: labelColor || "var(--tx-mute)" }}
       >
-        <i className={icon} style={{ fontSize: "14px" }} />
+        <i className={icon} style={{ fontSize: "15px" }} />
         {label}
       </div>
       <div
-        className="text-[34px] font-semibold leading-tight mt-2.5 tracking-tight"
+        className="text-[38px] font-bold leading-none mt-4 tracking-tighter"
         style={{ color: valueColor || "var(--tx)" }}
       >
         {value}
@@ -57,7 +57,7 @@ function Card({
 function SubRow({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="flex gap-2.5 mt-3 pt-2.5 border-t text-[11px] flex-wrap"
+      className="flex gap-2.5 mt-4 pt-3 border-t text-[11.5px] font-medium flex-wrap"
       style={{ borderColor: "var(--line-soft)", color: "var(--tx-dim)" }}
     >
       {children}
@@ -131,7 +131,7 @@ export default function KpiCards({ summary }: KpiCardsProps) {
         highlighted={summary.endpoints_isolated > 0}
         accent={summary.endpoints_isolated > 0 ? "var(--crit)" : undefined}
         sub={
-          <div className="text-[11px] mt-3 pt-2.5 border-t" style={{ borderColor: "var(--line-soft)", color: "var(--tx-dim)" }}>
+          <div className="text-[11.5px] font-medium mt-4 pt-3 border-t" style={{ borderColor: "var(--line-soft)", color: "var(--tx-dim)" }}>
             {summary.endpoints_isolated === 0
               ? "Ningún equipo contenido en este momento"
               : "Actualmente aislados"}

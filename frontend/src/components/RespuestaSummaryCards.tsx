@@ -7,15 +7,15 @@ interface Props {
 function Card({ icon, label, value, color }: { icon: string; label: string; value: number; color?: string }) {
   return (
     <div
-      className="rounded-[10px] border px-3.5 py-3 flex items-center gap-3"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 flex items-center gap-4 transition-premium hover:-translate-y-1"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)", boxShadow: "var(--shadow)" }}
     >
-      <div className="w-8 h-8 rounded-lg grid place-items-center shrink-0" style={{ background: color || "var(--surf2)" }}>
-        <i className={icon} style={{ fontSize: "15px", color: color ? "#fff" : "var(--tx-dim)" }} />
+      <div className="w-10 h-10 rounded-xl grid place-items-center shrink-0" style={{ background: color || "var(--surf2)" }}>
+        <i className={icon} style={{ fontSize: "18px", color: color ? "#fff" : "var(--tx-dim)" }} />
       </div>
       <div className="min-w-0">
-        <div className="text-lg font-semibold leading-none tracking-tight" style={{ color: "var(--tx)" }}>{value}</div>
-        <div className="text-[11px] mt-1 truncate" style={{ color: "var(--tx-mute)" }}>{label}</div>
+        <div className="text-2xl font-bold leading-none tracking-tight mt-0.5" style={{ color: "var(--tx)" }}>{value}</div>
+        <div className="text-[11.5px] mt-1 font-medium truncate" style={{ color: "var(--tx-mute)" }}>{label}</div>
       </div>
     </div>
   );

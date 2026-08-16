@@ -7,6 +7,7 @@ import EndpointDrawer from "../components/EndpointDrawer";
 import { fetchEndpoints } from "../api/client";
 import type { ConnStatus, EndpointsResponse } from "../types/endpoints";
 import type { Severity } from "../types/dashboard";
+import { useRowFlash } from "../hooks/useRowFlash";
 
 const PAGE_SIZE = 10;
 const DEBOUNCE_MS = 300;
@@ -23,6 +24,7 @@ export default function EndpointsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const flashId = useRowFlash(selectedId);
 
   // Debounce del buscador -- no dispara un pedido por cada tecla.
   useEffect(() => {
@@ -88,6 +90,8 @@ export default function EndpointsPage() {
             loading={loading}
             hasFilters={hasFilters}
             onSelect={setSelectedId}
+            selectedId={selectedId}
+            flashId={flashId}
           />
           {data && (
             <EndpointsPagination

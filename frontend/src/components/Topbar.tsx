@@ -32,24 +32,25 @@ export default function Topbar({
 }: TopbarProps) {
   return (
     <header
-      className="sticky top-0 z-20 border-b px-[22px] py-3.5 flex items-center gap-5"
-      style={{ background: "var(--surf)", borderColor: "var(--line)" }}
+      className="sticky top-0 z-20 border-b px-6 py-4 flex items-center gap-5 shadow-sm"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <div className="min-w-0">
-        <h1 className="text-[19px] font-semibold m-0 tracking-tight" style={{ color: "var(--tx)" }}>
+      <div className="min-w-0 flex-1">
+        <h1 className="text-xl font-bold m-0 tracking-tight" style={{ color: "var(--tx)" }}>
           {title}
         </h1>
-        <div className="text-xs mt-0.5" style={{ color: "var(--tx-mute)" }}>
+        <div className="text-[12.5px] mt-1 font-medium tracking-wide" style={{ color: "var(--tx-mute)" }}>
           {subtitle}
         </div>
       </div>
 
       <div className="ml-auto flex items-center gap-3">
         <div
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold tracking-wide border"
           style={{
             background: systemOk ? "var(--ok-soft)" : "var(--crit-soft)",
             color: systemOk ? "var(--ok)" : "var(--crit)",
+            borderColor: systemOk ? "var(--ok-soft)" : "var(--crit-soft)",
           }}
         >
           <span
@@ -65,10 +66,10 @@ export default function Topbar({
         <button
           onClick={onToggleTheme}
           title="Cambiar tema"
-          className="w-[34px] h-[34px] rounded-lg border grid place-items-center cursor-pointer transition-colors"
+          className="w-9 h-9 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
           style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
         >
-          <i className={theme === "dark" ? "ph ph-sun" : "ph ph-moon"} style={{ fontSize: "16px" }} />
+          <i className={theme === "dark" ? "ph-fill ph-sun" : "ph-fill ph-moon"} style={{ fontSize: "17px" }} />
         </button>
 
         <NotificationsBell count={notificationCount} onSelectAlert={onSelectAlert} onViewAll={onViewAllAlerts} />

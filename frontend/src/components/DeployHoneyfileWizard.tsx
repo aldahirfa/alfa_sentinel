@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { deployHoneyfile } from "../api/client";
 import type { AvailableAgent } from "../types/honeyfiles";
 
@@ -10,16 +10,16 @@ interface Props {
 }
 
 const FILE_TYPE_OPTIONS = [
-  { value: "xlsx", label: "📊 Documento Excel (.xlsx)" },
-  { value: "docx", label: "📄 Documento Word (.docx)" },
-  { value: "zip", label: "📦 Archivo ZIP (.zip)" },
-  { value: "txt", label: "📝 Texto plano (.txt)" },
-  { value: "pdf", label: "📕 Documento PDF (.pdf)" },
+  { value: "xlsx", label: "Documento Excel (.xlsx)" },
+  { value: "docx", label: "Documento Word (.docx)" },
+  { value: "zip", label: "Archivo ZIP (.zip)" },
+  { value: "txt", label: "Texto plano (.txt)" },
+  { value: "pdf", label: "Documento PDF (.pdf)" },
 ];
 
 const fieldStyle: React.CSSProperties = {
   background: "var(--surf2)",
-  border: "1px solid var(--line)",
+  border: "1px solid var(--line-soft)",
   color: "var(--tx)",
 };
 
@@ -34,8 +34,22 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
   const [selectedAgents, setSelectedAgents] = useState<Set<number>>(() => new Set(availableAgents.map((a) => a.id)));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [render, setRender] = useState(false);
+  const [entered, setEntered] = useState(false);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (open) {
+      setRender(true);
+      const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
+      return () => cancelAnimationFrame(raf);
+    } else if (render) {
+      setEntered(false);
+      const t = setTimeout(() => setRender(false), 220);
+      return () => clearTimeout(t);
+    }
+  }, [open, render]);
+
+  if (!render) return null;
 
   function reset() {
     setStep(1);
@@ -108,20 +122,38 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
 
   return (
     <>
-      <div onClick={handleClose} className="fixed inset-0 z-40" style={{ background: "rgba(0,0,0,0.5)" }} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div 
+        onClick={handleClose} 
+        className="fixed inset-0 z-40" 
+        style={{ background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 200ms ease" }} 
+      />
+      <div 
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{
+          opacity: entered ? 1 : 0,
+          transform: entered ? "scale(1)" : "scale(0.95)",
+          transition: "opacity 200ms ease, transform 200ms ease",
+        }}
+      >
         <div
-          className="w-full max-w-lg rounded-[12px] border flex flex-col max-h-[88vh]"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}
+          className="w-full max-w-lg rounded-2xl border flex flex-col max-h-[88vh] shadow-2xl"
+          style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
         >
-          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)" }}>
-            <div className="text-[15px] font-semibold" style={{ color: "var(--tx)" }}>Desplegar honeyfile</div>
+          <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
+                Configuración de trampa
+              </div>
+              <div className="text-[18px] font-bold mt-1 tracking-tight truncate" style={{ color: "var(--tx)" }}>
+                Desplegar honeyfile
+              </div>
+            </div>
             <button
               onClick={handleClose}
-              className="w-8 h-8 rounded-lg border grid place-items-center cursor-pointer"
+              className="w-8 h-8 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
               style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
             >
-              <i className="ph ph-x" style={{ fontSize: "15px" }} />
+              <i className="ph-fill ph-x" style={{ fontSize: "15px" }} />
             </button>
           </div>
 
@@ -155,7 +187,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                       value={fileName}
                       onChange={(e) => setFileName(e.target.value)}
                       placeholder="Ej: Documento_Confidencial"
-                      className="w-full px-3 py-2 rounded-[8px] text-[13px] outline-none"
+                      className="w-full px-3 py-2 rounded-lg text-[13px] outline-none transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
                       style={fieldStyle}
                     />
                   </div>
@@ -164,7 +196,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                     <select
                       value={fileType}
                       onChange={(e) => setFileType(e.target.value)}
-                      className="w-full px-3 py-2 rounded-[8px] text-[13px] outline-none cursor-pointer"
+                      className="w-full px-3 py-2 rounded-lg text-[13px] outline-none cursor-pointer transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
                       style={fieldStyle}
                     >
                       {FILE_TYPE_OPTIONS.map((o) => (
@@ -181,7 +213,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                     value={targetPath}
                     onChange={(e) => setTargetPath(e.target.value)}
                     placeholder="Ej: C:\Users\Public\Docs\ o /var/backups/"
-                    className="w-full px-3 py-2 rounded-[8px] text-[12px] outline-none font-mono"
+                    className="w-full px-3 py-2 rounded-lg text-[12.5px] outline-none font-mono font-medium transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent"
                     style={fieldStyle}
                   />
                 </div>
@@ -189,9 +221,10 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                 <div>
                   <label className="text-[11.5px] font-semibold block mb-1.5" style={{ color: "var(--tx-mute)" }}>Plataforma objetivo</label>
                   <div className="flex gap-4 text-[13px]" style={{ color: "var(--tx)" }}>
-                    {([["windows", "🪟 Windows"], ["linux", "🐧 Linux / Ubuntu"], ["all", "🌐 Todas"]] as const).map(([val, label]) => (
-                      <label key={val} className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="radio" name="platform" checked={platform === val} onChange={() => setPlatform(val)} />
+                    {([["windows", "Windows", "ph-windows-logo"], ["linux", "Linux / Ubuntu", "ph-linux-logo"], ["all", "Todas las plataformas", "ph-circles-four"]] as const).map(([val, label, icon]) => (
+                      <label key={val} className="flex items-center gap-1.5 cursor-pointer font-medium hover:text-[var(--tx)] transition-colors" style={{ color: platform === val ? "var(--brand)" : "var(--tx-mute)" }}>
+                        <input type="radio" name="platform" checked={platform === val} onChange={() => setPlatform(val as any)} />
+                        <i className={`ph ${icon} text-[15px]`} />
                         {label}
                       </label>
                     ))}
@@ -207,7 +240,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
                     placeholder="Documento confidencial. No modificar ni distribuir sin autorización."
-                    className="w-full px-3 py-2 rounded-[8px] text-[12px] outline-none resize-y"
+                    className="w-full px-3 py-2 rounded-lg text-[12.5px] outline-none resize-y transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
                     style={fieldStyle}
                   />
                   <p className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
@@ -218,9 +251,12 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                 <label className="flex items-start gap-2 cursor-pointer text-[13px]" style={{ color: "var(--tx)" }}>
                   <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} className="mt-0.5" />
                   <span>
-                    🔁 Desplegar automáticamente a todo endpoint (actual o futuro) cuya plataforma coincida
-                    <div className="text-[10.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>
-                      Si lo marcás, el Paso 2 es opcional: podés además reforzarlo ahora mismo en endpoints puntuales, o dejar que se aplique solo en cada uno la próxima vez que su agente corra.
+                    <div className="flex items-center gap-1.5 font-semibold">
+                      <i className="ph-fill ph-rocket-launch text-[15px]" style={{ color: "var(--brand)" }} />
+                      Despliegue automático a futuros endpoints compatibles
+                    </div>
+                    <div className="text-[10.5px] mt-1 leading-relaxed font-medium" style={{ color: "var(--tx-mute)" }}>
+                      Si activas esto, el Paso 2 es opcional. El honeyfile se distribuirá automáticamente en cuanto un agente de la plataforma objetivo empiece a reportar.
                     </div>
                   </span>
                 </label>
@@ -245,21 +281,23 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                     availableAgents.map((a) => (
                       <label
                         key={a.id}
-                        className="flex items-center gap-2.5 px-2.5 py-2 rounded-[8px] cursor-pointer"
-                        style={{ background: "var(--surf2)", border: "1px solid var(--line)" }}
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-premium hover:-translate-y-0.5 hover:shadow-sm"
+                        style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}
                       >
-                        <input type="checkbox" checked={selectedAgents.has(a.id)} onChange={() => toggleAgent(a.id)} />
+                        <input type="checkbox" checked={selectedAgents.has(a.id)} onChange={() => toggleAgent(a.id)} className="w-3.5 h-3.5 rounded-sm" />
                         <div className="flex-1 min-w-0">
-                          <div className="text-[12.5px] font-medium" style={{ color: "var(--tx)" }}>{a.hostname}</div>
-                          <div className="text-[10.5px]" style={{ color: "var(--tx-mute)" }}>
-                            {a.operating_system.toLowerCase().includes("win") ? "🪟 Windows" : a.operating_system.toLowerCase().includes("linux") ? "🐧 Linux" : `🖥️ ${a.operating_system}`} · IP: {a.ip_address}
+                          <div className="text-[13px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{a.hostname}</div>
+                          <div className="text-[11px] font-medium mt-1 flex items-center gap-1" style={{ color: "var(--tx-mute)" }}>
+                            <i className={a.operating_system.toLowerCase().includes("win") ? "ph ph-windows-logo" : a.operating_system.toLowerCase().includes("linux") ? "ph ph-linux-logo" : "ph ph-desktop"} />
+                            {a.operating_system} · IP: {a.ip_address}
                           </div>
                         </div>
                         <span
-                          className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                          style={a.is_live ? { background: "var(--ok-soft)", color: "var(--ok)" } : { color: "var(--tx-mute)" }}
+                          className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full whitespace-nowrap flex items-center gap-1"
+                          style={a.is_live ? { background: "var(--ok-soft)", color: "var(--ok)" } : { background: "transparent", color: "var(--tx-mute)", border: "1px solid var(--line)" }}
                         >
-                          {a.is_live ? "🟢 En línea" : "⚪ Desconectado"}
+                          {a.is_live && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)" }} />}
+                          {a.is_live ? "En línea" : "Desconectado"}
                         </span>
                       </label>
                     ))
@@ -273,7 +311,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
             {step === 2 ? (
               <button
                 onClick={() => setStep(1)}
-                className="px-3.5 py-2 rounded-[8px] text-[12.5px] font-medium cursor-pointer"
+                className="px-4 py-2 rounded-lg text-[13px] font-bold cursor-pointer transition-premium btn-hover shadow-sm"
                 style={{ border: "1px solid var(--line)", color: "var(--tx-dim)", background: "var(--surf2)" }}
               >
                 Atrás
@@ -282,7 +320,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
             {step === 1 ? (
               <button
                 onClick={goStep2}
-                className="px-4 py-2 rounded-[8px] text-[12.5px] font-semibold cursor-pointer border-0"
+                className="px-5 py-2 rounded-lg text-[13px] font-bold cursor-pointer border-0 transition-premium btn-hover shadow-sm"
                 style={{ background: "var(--brand)", color: "#fff" }}
               >
                 Continuar
@@ -291,7 +329,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
               <button
                 onClick={handleDeploy}
                 disabled={saving}
-                className="px-4 py-2 rounded-[8px] text-[12.5px] font-semibold cursor-pointer border-0 disabled:opacity-50"
+                className="px-5 py-2 rounded-lg text-[13px] font-bold cursor-pointer border-0 disabled:opacity-50 transition-premium btn-hover shadow-sm"
                 style={{ background: "var(--brand)", color: "#fff" }}
               >
                 {saving ? "Desplegando..." : "Desplegar honeyfile"}

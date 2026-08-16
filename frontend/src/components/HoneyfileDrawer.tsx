@@ -96,36 +96,35 @@ export default function HoneyfileDrawer({ honeyfileId, onClose, onChanged }: Pro
         style={{ background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 200ms ease" }}
       />
       <aside
-        className="fixed top-0 right-0 h-screen w-full sm:w-[440px] z-50 flex flex-col"
+        className="fixed top-0 right-0 h-screen w-full sm:w-[460px] z-50 flex flex-col shadow-2xl"
         style={{
           background: "var(--surf)",
           borderLeft: "1px solid var(--line)",
-          boxShadow: "-16px 0 40px rgba(0,0,0,.3)",
           transform: entered ? "translateX(0)" : "translateX(100%)",
           transition: "transform 220ms ease",
         }}
       >
-        <div className="px-5 py-4 border-b flex items-start gap-3" style={{ borderColor: "var(--line-soft)" }}>
-          <div className="min-w-0">
+        <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
+          <div className="min-w-0 flex-1">
             <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
               Detalles del honeyfile
             </div>
-            <div className="text-[17px] font-semibold mt-1 truncate flex items-center gap-2" style={{ color: "var(--tx)" }}>
+            <div className="text-[18px] font-bold mt-1 tracking-tight truncate flex items-center gap-2" style={{ color: "var(--tx)" }}>
               {data && <i className={fileTypeIcon(data.file_type)} style={{ fontSize: "16px", color: "var(--tx-mute)" }} />}
               {data?.file_name ?? "Cargando..."}
             </div>
             {data && (
-              <div className="text-[11.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+              <div className="text-[11.5px] mt-1.5 font-medium" style={{ color: "var(--tx-mute)" }}>
                 {data.hostname} · {data.agent_code}
               </div>
             )}
           </div>
           <button
             onClick={onClose}
-            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer"
+            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
             style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
           >
-            <i className="ph ph-x" style={{ fontSize: "15px" }} />
+            <i className="ph-fill ph-x" style={{ fontSize: "15px" }} />
           </button>
         </div>
 
@@ -149,16 +148,16 @@ export default function HoneyfileDrawer({ honeyfileId, onClose, onChanged }: Pro
               {/* Estado principal */}
               <div className="px-5 py-4">
                 <div
-                  className="rounded-[10px] border p-3.5"
+                  className="rounded-xl border p-4 shadow-sm"
                   style={{
-                    background: data.status === "TRIGGERED" ? "var(--crit-soft)" : "var(--surf2)",
-                    borderColor: data.status === "TRIGGERED" ? "var(--crit)" : "var(--line)",
+                    background: data.status === "TRIGGERED" ? "var(--crit-fill)" : "var(--surf2)",
+                    borderColor: data.status === "TRIGGERED" ? "var(--crit-soft)" : "var(--line-soft)",
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Estado</span>
                     <span
-                      className="text-[11px] font-bold tracking-wide px-2 py-0.5 rounded"
+                      className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                       style={honeyfileStatusPillStyle(data.status)}
                     >
                       {HONEYFILE_STATUS_LABEL[data.status].toUpperCase()}
@@ -226,14 +225,14 @@ export default function HoneyfileDrawer({ honeyfileId, onClose, onChanged }: Pro
                 <button
                   disabled={saving}
                   onClick={handleToggle}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-bold cursor-pointer disabled:opacity-50 transition-premium btn-hover shadow-sm"
                   style={
                     data.status === "INACTIVE"
                       ? { border: "1px solid var(--ok)", color: "var(--ok)", background: "var(--ok-soft)" }
-                      : { border: "1px solid var(--line)", color: "var(--tx-dim)", background: "var(--surf2)" }
+                      : { border: "1px solid var(--line-soft)", color: "var(--tx-dim)", background: "var(--surf2)" }
                   }
                 >
-                  <i className={data.status === "INACTIVE" ? "ph ph-play" : "ph ph-pause"} style={{ fontSize: "15px" }} />
+                  <i className={data.status === "INACTIVE" ? "ph-fill ph-play" : "ph-fill ph-pause"} style={{ fontSize: "16px" }} />
                   {data.status === "INACTIVE" ? "Reactivar honeyfile" : "Desactivar honeyfile"}
                 </button>
               </div>

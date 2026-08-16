@@ -21,14 +21,17 @@ export default function RiskDonut({ data, total }: RiskDonutProps) {
 
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 shadow-sm flex flex-col h-full"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
       <h2 className="text-[14.5px] font-semibold m-0" style={{ color: "var(--tx)" }}>
         Estado de riesgo de los endpoints
       </h2>
+      <div className="text-[11.5px] mt-0.5 mb-2" style={{ color: "var(--tx-mute)" }}>
+        Equipos monitoreados según su criticidad
+      </div>
 
-      <div className="flex items-center gap-4.5 mt-3.5">
+      <div className="flex items-center gap-4.5 mt-auto mb-auto">
         <div className="relative w-[150px] h-[150px] shrink-0">
           <svg viewBox="0 0 140 140" className="w-full h-full" style={{ transform: "rotate(-90deg)" }}>
             <circle cx="70" cy="70" r={R} fill="none" stroke="var(--surf3)" strokeWidth="15" />

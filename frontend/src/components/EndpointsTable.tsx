@@ -7,12 +7,15 @@ import {
   CONN_STATUS_VAR,
   connStatusPillStyle,
 } from "../lib/endpointStatus";
+import { rowSelectionStyle } from "../lib/rowSelection";
 
 interface Props {
   endpoints: EndpointListItem[];
   loading: boolean;
   hasFilters: boolean;
   onSelect: (id: number) => void;
+  selectedId: number | null;
+  flashId: number | null;
 }
 
 function rowAccent(ep: EndpointListItem): string | null {
@@ -37,15 +40,15 @@ function SkeletonRow() {
   );
 }
 
-export default function EndpointsTable({ endpoints, loading, hasFilters, onSelect }: Props) {
+export default function EndpointsTable({ endpoints, loading, hasFilters, onSelect, selectedId, flashId }: Props) {
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 overflow-x-auto shadow-sm"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <table className="w-full border-collapse text-[12.5px]">
+      <table className="w-full border-collapse text-[13px]">
         <thead>
-          <tr className="text-left text-[10.5px] tracking-wider uppercase" style={{ color: "var(--tx-mute)" }}>
+          <tr className="text-left text-[10.5px] tracking-widest uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
             <th className="pb-2 pr-3 font-semibold">Endpoint</th>
             <th className="pb-2 pr-3 font-semibold">IP</th>
             <th className="pb-2 pr-3 font-semibold">Estado</th>
@@ -72,64 +75,75 @@ export default function EndpointsTable({ endpoints, loading, hasFilters, onSelec
           ) : (
             endpoints.map((ep) => {
               const accent = rowAccent(ep);
+              const isSelected = ep.id === selectedId;
+              const isFlashing = ep.id === flashId;
+              const selStyle = rowSelectionStyle(isSelected, isFlashing);
               return (
                 <tr
                   key={ep.id}
-                  className="border-t transition-colors"
-                  style={{ borderColor: "var(--line-soft)" }}
+                  className="border-t transition-colors cursor-pointer group"
+                  style={{ borderColor: "var(--line-soft)", ...selStyle }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surf2)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = selStyle.background as string)}
                 >
-                  <td className="py-2.5 pr-3" style={accent ? { boxShadow: `inset 3px 0 0 ${accent}` } : undefined}>
-                    <div className="font-semibold pl-2" style={{ color: "var(--tx)" }}>{ep.hostname}</div>
-                    <div className="text-[11px] mt-0.5 pl-2" style={{ color: "var(--tx-mute)" }}>
-                      {ep.operating_system} {ep.os_version}
+                  <td className="py-3 pr-3" style={accent ? { boxShadow: `inset 3px 0 0 ${accent}` } : undefined}>
+                    <div className="flex items-center gap-2.5 pl-2">
+                      <i 
+                        className={ep.operating_system.toLowerCase().includes("win") ? "ph-fill ph-windows-logo" : ep.operating_system.toLowerCase().includes("linux") ? "ph-fill ph-linux-logo" : "ph-fill ph-desktop"} 
+                        style={{ fontSize: "18px", color: "var(--tx-dim)" }} 
+                      />
+                      <div>
+                        <div className="font-bold tracking-tight" style={{ color: "var(--tx)" }}>{ep.hostname}</div>
+                        <div className="text-[11px] mt-0.5 font-medium" style={{ color: "var(--tx-mute)" }}>
+                          {ep.operating_system} {ep.os_version}
+                        </div>
+                      </div>
                     </div>
                   </td>
-                  <td className="py-2.5 pr-3 tabular-nums" style={{ color: "var(--tx-dim)" }}>{ep.ip_address}</td>
-                  <td className="py-2.5 pr-3">
+                  <td className="py-3 pr-3 tabular-nums font-medium" style={{ color: "var(--tx-dim)" }}>{ep.ip_address}</td>
+                  <td className="py-3 pr-3">
                     <span
-                      className="text-[10.5px] font-medium px-2 py-0.5 rounded flex items-center gap-1.5 w-fit"
-                      style={connStatusPillStyle(ep.conn_status)}
+                      className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full flex items-center gap-1.5 w-fit"
+                      style={{ ...connStatusPillStyle(ep.conn_status), border: `1px solid ${connStatusPillStyle(ep.conn_status).color}` }}
                     >
                       <span className="w-1.5 h-1.5 rounded-full" style={{ background: CONN_STATUS_VAR[ep.conn_status] }} />
                       {CONN_STATUS_LABEL[ep.conn_status]}
                     </span>
                   </td>
-                  <td className="py-2.5 pr-3">
+                  <td className="py-3 pr-3">
                     <span
-                      className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded"
+                      className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
                       style={severityPillStyle(ep.risk)}
                     >
                       {SEVERITY_LABEL[ep.risk].toUpperCase()}
                     </span>
                   </td>
-                  <td className="py-2.5 pr-3">
-                    <span className="flex items-center gap-1.5" style={{ color: "var(--tx-dim)" }}>
+                  <td className="py-3 pr-3">
+                    <span className="flex items-center gap-1.5 font-medium" style={{ color: "var(--tx-dim)" }}>
                       <span className="w-1.5 h-1.5 rounded-full" style={{ background: AGENT_HEALTH_VAR[ep.agent_health] }} />
                       {AGENT_HEALTH_LABEL[ep.agent_health]}
                     </span>
                   </td>
-                  <td className="py-2.5 pr-3" style={{ color: "var(--tx-dim)" }}>{ep.last_seen_ago}</td>
-                  <td className="py-2.5 pr-3">
+                  <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-dim)" }}>{ep.last_seen_ago}</td>
+                  <td className="py-3 pr-3">
                     <span
-                      className="font-semibold"
+                      className="font-bold tabular-nums"
                       style={{ color: ep.alerts_count > 0 ? "var(--warn)" : "var(--tx-mute)" }}
                     >
                       {ep.alerts_count}
                     </span>
                   </td>
-                  <td className="py-2.5 pr-3" style={{ color: "var(--tx-mute)" }}>
+                  <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-mute)" }}>
                     {ep.last_activity_ago ?? "Sin actividad registrada"}
                   </td>
-                  <td className="py-2.5">
+                  <td className="py-3">
                     <button
                       onClick={() => onSelect(ep.id)}
-                      className="flex items-center gap-1 text-[11.5px] font-medium border-0 bg-transparent cursor-pointer whitespace-nowrap"
+                      className="flex items-center gap-1.5 text-[11.5px] font-bold border-0 bg-transparent cursor-pointer whitespace-nowrap transition-premium btn-hover"
                       style={{ color: "var(--brand)" }}
                     >
                       Detalles
-                      <i className="ph ph-arrow-right text-[12px]" />
+                      <i className="ph-fill ph-arrow-right text-[13px]" />
                     </button>
                   </td>
                 </tr>

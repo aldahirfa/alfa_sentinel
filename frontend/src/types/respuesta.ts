@@ -1,11 +1,12 @@
-// Tipos alineados 1:1 con GET /api/respuesta (server/main.py) -- la
-// versión JSON del placeholder honesto que hoy vive en /respuesta
-// (Jinja2). No hay respuesta automática real todavía: 'host_isolations'
-// existe en el schema pero ningún endpoint escribe ahí (el agente no
-// tiene canal de comandos remotos). Esta pantalla no inventa un botón
-// de aislamiento que funcione -- muestra lo real: el historial (vacío
-// hoy) y los incidentes críticos abiertos que sí requieren contención
-// manual, fuera de la consola.
+// Tipos alineados 1:1 con GET /api/respuesta (server/main.py).
+//
+// Desde el motor heurístico definitivo (2026-08-16), 'host_isolations'
+// SÍ puede tener filas reales con status='RECOMMENDED': el servidor
+// evalúa la condición de aislamiento (sección 30 de la especificación)
+// y deja constancia de que se cumplió, pero no ejecuta nada -- el
+// agente sigue sin tener canal de comandos remotos (agent/main.py es
+// de una sola pasada). Un aislamiento REQUESTED/EXECUTED de verdad
+// seguiría siendo manual, fuera de la consola.
 
 import type { Severity } from "./dashboard";
 
@@ -29,15 +30,18 @@ export interface CriticalIncidentItem {
   severity_label: string;
 }
 
-// 'isolation_type'/'status' no tienen un vocabulario fijo en el
-// código (VARCHAR libre, sin CHECK constraint, y nada lo escribe
-// nunca todavía) -- se muestran tal cual, sin traducir, a diferencia
-// de alerts.status/incidents.status que sí tienen una tabla de
-// etiquetas en español definida en el servidor.
+// 'isolation_type'/'status' siguen siendo VARCHAR libre (sin CHECK
+// constraint), pero desde el motor heurístico definitivo (2026-08-16)
+// el servidor sí puede escribir acá (status='RECOMMENDED', ver
+// server/main.py::report_alert) y ahora traduce ambos campos igual
+// que alerts.status/incidents.status (ISOLATION_STATUS_LABELS_ES /
+// ISOLATION_TYPE_LABELS_ES).
 export interface IsolationRecord {
   id: number;
   isolation_type: string;
+  isolation_type_label: string;
   status: string;
+  status_label: string;
   reason: string | null;
   requested_at: string | null;
   executed_at: string | null;

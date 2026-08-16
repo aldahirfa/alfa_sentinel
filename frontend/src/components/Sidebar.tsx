@@ -61,7 +61,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
         </div>
       </div>
 
-      <nav className="px-2.5 py-1.5 flex flex-col gap-0.5 flex-1 overflow-auto">
+      <nav className="px-3 py-2 flex flex-col gap-1 flex-1 overflow-auto">
         {NAV_ITEMS.map((item) => {
           const { label, icon, href, page: itemPage, badgeKey } = item;
           const active = itemPage !== undefined && itemPage === page;
@@ -73,10 +73,11 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
               {label}
               {badge !== null && badge > 0 && (
                 <span
-                  className="ml-auto text-[10.5px] font-semibold px-1.5 py-px rounded-full"
+                  className="ml-auto text-[10.5px] font-bold px-2 py-0.5 rounded-full tracking-wide shadow-sm"
                   style={{
-                    background: badgeKey === "alerts" ? "var(--crit-soft)" : "var(--high-soft)",
+                    background: badgeKey === "alerts" ? "var(--crit-fill)" : "var(--high-fill)",
                     color: badgeKey === "alerts" ? "var(--crit)" : "var(--high)",
+                    border: `1px solid ${badgeKey === "alerts" ? "var(--crit-soft)" : "var(--high-soft)"}`
                   }}
                 >
                   {badge}
@@ -88,9 +89,9 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
           const sharedProps = {
             key: label,
             className:
-              "flex items-center gap-2.5 px-2.5 py-2 rounded-[7px] no-underline text-[13px] font-medium transition-colors cursor-pointer",
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-[13.5px] font-medium transition-premium cursor-pointer",
             style: active
-              ? { color: "var(--brand)", background: "var(--brand-soft)", boxShadow: "inset 2px 0 0 var(--brand)" }
+              ? { color: "var(--brand)", background: "var(--brand-fill)", boxShadow: "inset 3px 0 0 var(--brand)" }
               : { color: "var(--tx-dim)" },
             onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
               if (!active) {

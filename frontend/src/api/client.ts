@@ -21,6 +21,7 @@ import type {
   AgentSettingsResponse,
   AuditLogsResponse,
   EnrollmentTokenResult,
+  RolesResponse,
   UserCreatePayload,
   UserUpdatePayload,
   UsersResponse,
@@ -313,6 +314,11 @@ export async function generateReport(payload: GenerateReportPayload): Promise<Ge
 // exacta. Cualquier sesión válida puede leerla (igual que la real).
 export function fetchUsers(): Promise<UsersResponse> {
   return request<UsersResponse>("/api/users");
+}
+
+// GET /api/roles -- catálogo real de la tabla 'roles' (2026-08-16).
+export function fetchRoles(): Promise<RolesResponse> {
+  return request<RolesResponse>("/api/roles");
 }
 
 // POST /users -- solo admin (endpoint real ya existente).

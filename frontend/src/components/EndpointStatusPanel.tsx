@@ -14,12 +14,14 @@ export default function EndpointStatusPanel({ status }: Props) {
 
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 shadow-sm flex flex-col h-full"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <h2 className="text-[14.5px] font-semibold m-0" style={{ color: "var(--tx)" }}>Estado de endpoints</h2>
+      <h2 className="text-[14px] font-bold tracking-tight m-0" style={{ color: "var(--tx)" }}>
+        Estado de endpoints
+      </h2>
 
-      <div className="flex h-[9px] rounded-[5px] overflow-hidden mt-3.5 gap-0.5">
+      <div className="flex h-[9px] rounded-[5px] overflow-hidden mt-auto gap-0.5 mb-1.5">
         {segments.map((s) => (
           <div key={s.key} style={{ width: `${(s.value / total) * 100}%`, background: s.color }} />
         ))}

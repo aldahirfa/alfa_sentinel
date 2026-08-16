@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { escalateAlertToIncident } from "../api/client";
 import type { IncidenteDrawerData } from "../types/alerts";
 import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
@@ -39,22 +39,49 @@ export default function EscalateAlertModal({ alert, onClose, onEscalated }: Prop
     }
   }
 
+  const [entered, setEntered] = useState(false);
+
+  // Un pequeño hack para que la animación de entrada de un modal "fijo" 
+  // que no recibe 'open' desde afuera funcione. Se monta, espera un frame y entra.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <>
-      <div onClick={onClose} className="fixed inset-0 z-50" style={{ background: "rgba(0,0,0,0.5)" }} />
-      <div className="fixed inset-0 z-[51] flex items-center justify-center p-4">
+      <div 
+        onClick={onClose} 
+        className="fixed inset-0 z-[50]" 
+        style={{ background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 200ms ease" }} 
+      />
+      <div 
+        className="fixed inset-0 z-[51] flex items-center justify-center p-4"
+        style={{
+          opacity: entered ? 1 : 0,
+          transform: entered ? "scale(1)" : "scale(0.95)",
+          transition: "opacity 200ms ease, transform 200ms ease",
+        }}
+      >
         <div
-          className="w-full max-w-md rounded-[12px] border flex flex-col"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}
+          className="w-full max-w-md rounded-2xl border flex flex-col shadow-2xl"
+          style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
         >
-          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)" }}>
-            <div className="text-[15px] font-semibold" style={{ color: "var(--tx)" }}>Escalar a incidente</div>
+          <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
+                Gestión manual
+              </div>
+              <div className="text-[18px] font-bold mt-1 tracking-tight truncate" style={{ color: "var(--tx)" }}>
+                Escalar a incidente
+              </div>
+            </div>
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-lg border grid place-items-center cursor-pointer"
+              className="w-8 h-8 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
               style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
             >
-              <i className="ph ph-x" style={{ fontSize: "15px" }} />
+              <i className="ph-fill ph-x" style={{ fontSize: "15px" }} />
             </button>
           </div>
 
@@ -98,7 +125,7 @@ export default function EscalateAlertModal({ alert, onClose, onEscalated }: Prop
             <button
               onClick={onClose}
               disabled={saving}
-              className="px-3.5 py-2 rounded-[8px] text-[12.5px] font-medium cursor-pointer disabled:opacity-50"
+              className="px-4 py-2 rounded-lg text-[13px] font-bold cursor-pointer transition-premium btn-hover shadow-sm disabled:opacity-50"
               style={{ border: "1px solid var(--line)", color: "var(--tx-dim)", background: "var(--surf2)" }}
             >
               Cancelar
@@ -106,7 +133,7 @@ export default function EscalateAlertModal({ alert, onClose, onEscalated }: Prop
             <button
               onClick={handleConfirm}
               disabled={saving}
-              className="px-4 py-2 rounded-[8px] text-[12.5px] font-semibold cursor-pointer border-0 disabled:opacity-50"
+              className="px-5 py-2 rounded-lg text-[13px] font-bold cursor-pointer border-0 transition-premium btn-hover shadow-sm disabled:opacity-50"
               style={{ background: "var(--brand)", color: "#fff" }}
             >
               {saving ? "Escalando..." : "Confirmar escalamiento"}

@@ -1465,11 +1465,12 @@
         });
 
         // Nombres/iconos por severidad para la ventana flotante -- las 3 que
-        // puede traer /alerts/open (NORMAL nunca genera alerta, ver el
+        // puede traer /alerts/open (NORMAL/Bajo nunca genera alerta, ver el
         // propio endpoint). Sigue la escala de color del resto de la app:
-        // Sospechoso=Amarillo, Alto=Naranja, Crítico=Rojo.
+        // Medio=Amarillo, Alto=Naranja, Crítico=Rojo. Etiquetas actualizadas
+        // 2026-08-16 junto con RISK_LABELS_ES en server/main.py.
         const TOAST_SEVERITY_LABEL = {
-            SUSPICIOUS: "Sospechoso",
+            SUSPICIOUS: "Medio",
             HIGH: "Alto",
             CRITICAL: "Crítico"
         };

@@ -83,36 +83,35 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
         style={{ background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 200ms ease" }}
       />
       <aside
-        className="fixed top-0 right-0 h-screen w-full sm:w-[440px] z-50 flex flex-col"
+        className="fixed top-0 right-0 h-screen w-full sm:w-[460px] z-50 flex flex-col shadow-2xl"
         style={{
           background: "var(--surf)",
           borderLeft: "1px solid var(--line)",
-          boxShadow: "-16px 0 40px rgba(0,0,0,.3)",
           transform: entered ? "translateX(0)" : "translateX(100%)",
           transition: "transform 220ms ease",
         }}
       >
         {/* Encabezado */}
-        <div className="px-5 py-4 border-b flex items-start gap-3" style={{ borderColor: "var(--line-soft)" }}>
-          <div className="min-w-0">
+        <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
+          <div className="min-w-0 flex-1">
             <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
               Detalles de la alerta
             </div>
-            <div className="text-[17px] font-semibold mt-1 truncate" style={{ color: "var(--tx)" }}>
+            <div className="text-[18px] font-bold mt-1 tracking-tight truncate" style={{ color: "var(--tx)" }}>
               {data?.title ?? "Cargando..."}
             </div>
             {data && (
-              <div className="text-[11.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+              <div className="text-[11.5px] mt-1.5 font-medium" style={{ color: "var(--tx-mute)" }}>
                 {data.code} · {data.hostname}
               </div>
             )}
           </div>
           <button
             onClick={onClose}
-            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer"
+            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
             style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
           >
-            <i className="ph ph-x" style={{ fontSize: "15px" }} />
+            <i className="ph-fill ph-x" style={{ fontSize: "15px" }} />
           </button>
         </div>
 
@@ -136,17 +135,17 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
               {/* Estado principal */}
               <div className="px-5 py-4">
                 <div
-                  className="rounded-[10px] border p-3.5"
+                  className="rounded-xl border p-4 shadow-sm"
                   style={{
-                    background: data.severity === "CRITICAL" ? "var(--crit-soft)" : "var(--surf2)",
-                    borderColor: data.severity === "CRITICAL" ? "var(--crit)" : "var(--line)",
+                    background: data.severity === "CRITICAL" ? "var(--crit-fill)" : "var(--surf2)",
+                    borderColor: data.severity === "CRITICAL" ? "var(--crit-soft)" : "var(--line-soft)",
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Severidad</span>
                     {data.severity && (
                       <span
-                        className="text-[11px] font-bold tracking-wide px-2 py-0.5 rounded"
+                        className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                         style={severityPillStyle(data.severity)}
                       >
                         {SEVERITY_LABEL[data.severity].toUpperCase()}
@@ -159,8 +158,8 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                       <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Estado</div>
                       <div className="mt-1">
                         <span
-                          className="text-[10.5px] font-medium px-2 py-0.5 rounded inline-block"
-                          style={statusPillStyle(data.status as AlertStatus)}
+                          className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full inline-block"
+                          style={{ ...statusPillStyle(data.status as AlertStatus), border: `1px solid ${statusPillStyle(data.status as AlertStatus).color}` }}
                         >
                           {data.status_label}
                         </span>
@@ -240,11 +239,11 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                     </div>
                     <button
                       onClick={() => onViewIncident(data.incident_id!)}
-                      className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-[12px] font-medium cursor-pointer border-0"
-                      style={{ border: "1px solid var(--brand)", color: "var(--brand)", background: "transparent" }}
+                      className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12.5px] font-bold cursor-pointer border transition-premium btn-hover shadow-sm"
+                      style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "transparent" }}
                     >
                       Ver incidente
-                      <i className="ph ph-arrow-right text-[13px]" />
+                      <i className="ph-fill ph-arrow-right text-[14px]" />
                     </button>
                   </>
                 ) : (
@@ -254,10 +253,10 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                     </p>
                     <button
                       onClick={() => setShowEscalate(true)}
-                      className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12.5px] font-semibold cursor-pointer"
-                      style={{ border: "1px solid var(--brand)", color: "var(--brand)", background: "var(--brand-soft)" }}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-bold cursor-pointer border transition-premium btn-hover shadow-sm"
+                      style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "var(--brand-fill)" }}
                     >
-                      <i className="ph-fill ph-siren" style={{ fontSize: "14px" }} />
+                      <i className="ph-fill ph-siren" style={{ fontSize: "15px" }} />
                       Escalar a incidente
                     </button>
                   </>
@@ -272,19 +271,16 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                   <p className="text-[10.5px] mb-2.5" style={{ color: "var(--tx-mute)" }}>
                     Eventos cercanos en el tiempo a esta alerta (correlación aproximada, no un vínculo directo).
                   </p>
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-0 relative before:absolute before:inset-y-2 before:left-[5px] before:w-px before:bg-[var(--line)]">
                     {data.timeline.map((item, i) => (
-                      <div key={i} className="flex gap-2.5">
-                        <i
-                          className={item.kind === "honeyfile" ? "ph-fill ph-file-lock" : "ph ph-activity"}
-                          style={{ fontSize: "13px", color: "var(--tx-dim)", marginTop: "2px" }}
-                        />
+                      <div key={i} className="flex gap-3.5 relative py-2">
+                        <div className="w-[11px] h-[11px] rounded-full mt-1 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: item.kind === "honeyfile" ? "var(--warn)" : "var(--tx-mute)" }} />
                         <div className="min-w-0">
-                          <div className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>{item.label}</div>
+                          <div className="text-[12.5px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.label}</div>
                           {item.detail && (
-                            <div className="text-[11px] truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
+                            <div className="text-[11px] mt-0.5 font-medium truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
                           )}
-                          <div className="text-[10.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{item.at}</div>
+                          <div className="text-[10.5px] mt-1 font-medium" style={{ color: "var(--tx-dim)" }}>{item.at}</div>
                         </div>
                       </div>
                     ))}

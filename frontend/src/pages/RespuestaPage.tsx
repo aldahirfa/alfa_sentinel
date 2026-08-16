@@ -35,14 +35,14 @@ export default function RespuestaPage() {
       {/* Mismo mensaje honesto que el placeholder real de /respuesta --
           no se simula un botón de aislamiento que funcione. */}
       <div
-        className="rounded-[10px] border px-4 py-3.5 flex items-start gap-3"
+        className="rounded-xl border p-5 flex items-start gap-3.5 shadow-sm"
         style={{ background: "var(--info-soft)", borderColor: "var(--info)" }}
       >
-        <i className="ph ph-info" style={{ fontSize: "18px", color: "var(--info)", marginTop: "1px" }} />
+        <i className="ph-fill ph-info" style={{ fontSize: "20px", color: "var(--info)", marginTop: "2px" }} />
         <div className="text-[12.5px] leading-relaxed" style={{ color: "var(--tx)" }}>
-          <strong>El aislamiento de endpoints es parte del diseño del sistema, pero la respuesta automática todavía no está implementada.</strong>
+          <strong>El motor heurístico puede recomendar aislar un endpoint, pero la ejecución sigue siendo manual.</strong>
           <br />
-          El agente no tiene un canal para recibir ni ejecutar comandos remotos, así que por ahora la contención ante una detección crítica es manual, fuera de esta consola. La tabla de abajo muestra qué incidentes la necesitarían ahora mismo.
+          El agente no tiene un canal para recibir ni ejecutar comandos remotos, así que cuando se cumple la política de contención (ver abajo, estado "Recomendado") la contención real ante una detección crítica es manual, fuera de esta consola. La tabla de abajo muestra el historial y qué incidentes la necesitarían ahora mismo.
         </div>
       </div>
 

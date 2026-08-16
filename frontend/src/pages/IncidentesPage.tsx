@@ -7,6 +7,7 @@ import IncidentDrawer from "../components/IncidentDrawer";
 import { fetchIncidentes } from "../api/client";
 import type { CombinedItem, IncidentesResponse, ItemKind, StatusBucket } from "../types/incidentes";
 import type { Severity } from "../types/dashboard";
+import { useRowFlash } from "../hooks/useRowFlash";
 
 const DEBOUNCE_MS = 300;
 
@@ -34,6 +35,10 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ kind: ItemKind; id: number } | null>(null);
+  // Clave combinada "kind:id" para comparar contra las filas de la
+  // tabla -- ver lib/rowSelection.ts / hooks/useRowFlash.ts.
+  const selectedKey = selected ? `${selected.kind}:${selected.id}` : null;
+  const flashKey = useRowFlash(selectedKey);
 
   useEffect(() => {
     if (initialSelection != null) setSelected(initialSelection);
@@ -109,6 +114,8 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
             loading={loading}
             hasFilters={hasFilters}
             onSelect={(item: CombinedItem) => setSelected({ kind: item.kind, id: item.id })}
+            selectedKey={selectedKey}
+            flashKey={flashKey}
           />
           {data && (
             <IncidentesPagination

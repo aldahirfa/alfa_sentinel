@@ -1,11 +1,14 @@
 import type { HoneyfileListItem } from "../types/honeyfiles";
 import { fileTypeIcon, honeyfileStatusPillStyle, HONEYFILE_STATUS_LABEL } from "../lib/honeyfileStatus";
+import { rowSelectionStyle } from "../lib/rowSelection";
 
 interface Props {
   honeyfiles: HoneyfileListItem[];
   loading: boolean;
   hasFilters: boolean;
   onSelect: (id: number) => void;
+  selectedId: number | null;
+  flashId: number | null;
 }
 
 function SkeletonRow() {
@@ -23,7 +26,7 @@ function SkeletonRow() {
   );
 }
 
-export default function HoneyfilesTable({ honeyfiles, loading, hasFilters, onSelect }: Props) {
+export default function HoneyfilesTable({ honeyfiles, loading, hasFilters, onSelect, selectedId, flashId }: Props) {
   return (
     <section
       className="rounded-[10px] border p-4"
@@ -55,13 +58,16 @@ export default function HoneyfilesTable({ honeyfiles, loading, hasFilters, onSel
           ) : (
             honeyfiles.map((hf) => {
               const accent = hf.status === "TRIGGERED" ? "var(--crit)" : null;
+              const isSelected = hf.id === selectedId;
+              const isFlashing = hf.id === flashId;
+              const selStyle = rowSelectionStyle(isSelected, isFlashing);
               return (
                 <tr
                   key={hf.id}
-                  className="border-t transition-colors"
-                  style={{ borderColor: "var(--line-soft)" }}
+                  className="border-t"
+                  style={{ borderColor: "var(--line-soft)", ...selStyle }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surf2)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = selStyle.background as string)}
                 >
                   <td className="py-2.5 pr-3" style={accent ? { boxShadow: `inset 3px 0 0 ${accent}` } : undefined}>
                     <div className="flex items-start gap-2 pl-2">

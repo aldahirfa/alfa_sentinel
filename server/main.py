@@ -194,11 +194,18 @@ class EventCreate(BaseModel):
 
 
 class AlertCreate(BaseModel):
-    severity: str
+    """Contrato reescrito 2026-08-16 junto con el motor heurístico
+    definitivo (ver PENDIENTES.md): el agente ya NO decide severidad
+    ni risk_score -- solo reporta qué reglas detectó activas
+    (matched_rules, nombres de 'heuristic_rules.name'). El servidor
+    (POST /agent/alerts, report_alert) es quien calcula peso,
+    correlación, score final y severidad. 'severity'/'risk_score'/
+    'rule_name' (contrato viejo) se eliminan -- no quedaba ningún
+    agente en uso con el contrato anterior que hubiera que soportar en
+    paralelo."""
     title: str
     description: str | None = None
-    risk_score: int | None = None
-    rule_name: str | None = None
+    matched_rules: list[str] = []
 
 
 class LoginRequest(BaseModel):
@@ -632,6 +639,31 @@ def perfil_page(request: Request):
     )
 
 
+@app.get("/api/roles")
+def api_roles(user: dict = Depends(get_current_user)):
+    """Catálogo real de roles -- fuente para el selector de 'Rol' en
+    crear/editar usuario (frontend) y para validar en el backend que un
+    role_id/nombre de rol enviado realmente existe (ver POST /users,
+    PATCH /users/{id}). Si mañana se agrega una fila nueva en 'roles',
+    aparece acá sin tocar código (2026-08-16, ver PENDIENTES.md,
+    auditoría de catálogos duplicados)."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id, name, description FROM roles ORDER BY name;")
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    return {
+        "roles": [
+            {"id": r[0], "name": r[1], "description": r[2]}
+            for r in rows
+        ]
+    }
+
+
 @app.post("/users")
 def create_user(
     new_user: UserCreate,
@@ -665,8 +697,14 @@ def create_user(
                     detail=f"Ya existe un usuario '{new_user.username}'"
                 )
 
-            # Busca el rol pedido; si todavía no existe, lo crea
-            # (mismo patrón que usaba bootstrap_admin.py).
+            # El rol pedido tiene que existir en 'roles' -- no se crea
+            # uno nuevo silenciosamente a partir de un string que mandó
+            # el frontend (antes lo hacía: cualquier typo en el campo de
+            # texto generaba una fila basura en 'roles'. Ver
+            # PENDIENTES.md, auditoría de catálogos duplicados,
+            # 2026-08-16). El frontend ahora elige de un <select>
+            # poblado con GET /api/roles, pero el backend no confía en
+            # eso -- valida igual.
             cursor.execute(
                 "SELECT id FROM roles WHERE name = %s;",
                 (new_user.role,)
@@ -674,18 +712,13 @@ def create_user(
 
             role_row = cursor.fetchone()
 
-            if role_row:
-                role_id = role_row[0]
-            else:
-                cursor.execute(
-                    """
-                    INSERT INTO roles (name, description)
-                    VALUES (%s, %s)
-                    RETURNING id;
-                    """,
-                    (new_user.role, f"Rol '{new_user.role}'")
+            if role_row is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"El rol '{new_user.role}' no existe. Los roles disponibles se obtienen de GET /api/roles."
                 )
-                role_id = cursor.fetchone()[0]
+
+            role_id = role_row[0]
 
             cursor.execute(
                 """
@@ -786,17 +819,18 @@ def update_user(
 
             if payload.role is not None:
 
+                # Igual que POST /users: el rol tiene que existir ya en
+                # 'roles', no se crea uno nuevo a partir de texto libre.
                 cursor.execute("SELECT id FROM roles WHERE name = %s;", (payload.role,))
                 role_row = cursor.fetchone()
 
-                if role_row:
-                    role_id = role_row[0]
-                else:
-                    cursor.execute(
-                        "INSERT INTO roles (name, description) VALUES (%s, %s) RETURNING id;",
-                        (payload.role, f"Rol '{payload.role}'")
+                if role_row is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"El rol '{payload.role}' no existe. Los roles disponibles se obtienen de GET /api/roles."
                     )
-                    role_id = cursor.fetchone()[0]
+
+                role_id = role_row[0]
 
                 # Reemplaza los roles existentes en vez de sumarlos --
                 # hoy la UI solo maneja "un rol por usuario" (mismo
@@ -978,8 +1012,8 @@ def dashboard_page(request: Request):
             risk_distribution = [
                 {"label": "Crítico", "key": "CRITICAL", "count": critical_n, "color": "#dc2626"},
                 {"label": "Alto", "key": "HIGH", "count": high_n, "color": "#ea580c"},
-                {"label": "Sospechoso", "key": "SUSPICIOUS", "count": suspicious_n, "color": "#ca8a04"},
-                {"label": "Normal", "key": "NORMAL", "count": normal_n, "color": "#16a34a"},
+                {"label": "Medio", "key": "SUSPICIOUS", "count": suspicious_n, "color": "#ca8a04"},
+                {"label": "Bajo", "key": "NORMAL", "count": normal_n, "color": "#16a34a"},
             ]
             risk_max = max((r["count"] for r in risk_distribution), default=0) or 1
 
@@ -1086,7 +1120,7 @@ def dashboard_page(request: Request):
                 FROM alerts
                 JOIN alert_rule ON alert_rule.alert_id = alerts.id
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE heuristic_rules.name = 'honeyfile_access'
+                WHERE heuristic_rules.name = 'acceso_honeyfile'
                   AND alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';
                 """
             )
@@ -1100,7 +1134,7 @@ def dashboard_page(request: Request):
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE heuristic_rules.name = 'honeyfile_access'
+                WHERE heuristic_rules.name = 'acceso_honeyfile'
                 ORDER BY alerts.created_at DESC
                 LIMIT 1;
                 """
@@ -1164,7 +1198,7 @@ def dashboard_page(request: Request):
                 UNION ALL
                 (
                     SELECT 'event' AS kind, NULL AS sev,
-                           event_types.name AS label, endpoints.hostname AS hostname,
+                           event_types.description AS label, endpoints.hostname AS hostname,
                            events.detected_at AS ts,
                            events.file_path AS file_path
                     FROM events
@@ -1179,19 +1213,12 @@ def dashboard_page(request: Request):
                 """
             )
 
-            # Los tipos de evento que manda el agente son nombres de
-            # código (file_modified, etc.) -- se traducen acá para que
-            # la columna "Tipo" diga algo entendible sin tener que
-            # adivinar. Para las detecciones, el "tipo" específico es
-            # la severidad -- eso es lo que distingue una alerta de
-            # otra, no el hecho genérico de que sea una "detección".
-            EVENT_LABELS = {
-                "file_created": "Archivo creado",
-                "file_modified": "Archivo modificado",
-                "file_deleted": "Archivo eliminado",
-                "file_renamed": "Archivo renombrado / movido",
-            }
-
+            # 'label' de eventos ya viene traducido desde la BD
+            # (event_types.description, vía el UNION ALL de arriba) --
+            # no se mantiene una copia paralela en Python. Para las
+            # detecciones, el "tipo" específico es la severidad -- eso
+            # es lo que distingue una alerta de otra, no el hecho
+            # genérico de que sea una "detección".
             SEVERITY_TYPE_LABELS = {
                 "CRITICAL": "Detección crítica",
                 "HIGH": "Detección alta",
@@ -1208,7 +1235,7 @@ def dashboard_page(request: Request):
                     type_label = SEVERITY_TYPE_LABELS.get(sev, "Detección")
                     description = raw_label  # el título de la alerta
                 else:
-                    type_label = EVENT_LABELS.get(raw_label, raw_label)
+                    type_label = raw_label
                     # Para eventos, el "tipo" ya dice qué pasó (p. ej.
                     # "Archivo modificado") -- la descripción entonces
                     # es dónde pasó, no repetir qué pasó.
@@ -1318,18 +1345,18 @@ def dashboard_page(request: Request):
         pct = round((n / vector_total * 100), 2) if vector_total else 0
         threat_vectors.append({
             "rule_name": rule_name,
-            "rule_label": ALERT_RULE_LABELS_ES.get(rule_name, rule_name),
+            "rule_label": rule_name,
             "count": n,
             "pct": pct,
             "dash_offset": round(-vector_cumulative, 2),
-            "color": "#3059d6" if rule_name == "mass_file_activity" else "#0d9488"
+            "color": "#3059d6" if rule_name == "modificacion_masiva_archivos" else "#0d9488"
         })
         vector_cumulative += pct
 
     heuristic_rules_status = [
         {
             "name": row[0],
-            "rule_label": ALERT_RULE_LABELS_ES.get(row[0], row[0]),
+            "rule_label": row[0],
             "threshold": row[1],
             "window_seconds": row[2],
             "weight": row[3],
@@ -1449,34 +1476,26 @@ def _endpoint_cte(stale_seconds):
 
 ENDPOINTS_PAGE_SIZE = 25
 
-RISK_LABELS_ES = {"NORMAL": "Normal", "SUSPICIOUS": "Sospechoso", "HIGH": "Alto", "CRITICAL": "Crítico"}
+# Etiquetas actualizadas 2026-08-16 a los 4 niveles que pide la
+# especificación definitiva del motor heurístico: BAJO/MEDIO/ALTO/
+# CRÍTICO. Los valores internos de 'severity_levels.name' (NORMAL/
+# SUSPICIOUS/HIGH/CRITICAL) NO se renombran -- son un identificador
+# usado como literal en decenas de consultas; solo cambia la
+# traducción que ve el usuario. Ver database/schema.sql para el
+# comentario completo de esta decisión.
+RISK_LABELS_ES = {"NORMAL": "Bajo", "SUSPICIOUS": "Medio", "HIGH": "Alto", "CRITICAL": "Crítico"}
 
-# Únicos 4 tipos de evento que el agente realmente reporta hoy (vienen
-# de watchdog: on_created/on_modified/on_deleted/on_moved). No existe
-# "READ" -- watchdog no expone lectura de archivos, así que no lo
-# ofrecemos como filtro para no sugerir un dato que no recolectamos.
-EVENT_TYPE_LABELS_ES = {
-    "file_created": "Archivo creado",
-    "file_modified": "Archivo modificado",
-    "file_deleted": "Archivo eliminado",
-    "file_renamed": "Archivo renombrado / movido",
-}
+# EVENT_TYPE_LABELS_ES y ALERT_RULE_LABELS_ES se eliminaron (2026-08-16,
+# ver PENDIENTES.md, auditoría de catálogos duplicados): duplicaban
+# event_types.description y heuristic_rules.name respectivamente. Los
+# tipos de evento se leen en vivo con _event_type_labels(cursor)
+# (definida más abajo, junto a _eventos_kpis); los nombres de regla se
+# muestran tal cual vienen de heuristic_rules.name, sin traducir.
 
-# Severidad real de 'alerts' -- LOW existe en el CHECK constraint pero
-# el motor heurístico nunca lo produce (get_risk_level() solo devuelve
-# NORMAL/SUSPICIOUS/HIGH/CRITICAL, y NORMAL nunca genera alerta). En
-# la práctica solo aparecen estos 3.
-ALERT_SEVERITY_LABELS_ES = {"SUSPICIOUS": "Sospechosa", "HIGH": "Alta", "CRITICAL": "Crítica"}
-
-# Reglas que el motor heurístico del agente implementa hoy (sembradas
-# en database/schema.sql, sección de datos semilla). Las dos últimas
-# se agregaron 2026-08-12 (agent/heuristic_engine.py).
-ALERT_RULE_LABELS_ES = {
-    "mass_file_activity": "Modificación masiva de archivos",
-    "honeyfile_access": "Honeyfile activado",
-    "ransomware_extension_rename": "Rename a extensión de ransomware",
-    "mass_deletion": "Borrado masivo de archivos",
-}
+# Severidad real de 'alerts' -- en la práctica NORMAL (Bajo) casi
+# nunca aparece: report_alert exige matched_rules no vacío, así que la
+# alerta siempre nace con al menos un peso > 0.
+ALERT_SEVERITY_LABELS_ES = {"SUSPICIOUS": "Medio", "HIGH": "Alto", "CRITICAL": "Crítico"}
 
 # La nueva 'alerts.status' (alfa_sentinel) es un VARCHAR sin CHECK
 # constraint -- estos 5 valores ya no vienen impuestos por la base,
@@ -1502,6 +1521,23 @@ INCIDENT_STATUS_LABELS_ES = {
     "IN_PROGRESS": "En investigación",
     "CONTAINED": "Contenido",
     "CLOSED": "Cerrado",
+}
+
+# 'host_isolations.status' -- agregado 2026-08-16 junto con el motor
+# heurístico: 'RECOMMENDED' es nuevo y lo escribe report_alert cuando
+# se cumple la condición de aislamiento (sección 30 de la
+# especificación), sin ejecutar nada. 'REQUESTED'/'EXECUTED' quedan
+# documentados para cuando exista una vía real de aislamiento manual o
+# remoto -- hoy ningún endpoint los escribe todavía.
+ISOLATION_STATUS_LABELS_ES = {
+    "RECOMMENDED": "Recomendado (no ejecutado)",
+    "REQUESTED": "Solicitado",
+    "EXECUTED": "Ejecutado",
+    "RELEASED": "Liberado",
+}
+
+ISOLATION_TYPE_LABELS_ES = {
+    "NETWORK": "Aislamiento de red",
 }
 
 # Clasificación del resultado de la investigación -- separada del
@@ -1895,7 +1931,7 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
                     "severity": alert_row[1],
                     "created_at": alert_row[2].strftime("%d/%m/%Y %H:%M:%S") if alert_row[2] else "",
                     "file_path": None,
-                    "rule_name": ALERT_RULE_LABELS_ES.get(alert_row[3], alert_row[3]) if alert_row[3] else ""
+                    "rule_name": alert_row[3] if alert_row[3] else ""
                 }
 
             return {
@@ -2115,7 +2151,7 @@ def endpoint_detail_page(agent_id: int, request: Request):
                 UNION ALL
                 (
                     SELECT 'event' AS kind, NULL AS sev,
-                           event_types.name AS label, events.detected_at AS ts
+                           event_types.description AS label, events.detected_at AS ts
                     FROM events
                     JOIN event_types ON event_types.id = events.event_type_id
                     WHERE events.agent_id = %(agent_id)s
@@ -2140,7 +2176,9 @@ def endpoint_detail_page(agent_id: int, request: Request):
                 if kind == "alert":
                     type_label = SEVERITY_TYPE_LABELS_LOCAL.get(sev, "Detección")
                 else:
-                    type_label = EVENT_TYPE_LABELS_ES.get(raw_label, raw_label)
+                    # 'label' de eventos ya viene traducido desde la BD
+                    # (event_types.description) -- no hace falta diccionario.
+                    type_label = raw_label
                 recent_activity.append({
                     "kind": kind, "severity": sev, "type_label": type_label,
                     "label": raw_label if kind == "alert" else type_label, "ts": ts
@@ -2278,6 +2316,18 @@ def _eventos_where(agent_id, type_filter, category, since, search, params):
     return where_sql
 
 
+def _event_type_labels(cursor) -> dict:
+    """Diccionario event_types.name -> event_types.description, leído en
+    vivo de la BD en cada request en vez de mantener una copia
+    hardcodeada en Python (la BD es la fuente de verdad para este
+    catálogo -- ver PENDIENTES.md, auditoría de catálogos duplicados,
+    2026-08-16). event_types tiene 4 filas -- el costo de esta consulta
+    extra es despreciable."""
+
+    cursor.execute("SELECT name, description FROM event_types ORDER BY name;")
+    return dict(cursor.fetchall())
+
+
 def _eventos_kpis(cursor):
     """KPIs reales de las últimas 24h -- ver PENDIENTES.md para lo que
     NO se incluye acá (no hay 'anomalías por evento': el score de
@@ -2338,17 +2388,19 @@ def eventos_page(
     if user is None:
         return RedirectResponse(url="/login", status_code=302)
 
-    type_filter = type_filter if type_filter in EVENT_TYPE_LABELS_ES else ""
-    category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
-    since = since if since in EVENTOS_SINCE_OPTIONS else ""
-
     params = {}
-    where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
 
     connection = get_connection()
 
     try:
         with connection.cursor() as cursor:
+
+            event_type_labels = _event_type_labels(cursor)
+            type_filter = type_filter if type_filter in event_type_labels else ""
+            category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
+            since = since if since in EVENTOS_SINCE_OPTIONS else ""
+
+            where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
 
             kpis = _eventos_kpis(cursor)
 
@@ -2419,7 +2471,7 @@ def eventos_page(
             "id": row[0],
             "event_code": f"EVT-{row[0]:06d}",
             "event_type": row[1],
-            "type_label": EVENT_TYPE_LABELS_ES.get(row[1], row[1]),
+            "type_label": event_type_labels.get(row[1], row[1]),
             "file_path": row[2],
             "hostname": row[3],
             "operating_system": row[4],
@@ -2450,7 +2502,7 @@ def eventos_page(
             "last_id": last_id,
             "kpis": kpis,
             "endpoint_options": endpoint_options,
-            "event_type_options": EVENT_TYPE_LABELS_ES,
+            "event_type_options": event_type_labels,
             "category_options": EVENTOS_CATEGORY_LABELS_ES,
             "since_options": EVENTOS_SINCE_OPTIONS,
             "current_type": type_filter,
@@ -2467,7 +2519,7 @@ def eventos_page(
     )
 
 
-@app.get("/eventos/{event_id}")
+@app.get("/eventos/{event_id:int}")
 def evento_detail_page(event_id: int, request: Request):
 
     user = require_session_user(request)
@@ -2482,7 +2534,7 @@ def evento_detail_page(event_id: int, request: Request):
 
             cursor.execute(
                 """
-                SELECT events.id, event_types.name, events.file_path,
+                SELECT events.id, event_types.name, event_types.description, events.file_path,
                        agents.id, endpoints.hostname, endpoints.os,
                        agents.status, agents.last_seen_at, events.detected_at
                 FROM events
@@ -2499,7 +2551,7 @@ def evento_detail_page(event_id: int, request: Request):
             if row is None:
                 raise HTTPException(status_code=404, detail="Evento no encontrado")
 
-            (evt_id, event_type, file_path, agent_id, hostname,
+            (evt_id, event_type, event_type_label, file_path, agent_id, hostname,
              operating_system, agent_status, last_seen_at, detected_at) = row
 
             stale_seconds = get_agent_stale_seconds(cursor)
@@ -2524,7 +2576,7 @@ def evento_detail_page(event_id: int, request: Request):
         "id": evt_id,
         "event_code": f"EVT-{evt_id:06d}",
         "event_type": event_type,
-        "type_label": EVENT_TYPE_LABELS_ES.get(event_type, event_type),
+        "type_label": event_type_label,
         "description": None,
         "file_path": file_path,
         # Ya no viene guardada (era parte de 'metadata' JSONB, que no
@@ -2573,7 +2625,8 @@ def get_evento_drawer(event_id: int, request: Request):
                 SELECT events.id, event_types.name, events.file_path, events.detected_at,
                        events.process_id, events.process_name, endpoints.hostname,
                        endpoints.os, endpoints.os_version, endpoints.ip_address,
-                       agents.id, agents.status, {EVENT_IS_HONEYFILE_SQL} AS is_honeyfile
+                       agents.id, agents.status, {EVENT_IS_HONEYFILE_SQL} AS is_honeyfile,
+                       event_types.description AS event_type_label
                 FROM events
                 JOIN agents ON agents.id = events.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -2615,7 +2668,7 @@ def get_evento_drawer(event_id: int, request: Request):
             return {
                 "id": r[0],
                 "event_code": f"EVT-{r[0]:06d}",
-                "type_label": EVENT_TYPE_LABELS_ES.get(r[1], r[1]),
+                "type_label": r[13],
                 "file_path": file_path,
                 "extension": (os.path.splitext(file_path)[1].lstrip(".").lower() or None) if file_path else None,
                 "detected_at": r[3].strftime("%d/%m/%Y %H:%M:%S") if r[3] else "",
@@ -2655,19 +2708,21 @@ def get_eventos_live(
     if user is None:
         return JSONResponse({"error": "No autorizado"}, status_code=401)
 
-    type_filter = type_filter if type_filter in EVENT_TYPE_LABELS_ES else ""
     category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
     since = since if since in EVENTOS_SINCE_OPTIONS else ""
 
     params = {"after_id": after_id}
-    where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
-
-    extra_clause = "events.id > %(after_id)s"
-    where_sql = f"{where_sql} AND {extra_clause}" if where_sql else f"WHERE {extra_clause}"
 
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+            event_type_labels = _event_type_labels(cursor)
+            type_filter = type_filter if type_filter in event_type_labels else ""
+
+            where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
+            extra_clause = "events.id > %(after_id)s"
+            where_sql = f"{where_sql} AND {extra_clause}" if where_sql else f"WHERE {extra_clause}"
+
             kpis = _eventos_kpis(cursor)
 
             cursor.execute(
@@ -2693,7 +2748,7 @@ def get_eventos_live(
         {
             "id": row[0],
             "event_code": f"EVT-{row[0]:06d}",
-            "type_label": EVENT_TYPE_LABELS_ES.get(row[1], row[1]),
+            "type_label": event_type_labels.get(row[1], row[1]),
             "file_path": row[2],
             "hostname": row[3],
             "operating_system": row[4],
@@ -2727,16 +2782,19 @@ def export_eventos_csv(
     if user is None:
         return RedirectResponse(url="/login", status_code=302)
 
-    type_filter = type_filter if type_filter in EVENT_TYPE_LABELS_ES else ""
     category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
     since = since if since in EVENTOS_SINCE_OPTIONS else ""
 
     params = {}
-    where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
 
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+            event_type_labels = _event_type_labels(cursor)
+            type_filter = type_filter if type_filter in event_type_labels else ""
+
+            where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
+
             cursor.execute(
                 f"""
                 SELECT events.id, event_types.name, events.detected_at, endpoints.hostname,
@@ -2766,7 +2824,7 @@ def export_eventos_csv(
         writer.writerow([
             row[0],
             f"EVT-{row[0]:06d}",
-            EVENT_TYPE_LABELS_ES.get(row[1], row[1]),
+            event_type_labels.get(row[1], row[1]),
             "Honeyfile" if row[8] else "Archivo regular",
             row[2].strftime("%Y-%m-%d %H:%M:%S") if row[2] else "",
             row[3],
@@ -2781,13 +2839,6 @@ def export_eventos_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=eventos_alfa_sentinel.csv"}
     )
-
-
-MANUAL_ALERT_RISK_SCORE_BY_SEVERITY = {
-    "SUSPICIOUS": 45.00,
-    "HIGH": 70.00,
-    "CRITICAL": 90.00
-}
 
 
 class EventToAlert(BaseModel):
@@ -2818,7 +2869,7 @@ def convert_evento_to_alert(event_id: int, body: EventToAlert, request: Request)
             cursor.execute(
                 """
                 SELECT events.id, event_types.name, events.file_path, events.detected_at,
-                       events.agent_id, endpoints.hostname
+                       events.agent_id, endpoints.hostname, event_types.description
                 FROM events
                 JOIN agents ON agents.id = events.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -2832,7 +2883,7 @@ def convert_evento_to_alert(event_id: int, body: EventToAlert, request: Request)
                 return JSONResponse({"error": "Evento no encontrado"}, status_code=404)
 
             event_code = f"EVT-{r[0]:06d}"
-            type_label = EVENT_TYPE_LABELS_ES.get(r[1], r[1])
+            type_label = r[6]
             file_path = r[2]
             agent_id = r[4]
             hostname = r[5]
@@ -2845,15 +2896,21 @@ def convert_evento_to_alert(event_id: int, body: EventToAlert, request: Request)
             )
 
             cursor.execute(
-                "SELECT id FROM severity_levels WHERE name = %s;",
+                "SELECT id, min_score, max_score FROM severity_levels WHERE name = %s;",
                 (body.severity,)
             )
             severity_row = cursor.fetchone()
             if severity_row is None:
                 return JSONResponse({"error": "Severidad desconocida en el catálogo"}, status_code=422)
 
-            severity_id = severity_row[0]
-            risk_score = MANUAL_ALERT_RISK_SCORE_BY_SEVERITY[body.severity]
+            severity_id, min_score, max_score = severity_row
+            # No hay ventana/threshold evaluado en una alerta manual (no
+            # viene de una detección del motor heurístico), así que se usa
+            # el punto medio de la banda de severidad elegida como puntaje
+            # -- calculado en el momento desde severity_levels (la BD),
+            # no una constante Python que puede desincronizarse si se
+            # editan los rangos (ver PENDIENTES.md).
+            risk_score = round((float(min_score) + float(max_score)) / 2, 2)
 
             cursor.execute(
                 """
@@ -3934,7 +3991,7 @@ def dashboard_live(user: dict = Depends(get_current_user)):
                 UNION ALL
                 (
                     SELECT 'event' AS kind, NULL AS sev,
-                           event_types.name AS label, endpoints.hostname AS hostname,
+                           event_types.description AS label, endpoints.hostname AS hostname,
                            events.detected_at AS ts,
                            events.file_path AS file_path
                     FROM events
@@ -3949,12 +4006,6 @@ def dashboard_live(user: dict = Depends(get_current_user)):
                 """
             )
 
-            EVENT_LABELS = {
-                "file_created": "Archivo creado",
-                "file_modified": "Archivo modificado",
-                "file_deleted": "Archivo eliminado",
-                "file_renamed": "Archivo renombrado / movido",
-            }
             SEVERITY_TYPE_LABELS = {
                 "CRITICAL": "Detección crítica",
                 "HIGH": "Detección alta",
@@ -3968,7 +4019,8 @@ def dashboard_live(user: dict = Depends(get_current_user)):
                     type_label = SEVERITY_TYPE_LABELS.get(sev, "Detección")
                     description = raw_label
                 else:
-                    type_label = EVENT_LABELS.get(raw_label, raw_label)
+                    # 'label' de eventos ya viene de event_types.description (BD).
+                    type_label = raw_label
                     description = file_path or type_label
                 activity_feed.append({
                     "kind": kind, "severity": sev, "type_label": type_label,
@@ -4084,7 +4136,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 FROM alerts
                 JOIN alert_rule ON alert_rule.alert_id = alerts.id
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE heuristic_rules.name = 'honeyfile_access'
+                WHERE heuristic_rules.name = 'acceso_honeyfile'
                   AND alerts.created_at >= date_trunc('day', CURRENT_TIMESTAMP);
                 """
             )
@@ -4112,8 +4164,8 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             normal_n = max(endpoints_total - agents_with_open_alerts, 0)
 
             risk_distribution = [
-                {"level": "NORMAL", "label": "Normal", "count": normal_n, "color": RISK_COLOR_HEX["NORMAL"]},
-                {"level": "SUSPICIOUS", "label": "Sospechoso", "count": suspicious_n, "color": RISK_COLOR_HEX["SUSPICIOUS"]},
+                {"level": "NORMAL", "label": "Bajo", "count": normal_n, "color": RISK_COLOR_HEX["NORMAL"]},
+                {"level": "SUSPICIOUS", "label": "Medio", "count": suspicious_n, "color": RISK_COLOR_HEX["SUSPICIOUS"]},
                 {"level": "HIGH", "label": "Alto", "count": high_n, "color": RISK_COLOR_HEX["HIGH"]},
                 {"level": "CRITICAL", "label": "Crítico", "count": critical_n, "color": RISK_COLOR_HEX["CRITICAL"]},
             ]
@@ -4185,7 +4237,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
 
             # --- Honeyfiles: resumen + últimas activaciones. El
             # nombre de archivo puntual no está disponible todavía: la
-            # alerta de honeyfile_access no incluye qué archivo fue
+            # alerta de acceso_honeyfile no incluye qué archivo fue
             # (el agente no lo manda en el payload hoy), así que
             # 'file_name' va null en vez de inventado -- ver
             # PENDIENTES.md.
@@ -4200,7 +4252,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE heuristic_rules.name = 'honeyfile_access'
+                WHERE heuristic_rules.name = 'acceso_honeyfile'
                 ORDER BY alerts.created_at DESC
                 LIMIT 5;
                 """
@@ -4231,7 +4283,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 """
             )
             top_detections = [
-                {"rule_name": r[0], "rule_label": ALERT_RULE_LABELS_ES.get(r[0], r[0]), "count": r[1]}
+                {"rule_name": r[0], "rule_label": r[0], "count": r[1]}
                 for r in cursor.fetchall()
             ]
 
@@ -4416,7 +4468,7 @@ def api_dashboard_activity_series(
                 FROM alerts
                 JOIN alert_rule ON alert_rule.alert_id = alerts.id
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE heuristic_rules.name = 'honeyfile_access'
+                WHERE heuristic_rules.name = 'acceso_honeyfile'
                   AND alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'
                 GROUP BY bucket;
                 """
@@ -4682,8 +4734,8 @@ def deteccion_detail_page(alert_id: int, request: Request):
         "hostname": row[8],
         "operating_system": row[9],
         "rule_name": row[10],
-        "rule_label": ALERT_RULE_LABELS_ES.get(row[10], row[10] or "—"),
-        "is_honeyfile": row[10] == "honeyfile_access"
+        "rule_label": row[10] or "—",
+        "is_honeyfile": row[10] == "acceso_honeyfile"
     }
 
     return templates.TemplateResponse(
@@ -4951,10 +5003,18 @@ def assign_incident(
 
 @app.get("/api/rules")
 def api_rules(user: dict = Depends(get_current_user)):
-    """Versión JSON de la sub-pestaña Detección > Reglas de
-    /configuracion (Jinja2) para la pantalla Reglas Heurísticas en
-    React -- misma consulta exacta, mismos 4 campos editables después
-    (ver PATCH /rules/{rule_id})."""
+    """Pantalla Reglas Heurísticas (React) -- versión completa
+    (2026-08-16, ver PENDIENTES.md) que expone TODO lo que la
+    especificación de la pantalla pide: identificación, métrica
+    (nombre/descripción/unidad, desde 'metric_types'), evento
+    (nombre/descripción, desde 'event_types'), parámetros, actividad
+    real (alertas en 30 días / última activación, calculadas desde
+    'alert_rule') y auditoría (creación/última actualización). Nada de
+    esto se inventa: sale de columnas reales o de sub-consultas sobre
+    datos reales; cuando no hay dato (ej. una regla diferida sin
+    ninguna alerta todavía), el campo queda en None y el cliente
+    decide cómo mostrarlo ("Sin actividad registrada", etc.), no se
+    rellena acá con un valor de relleno."""
 
     connection = get_connection()
     try:
@@ -4969,8 +5029,13 @@ def api_rules(user: dict = Depends(get_current_user)):
                     heuristic_rules.threshold,
                     heuristic_rules.window_seconds,
                     heuristic_rules.is_active,
+                    heuristic_rules.created_at,
                     heuristic_rules.updated_at,
                     event_types.name,
+                    event_types.description,
+                    metric_types.name,
+                    metric_types.description,
+                    metric_types.unit,
                     (
                         SELECT COUNT(*)
                         FROM alert_rule
@@ -4986,6 +5051,7 @@ def api_rules(user: dict = Depends(get_current_user)):
                     ) AS last_triggered_at
                 FROM heuristic_rules
                 LEFT JOIN event_types ON event_types.id = heuristic_rules.event_type_id
+                LEFT JOIN metric_types ON metric_types.id = heuristic_rules.metric_type_id
                 ORDER BY heuristic_rules.weight DESC, heuristic_rules.name ASC;
                 """
             )
@@ -4997,16 +5063,33 @@ def api_rules(user: dict = Depends(get_current_user)):
         {
             "id": r[0],
             "name": r[1],
-            "label": ALERT_RULE_LABELS_ES.get(r[1], r[1]),
+            # 'label' es heuristic_rules.name tal cual -- sin diccionario
+            # de traducción paralelo (decisión 2026-08-16, ver
+            # PENDIENTES.md: los nombres en heuristic_rules ya son los
+            # definitivos, no se vuelven a traducir en código).
+            "label": r[1],
             "description": r[2],
             "weight": float(r[3]),
             "threshold": float(r[4]),
             "window_seconds": r[5],
             "is_active": r[6],
-            "updated_at": r[7].strftime("%d/%m/%Y %H:%M:%S") if r[7] else None,
-            "event_type_label": EVENT_TYPE_LABELS_ES.get(r[8], r[8]) if r[8] else "Cualquiera en la ventana",
-            "alerts_30d": r[9],
-            "last_triggered_at": r[10].strftime("%d/%m/%Y %H:%M:%S") if r[10] else None,
+            "created_at": r[7].strftime("%d/%m/%Y %H:%M:%S") if r[7] else None,
+            "updated_at": r[8].strftime("%d/%m/%Y %H:%M:%S") if r[8] else None,
+            "event_type_name": r[9],
+            "event_type_label": r[10] if r[9] else "Cualquiera en la ventana",
+            "event_type_description": r[10],
+            "metric_type_name": r[11],
+            "metric_type_description": r[12],
+            "metric_unit": r[13],
+            "alerts_30d": r[14],
+            "last_triggered_at": r[15].strftime("%d/%m/%Y %H:%M:%S") if r[15] else None,
+            # Calculados acá (no una columna nueva) para que el
+            # cliente no tenga que mantener su propia copia de estos
+            # dos sets -- una sola fuente de verdad, la misma que ya
+            # usa PATCH /rules/{id} para bloquear ediciones inválidas.
+            "is_deferred": r[1] in DEFERRED_RULE_NAMES,
+            "is_honeyfile": r[1] == "acceso_honeyfile",
+            "has_fixed_scoring": r[1] in FIXED_SCORING_RULE_NAMES,
         }
         for r in rows
     ]
@@ -5058,12 +5141,56 @@ def update_rule(
     try:
         with connection.cursor() as cursor:
 
+            # Se leen los valores ANTERIORES antes de tocar nada --
+            # hace falta tanto para las validaciones (nombre de la
+            # regla) como para la auditoría completa (sección 15 de la
+            # especificación: "valores anteriores; valores nuevos").
+            cursor.execute(
+                "SELECT name, weight, threshold, window_seconds, is_active FROM heuristic_rules WHERE id = %s;",
+                (rule_id,)
+            )
+            old_row = cursor.fetchone()
+
+            if old_row is None:
+                raise HTTPException(status_code=404, detail="Regla no encontrada")
+
+            old_name, old_weight, old_threshold, old_window, old_is_active = old_row
+
+            if payload.is_active is True and old_name in DEFERRED_RULE_NAMES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Esta regla está diferida: requiere datos que el agente no recopila "
+                        "hoy (atribución de proceso a evento de archivo, o muestreo de CPU por "
+                        "proceso). Activarla acá no haría que el agente empiece a evaluarla -- "
+                        "ver la descripción de la regla."
+                    )
+                )
+
+            if old_name in FIXED_SCORING_RULE_NAMES and (
+                payload.weight is not None or payload.threshold is not None or payload.window_seconds is not None
+            ):
+                if old_name == "acceso_honeyfile":
+                    reason = (
+                        "El peso de esta regla es fijo (100): cualquier interacción con un "
+                        "honeyfile debe llevar el riesgo a CRÍTICO sin depender de otras reglas. "
+                        "Solo se puede activar o desactivar, no ajustar su peso/umbral/ventana."
+                    )
+                else:
+                    reason = (
+                        "Esta regla no puntúa por umbral/ventana: es una bonificación de "
+                        "correlación calculada por el servidor según cuántas reglas distintas "
+                        "coincidieron (2 -> +5, 3 -> +10, 4+ -> +15). Solo se puede activar o "
+                        "desactivar, no ajustar su peso/umbral/ventana."
+                    )
+                raise HTTPException(status_code=422, detail=reason)
+
             fields = []
             values = []
 
             if payload.weight is not None:
-                if payload.weight < 0:
-                    raise HTTPException(status_code=422, detail="El peso no puede ser negativo")
+                if payload.weight < 0 or payload.weight > 100:
+                    raise HTTPException(status_code=422, detail="El peso tiene que estar entre 0 y 100")
                 fields.append("weight = %s")
                 values.append(payload.weight)
 
@@ -5091,25 +5218,22 @@ def update_rule(
                 UPDATE heuristic_rules
                 SET {', '.join(fields)}
                 WHERE id = %s
-                RETURNING id, name, weight, is_active, threshold, window_seconds;
+                RETURNING id, name, weight, is_active, threshold, window_seconds, updated_at;
                 """,
                 values
             )
 
             updated = cursor.fetchone()
 
-            if updated is None:
-                raise HTTPException(status_code=404, detail="Regla no encontrada")
-
             change_parts = []
             if payload.weight is not None:
-                change_parts.append(f"peso -> {payload.weight}")
+                change_parts.append(f"peso: {old_weight} -> {payload.weight}")
             if payload.is_active is not None:
-                change_parts.append(f"activa -> {payload.is_active}")
+                change_parts.append(f"activa: {old_is_active} -> {payload.is_active}")
             if payload.threshold is not None:
-                change_parts.append(f"umbral -> {payload.threshold}")
+                change_parts.append(f"umbral: {old_threshold} -> {payload.threshold}")
             if payload.window_seconds is not None:
-                change_parts.append(f"ventana -> {payload.window_seconds}s")
+                change_parts.append(f"ventana: {old_window}s -> {payload.window_seconds}s")
 
             log_audit(
                 cursor, user["id"], "UPDATE_RULE", "heuristic_rules", updated[0],
@@ -5125,7 +5249,8 @@ def update_rule(
             "weight": float(updated[2]),
             "is_active": updated[3],
             "threshold": float(updated[4]),
-            "window_seconds": updated[5]
+            "window_seconds": updated[5],
+            "updated_at": updated[6].strftime("%d/%m/%Y %H:%M:%S") if updated[6] else None,
         }
 
     finally:
@@ -5508,45 +5633,52 @@ def incidentes_page(
 
     status_bucket = status_bucket if status_bucket in STATUS_BUCKET_LABELS_ES else ""
     severity = severity if severity in ALERT_SEVERITY_LABELS_ES else ""
-    rule = rule if rule in ALERT_RULE_LABELS_ES else ""
     since = since if since in INCIDENTES_SINCE_OPTIONS else ""
-
-    where_clauses = []
-    params = {}
-
-    if agent_id:
-        where_clauses.append("agent_id = %(agent_id)s")
-        params["agent_id"] = agent_id
-
-    if status_bucket:
-        where_clauses.append("status_bucket = %(status_bucket)s")
-        params["status_bucket"] = status_bucket
-
-    if severity:
-        where_clauses.append("severity = %(severity)s")
-        params["severity"] = severity
-
-    if rule:
-        where_clauses.append("rule_names ILIKE %(rule)s")
-        params["rule"] = f"%{rule}%"
-
-    if since:
-        where_clauses.append("ts >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s")
-        params["since_interval"] = INCIDENTES_SINCE_OPTIONS[since][1]
-
-    if search:
-        where_clauses.append(
-            "(hostname ILIKE %(search)s OR CAST(ip_address AS TEXT) ILIKE %(search)s "
-            "OR rule_names ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
-        )
-        params["search"] = f"%{search}%"
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     connection = get_connection()
 
     try:
         with connection.cursor() as cursor:
+
+            # Nombres reales de heuristic_rules -- no un diccionario
+            # hardcodeado paralelo (ver PENDIENTES.md, auditoría de
+            # catálogos duplicados, 2026-08-16). Se usan tanto para
+            # validar el filtro 'rule' como para armar el selector.
+            cursor.execute("SELECT name FROM heuristic_rules ORDER BY name;")
+            rule_options = {row[0]: row[0] for row in cursor.fetchall()}
+            rule = rule if rule in rule_options else ""
+
+            where_clauses = []
+            params = {}
+
+            if agent_id:
+                where_clauses.append("agent_id = %(agent_id)s")
+                params["agent_id"] = agent_id
+
+            if status_bucket:
+                where_clauses.append("status_bucket = %(status_bucket)s")
+                params["status_bucket"] = status_bucket
+
+            if severity:
+                where_clauses.append("severity = %(severity)s")
+                params["severity"] = severity
+
+            if rule:
+                where_clauses.append("rule_names ILIKE %(rule)s")
+                params["rule"] = f"%{rule}%"
+
+            if since:
+                where_clauses.append("ts >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s")
+                params["since_interval"] = INCIDENTES_SINCE_OPTIONS[since][1]
+
+            if search:
+                where_clauses.append(
+                    "(hostname ILIKE %(search)s OR CAST(ip_address AS TEXT) ILIKE %(search)s "
+                    "OR rule_names ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
+                )
+                params["search"] = f"%{search}%"
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
             # KPIs -- siempre globales, sin filtrar (mismo criterio
             # que el resto de las listas).
@@ -5655,7 +5787,7 @@ def incidentes_page(
             "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity_val, severity_val or "—"),
             "risk_score": risk_score,
             "rule_label": " + ".join(
-                ALERT_RULE_LABELS_ES.get(n, n) for n in (rule_names or "").split(" + ") if n
+                n for n in (rule_names or "").split(" + ") if n
             ) or "—",
             "detection_count": detection_count,
             "assigned_to": assigned_to,
@@ -5685,7 +5817,7 @@ def incidentes_page(
             "incident_status_options": INCIDENT_STATUS_LABELS_ES,
             "alert_status_options": ALERT_STATUS_LABELS_ES,
             "severity_options": ALERT_SEVERITY_LABELS_ES,
-            "rule_options": ALERT_RULE_LABELS_ES,
+            "rule_options": rule_options,
             "since_options": INCIDENTES_SINCE_OPTIONS,
             "current_status": status_bucket,
             "current_severity": severity,
@@ -5733,39 +5865,44 @@ def api_incidentes(
 
     status_bucket = status_bucket if status_bucket in INCIDENT_STATUS_BUCKETS else ""
     severity = severity if severity in ALERT_SEVERITY_LABELS_ES else ""
-    rule = rule if rule in ALERT_RULE_LABELS_ES else ""
     since = since if since in INCIDENTES_SINCE_OPTIONS else ""
-
-    where_clauses = ["kind = 'incident'"]
-    params = {}
-
-    if agent_id:
-        where_clauses.append("agent_id = %(agent_id)s")
-        params["agent_id"] = agent_id
-    if status_bucket:
-        where_clauses.append("status_bucket = %(status_bucket)s")
-        params["status_bucket"] = status_bucket
-    if severity:
-        where_clauses.append("severity = %(severity)s")
-        params["severity"] = severity
-    if rule:
-        where_clauses.append("rule_names ILIKE %(rule)s")
-        params["rule"] = f"%{rule}%"
-    if since:
-        where_clauses.append("ts >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s")
-        params["since_interval"] = INCIDENTES_SINCE_OPTIONS[since][1]
-    if search:
-        where_clauses.append(
-            "(hostname ILIKE %(search)s OR CAST(ip_address AS TEXT) ILIKE %(search)s "
-            "OR rule_names ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
-        )
-        params["search"] = f"%{search}%"
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+
+            # Nombres reales de heuristic_rules -- ver incidentes_page
+            # (misma razón: no mantener un diccionario paralelo).
+            cursor.execute("SELECT name FROM heuristic_rules ORDER BY name;")
+            rule_names_catalog = [row[0] for row in cursor.fetchall()]
+            rule = rule if rule in rule_names_catalog else ""
+
+            where_clauses = ["kind = 'incident'"]
+            params = {}
+
+            if agent_id:
+                where_clauses.append("agent_id = %(agent_id)s")
+                params["agent_id"] = agent_id
+            if status_bucket:
+                where_clauses.append("status_bucket = %(status_bucket)s")
+                params["status_bucket"] = status_bucket
+            if severity:
+                where_clauses.append("severity = %(severity)s")
+                params["severity"] = severity
+            if rule:
+                where_clauses.append("rule_names ILIKE %(rule)s")
+                params["rule"] = f"%{rule}%"
+            if since:
+                where_clauses.append("ts >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s")
+                params["since_interval"] = INCIDENTES_SINCE_OPTIONS[since][1]
+            if search:
+                where_clauses.append(
+                    "(hostname ILIKE %(search)s OR CAST(ip_address AS TEXT) ILIKE %(search)s "
+                    "OR rule_names ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
+                )
+                params["search"] = f"%{search}%"
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
             cursor.execute(
                 COMBINED_CTE + "SELECT COUNT(*) FROM combined WHERE kind = 'incident' AND severity = 'CRITICAL' AND raw_status != 'CLOSED';"
@@ -5839,7 +5976,7 @@ def api_incidentes(
             "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity_val, severity_val or "—"),
             "risk_score": float(risk_score) if risk_score is not None else None,
             "rule_label": " + ".join(
-                ALERT_RULE_LABELS_ES.get(n, n) for n in (rule_names or "").split(" + ") if n
+                n for n in (rule_names or "").split(" + ") if n
             ) or "—",
             "detection_count": detection_count,
             "assigned_to": assigned_to,
@@ -5859,7 +5996,7 @@ def api_incidentes(
                 if k in INCIDENT_STATUS_BUCKETS
             ],
             "severity_options": [{"value": k, "label": v} for k, v in ALERT_SEVERITY_LABELS_ES.items()],
-            "rule_options": [{"value": k, "label": v} for k, v in ALERT_RULE_LABELS_ES.items()],
+            "rule_options": [{"value": n, "label": n} for n in rule_names_catalog],
             "since_options": [{"value": k, "label": v[0]} for k, v in INCIDENTES_SINCE_OPTIONS.items()],
             "assignable_users": assignable_users,
         },
@@ -5918,7 +6055,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 )
                 linked = cursor.fetchall()
                 anchor_ts = linked[0][1] if linked else opened_at
-                is_honeyfile = any(r[2] == "honeyfile_access" for r in linked)
+                is_honeyfile = any(r[2] == "acceso_honeyfile" for r in linked)
                 code = f"INC-{inc_id:05d}"
                 status_label = INCIDENT_STATUS_LABELS_ES.get(status, status)
 
@@ -5970,7 +6107,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 
                 code = f"ALT-{alert_id:05d}"
                 status_label = ALERT_STATUS_LABELS_ES.get(status, status)
-                is_honeyfile = rule_name == "honeyfile_access"
+                is_honeyfile = rule_name == "acceso_honeyfile"
                 classification = None
                 assigned_to = None
                 assigned_to_name = None
@@ -5994,7 +6131,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 )
                 matched_rules = [
                     {
-                        "rule_name": ALERT_RULE_LABELS_ES.get(r[0], r[0]),
+                        "rule_name": r[0],
                         "weight_applied": float(r[1]),
                         "matched_at": r[2].strftime("%d/%m/%Y %H:%M:%S"),
                     }
@@ -6039,7 +6176,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                     "at_raw": r[0],
                     "at": r[0].strftime("%d/%m %H:%M:%S"),
                     "kind": "event",
-                    "label": EVENT_TYPE_LABELS_ES.get(r[1], r[1]),
+                    "label": r[1],
                     "detail": r[2] or ""
                 }
                 for r in cursor.fetchall()
@@ -6231,7 +6368,7 @@ def api_alerts(
             "status_label": ALERT_STATUS_LABELS_ES.get(r[5], r[5]),
             "created_at": r[6].strftime("%d/%m/%Y %H:%M:%S"),
             "incident_id": r[7],
-            "rule_name": ALERT_RULE_LABELS_ES.get(r[8], r[8]) if r[8] else None,
+            "rule_name": r[8] if r[8] else None,
             "agent_id": r[9],
         }
         for r in rows
@@ -6245,7 +6382,7 @@ def api_alerts(
             "investigating": investigating_n,
             "resolved": resolved_n,
         },
-        "rules": [{"value": n, "label": ALERT_RULE_LABELS_ES.get(n, n)} for n in rule_names],
+        "rules": [{"value": n, "label": n} for n in rule_names],
         "page": current_page,
         "page_size": page_size,
         "total_pages": total_pages,
@@ -6414,7 +6551,7 @@ def incidente_reporte_pdf(incident_id: int, request: Request):
         for a_id, a_title, a_created, a_resolved, a_status, a_risk, a_sev, a_rule, a_weight in linked_alerts:
             rule_table_data.append([
                 f"ALT-{a_id:05d}",
-                ALERT_RULE_LABELS_ES.get(a_rule, a_rule) if a_rule else "Sin regla vinculada",
+                a_rule if a_rule else "Sin regla vinculada",
                 f"{float(a_weight):.0f}" if a_weight is not None else "—",
                 a_created.strftime("%d/%m %H:%M:%S")
             ])
@@ -6438,7 +6575,7 @@ def incidente_reporte_pdf(incident_id: int, request: Request):
         proc = f"{proc_name} (PID {proc_id})" if proc_name else "No disponible"
         trace_rows.append([
             detected_at.strftime("%d/%m %H:%M:%S"),
-            EVENT_TYPE_LABELS_ES.get(ev_type, ev_type),
+            ev_type,
             Paragraph(detail, styles["Normal"]),
             proc
         ])
@@ -6635,8 +6772,8 @@ def incidente_detail_page(incident_id: int, request: Request):
             "title": r[2],
             "status_label": ALERT_STATUS_LABELS_ES.get(r[3], r[3]),
             "created_at": r[4],
-            "rule_label": ALERT_RULE_LABELS_ES.get(r[5], r[5] or "—"),
-            "is_honeyfile": r[5] == "honeyfile_access"
+            "rule_label": r[5] or "—",
+            "is_honeyfile": r[5] == "acceso_honeyfile"
         }
         for r in linked_alert_rows
     ]
@@ -6822,7 +6959,9 @@ def api_respuesta(user: dict = Depends(get_current_user)):
         {
             "id": r[0],
             "isolation_type": r[1],
+            "isolation_type_label": ISOLATION_TYPE_LABELS_ES.get(r[1], r[1]),
             "status": r[2],
+            "status_label": ISOLATION_STATUS_LABELS_ES.get(r[2], r[2]),
             "reason": r[3],
             "requested_at": r[4].strftime("%d/%m/%Y %H:%M:%S") if r[4] else None,
             "executed_at": r[5].strftime("%d/%m/%Y %H:%M:%S") if r[5] else None,
@@ -7124,7 +7263,7 @@ def _gather_incidents_report_data(cursor, start, end, endpoint_id):
             "classification_label": INCIDENT_CLASSIFICATION_LABELS_ES.get(r[3], "Sin clasificar"),
             "opened_at": r[4], "closed_at": r[5], "hostname": r[6],
             "assigned_to_name": r[7] or "Sin asignar", "risk_score": float(r[8]),
-            "rule_label": ALERT_RULE_LABELS_ES.get(r[9], r[9]) if r[9] else "Sin regla vinculada",
+            "rule_label": r[9] if r[9] else "Sin regla vinculada",
             "alert_count": r[10]
         }
         for r in rows
@@ -7175,7 +7314,7 @@ def _build_security_pdf(data, meta):
 
     story.append(Paragraph("3. Reglas Heurísticas Más Activas", styles["AlfaSection"]))
     if data["rule_counts"]:
-        rule_rows = [["Regla", "Alertas disparadas"]] + [[ALERT_RULE_LABELS_ES.get(name, name or "Sin regla vinculada"), str(n)] for name, n in data["rule_counts"]]
+        rule_rows = [["Regla", "Alertas disparadas"]] + [[name or "Sin regla vinculada", str(n)] for name, n in data["rule_counts"]]
         story.append(_alfa_table(rule_rows))
     else:
         story.append(Paragraph("No hubo alertas en el período evaluado.", styles["Normal"]))
@@ -7296,7 +7435,7 @@ def _build_security_xlsx(data, meta):
         cls_rows = [[INCIDENT_CLASSIFICATION_LABELS_ES.get(c, c), n] for c, n in data["classification_counts"].items()]
         _xlsx_section(ws, "Clasificación de incidentes cerrados", ["Clasificación", "Cantidad"], cls_rows)
 
-    rule_rows = [[ALERT_RULE_LABELS_ES.get(name, name or "Sin regla vinculada"), n] for name, n in data["rule_counts"]]
+    rule_rows = [[name or "Sin regla vinculada", n] for name, n in data["rule_counts"]]
     _xlsx_section(ws, "Reglas más activas", ["Regla", "Alertas disparadas"], rule_rows or [["Sin alertas en el período", ""]])
 
     coverage_pct = round((data["honeyfiles_active"] + data["honeyfiles_triggered"]) / data["honeyfiles_total"] * 100, 1) if data["honeyfiles_total"] else 0
@@ -7904,14 +8043,14 @@ def configuracion_page(
                     {
                         "id": r[0],
                         "name": r[1],
-                        "label": ALERT_RULE_LABELS_ES.get(r[1], r[1]),
+                        "label": r[1],
                         "description": r[2],
                         "weight": float(r[3]),
                         "threshold": float(r[4]),
                         "window_seconds": r[5],
                         "is_active": r[6],
                         "updated_at": r[7],
-                        "event_type_label": EVENT_TYPE_LABELS_ES.get(r[8], r[8]) if r[8] else "Cualquiera en la ventana",
+                        "event_type_label": r[8] if r[8] else "Cualquiera en la ventana",
                         "alerts_30d": r[9],
                         "last_triggered_at": r[10]
                     }
@@ -8320,14 +8459,88 @@ def report_event(
         connection.close()
 
 
+# ------------------------------------------------------------------
+# Motor heurístico -- lado servidor (2026-08-16, ver PENDIENTES.md,
+# "Motor de reglas heurísticas -- especificación definitiva").
+#
+# "Mismo episodio": una ráfaga de eventos del mismo agente se agrupa
+# en una sola alerta en vez de crear una nueva por cada evento
+# (sección 27 -- "no crear cientos de alertas idénticas"). Se
+# considera mismo episodio una alerta del mismo agente que sigue
+# NEW/ACKNOWLEDGED (no cerrada/descartada) y fue creada hace menos de
+# EPISODE_WINDOW_SECONDS. Es una decisión de producto razonable (no
+# hay un valor "correcto" único) -- 120s, generoso respecto a las
+# ventanas de las reglas individuales (10-20s) para que una ráfaga que
+# dispara varias reglas en sucesión siga cayendo en la misma alerta.
+EPISODE_WINDOW_SECONDS = 120
+
+# Reglas "fuertes" -- peso >= 15, es decir todas menos las señales
+# secundarias explícitas de la especificación (HR-06 CPU, HR-08
+# archivos temporales) y las contextuales de menor peso (HR-10, y las
+# diferidas HR-05/11). Se usan para decidir "evidencia fuerte" en la
+# condición de incidente (sección 28) y de aislamiento (sección 30).
+STRONG_RULE_NAMES = {
+    "modificacion_masiva_archivos",
+    "renombrado_extension_anomala",
+    "acceso_honeyfile",
+    "escritura_intensiva_archivos",
+    "acceso_recursos_compartidos",
+    "eliminacion_anomala_archivos",
+}
+
+# Igual que STRONG_RULE_NAMES pero sin 'acceso_honeyfile' -- para la
+# Condición A de aislamiento (sección 30: "honeyfile + al menos un
+# indicador FUERTE DE ACTIVIDAD DE ARCHIVOS", el honeyfile no cuenta
+# como su propio segundo indicador).
+STRONG_FILE_ACTIVITY_RULES = STRONG_RULE_NAMES - {"acceso_honeyfile"}
+
+# HR-05/06/11 -- sembradas is_active=FALSE porque requieren datos que
+# el agente no recopila hoy (ver database/schema.sql). 'agent/
+# heuristic_engine.py::RULE_NAMES' tampoco las conoce, así que aunque
+# alguien las active desde /configuracion el agente seguiría
+# ignorándolas en silencio -- update_rule() bloquea esa activación
+# acá para no dejar que la UI sugiera una capacidad que no existe.
+DEFERRED_RULE_NAMES = {"proceso_sospechoso", "consumo_cpu_elevado", "actividad_repetitiva_automatizada"}
+
+# Reglas cuyo weight/threshold/window_seconds NO deben editarse desde
+# PATCH /rules/{id} porque no funcionan como una regla convencional de
+# puntuación (ver sección 13 de la especificación de la pantalla de
+# Reglas Heurísticas, 2026-08-16):
+# - 'acceso_honeyfile': su weight=100 es lo que hace que CUALQUIER
+#   interacción con un honeyfile llegue a risk_score=100 "gratis" (ver
+#   report_alert, MIN(100, suma_pesos + correlación)) -- cambiarlo
+#   rompería esa garantía sin que se note hasta la próxima alerta real.
+# - 'correlacion_multiples_indicadores': su weight/threshold en la base son
+#   solo documentales -- report_alert calcula la bonificación real por
+#   tramos fijos (2/3/4+ reglas -> +5/+10/+15), no lee estas columnas.
+#   Editarlas no cambiaría ningún cálculo, así que se bloquea para no
+#   sugerir un control que no hace nada.
+FIXED_SCORING_RULE_NAMES = {"acceso_honeyfile", "correlacion_multiples_indicadores"}
+
+
 @app.post("/agent/alerts")
 def report_alert(
     alert: AlertCreate,
     x_agent_credential: str = Header(...)
 ):
-    """Recibe alertas ya evaluadas por el motor heurístico del agente
-    y las persiste en 'alerts', enlazándolas a la regla de
-    'heuristic_rules' que matcheó (tabla puente 'alert_rule')."""
+    """El agente ya NO calcula severidad/score -- solo reporta qué
+    reglas detectó activas (alert.matched_rules). Este endpoint es el
+    responsable único de: (1) buscar el peso real de cada regla en
+    'heuristic_rules', (2) registrar trazabilidad completa en
+    'alert_rule' -- una fila por regla que participó, sin duplicar
+    evidencia ya registrada (secciones 24 y 26), (3) calcular la
+    bonificación de correlación HR-12 (sección 21), (4) sumar y acotar
+    a 100 (sección 8; HR-03/honeyfile llega a 100 'gratis' porque su
+    weight en la base ya es 100, sin necesidad de un caso especial acá),
+    (5) derivar la severidad consultando 'severity_levels' (sección 3),
+    (6) decidir si corresponde crear un incidente automáticamente
+    (sección 28) y (7) evaluar -- sin ejecutar -- si se cumple la
+    condición de aislamiento (sección 30), dejando una recomendación
+    honesta en 'host_isolations' (status='RECOMMENDED': el agente no
+    tiene forma de aislar nada de verdad, ver PENDIENTES.md)."""
+
+    if not alert.matched_rules:
+        raise HTTPException(status_code=422, detail="matched_rules no puede estar vacío")
 
     connection = get_connection()
 
@@ -8336,83 +8549,247 @@ def report_alert(
 
             agent_id = resolve_agent_id(cursor, x_agent_credential)
 
-            # 'alerts.severity' pasó a ser 'severity_id' (FK a
-            # 'severity_levels'). Igual que con event_type: se rechaza
-            # si el agente manda un nombre que no está en el catálogo,
-            # en vez de guardar una severidad inventada.
+            # Solo reglas activas y conocidas por la base -- si el
+            # agente reportara el nombre de una regla diferida
+            # (is_active=FALSE) o desconocida, se ignora en vez de
+            # inventarle un peso.
             cursor.execute(
-                "SELECT id FROM severity_levels WHERE name = %s;",
-                (alert.severity,)
+                """
+                SELECT id, name, weight FROM heuristic_rules
+                WHERE name = ANY(%s) AND is_active = TRUE;
+                """,
+                (alert.matched_rules,)
             )
+            matched = cursor.fetchall()
 
-            severity_row = cursor.fetchone()
-
-            if severity_row is None:
+            if not matched:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"Severidad desconocida: '{alert.severity}'"
+                    detail="Ninguna de las reglas reportadas es una regla activa conocida"
                 )
 
-            severity_id = severity_row[0]
+            is_honeyfile = any(name == "acceso_honeyfile" for _, name, _ in matched)
 
-            rule_id = None
-            rule_weight = None
+            # ¿Actualiza una alerta existente del mismo episodio, o
+            # crea una nueva?
+            cursor.execute(
+                """
+                SELECT id FROM alerts
+                WHERE agent_id = %s
+                  AND status IN ('NEW', 'ACKNOWLEDGED')
+                  AND created_at >= NOW() - (%s || ' seconds')::INTERVAL
+                ORDER BY created_at DESC
+                LIMIT 1;
+                """,
+                (agent_id, EPISODE_WINDOW_SECONDS)
+            )
+            existing = cursor.fetchone()
+            alert_id = existing[0] if existing else None
 
-            if alert.rule_name:
-
+            if alert_id is None:
                 cursor.execute(
                     """
-                    SELECT id, weight FROM heuristic_rules
-                    WHERE name = %s AND is_active = TRUE;
+                    INSERT INTO alerts (agent_id, severity_id, title, description, risk_score)
+                    VALUES (%s, (SELECT id FROM severity_levels WHERE name = 'NORMAL'), %s, %s, 0)
+                    RETURNING id;
                     """,
-                    (alert.rule_name,)
+                    (agent_id, alert.title, alert.description)
                 )
+                alert_id = cursor.fetchone()[0]
 
-                rule_row = cursor.fetchone()
+            # Reglas ya vinculadas a esta alerta (sin contar la fila
+            # sintética de correlación) -- para no duplicar evidencia
+            # ya registrada si la misma regla vuelve a matchear en un
+            # evento posterior del mismo episodio (sección 24).
+            cursor.execute(
+                """
+                SELECT alert_rule.rule_id FROM alert_rule
+                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                WHERE alert_rule.alert_id = %s
+                  AND heuristic_rules.name != 'correlacion_multiples_indicadores';
+                """,
+                (alert_id,)
+            )
+            already_linked = {row[0] for row in cursor.fetchall()}
 
-                if rule_row:
-                    rule_id, rule_weight = rule_row
+            for rule_id, _, weight in matched:
+                if rule_id not in already_linked:
+                    cursor.execute(
+                        """
+                        INSERT INTO alert_rule (alert_id, rule_id, weight_applied)
+                        VALUES (%s, %s, %s);
+                        """,
+                        (alert_id, rule_id, weight)
+                    )
+
+            # Recalcular el score a partir de TODAS las reglas
+            # vinculadas hasta ahora (evidencia acumulada del
+            # episodio completo, no solo la de este request).
+            cursor.execute(
+                """
+                SELECT heuristic_rules.id, heuristic_rules.name, alert_rule.weight_applied
+                FROM alert_rule
+                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                WHERE alert_rule.alert_id = %s
+                  AND heuristic_rules.name != 'correlacion_multiples_indicadores';
+                """,
+                (alert_id,)
+            )
+            linked_rules = cursor.fetchall()
+
+            base_score = sum(float(w) for _, _, w in linked_rules)
+            linked_names = {name for _, name, _ in linked_rules}
+            distinct_rule_count = len(linked_rules)
+
+            # HR-12 -- bonificación de correlación (sección 21): NO es
+            # una regla de conteo convencional, es una segunda capa.
+            if distinct_rule_count >= 4:
+                correlation_bonus = 15.0
+            elif distinct_rule_count == 3:
+                correlation_bonus = 10.0
+            elif distinct_rule_count == 2:
+                correlation_bonus = 5.0
+            else:
+                correlation_bonus = 0.0
+
+            # Respeta el mismo interruptor is_active que cualquier otra
+            # regla (editable desde /configuracion) -- si un analista
+            # desactiva la correlación, deja de sumar bonificación.
+            cursor.execute(
+                "SELECT id FROM heuristic_rules WHERE name = 'correlacion_multiples_indicadores' AND is_active = TRUE;"
+            )
+            correlation_row = cursor.fetchone()
+            correlation_rule_id = correlation_row[0] if correlation_row else None
+
+            if correlation_rule_id is None:
+                correlation_bonus = 0.0
+                existing_correlation_row = None
+            else:
+                cursor.execute(
+                    "SELECT id FROM alert_rule WHERE alert_id = %s AND rule_id = %s;",
+                    (alert_id, correlation_rule_id)
+                )
+                existing_correlation_row = cursor.fetchone()
+
+            if correlation_bonus > 0:
+                if existing_correlation_row:
+                    cursor.execute(
+                        "UPDATE alert_rule SET weight_applied = %s, matched_at = CURRENT_TIMESTAMP WHERE id = %s;",
+                        (correlation_bonus, existing_correlation_row[0])
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO alert_rule (alert_id, rule_id, weight_applied)
+                        VALUES (%s, %s, %s);
+                        """,
+                        (alert_id, correlation_rule_id, correlation_bonus)
+                    )
+
+            # Sección 8: nunca almacenar un score superior a 100.
+            # HR-03 (honeyfile) llega a 100 sin caso especial: su
+            # weight en 'heuristic_rules' ya es 100.
+            final_score = min(100.0, base_score + correlation_bonus)
+
+            cursor.execute(
+                "SELECT id, name FROM severity_levels WHERE %s BETWEEN min_score AND max_score;",
+                (final_score,)
+            )
+            severity_row = cursor.fetchone()
+            severity_id, severity_name = severity_row if severity_row else (None, "NORMAL")
 
             cursor.execute(
                 """
-                INSERT INTO alerts (
-                    agent_id,
-                    severity_id,
-                    title,
-                    description,
-                    risk_score
-                )
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING id;
+                UPDATE alerts SET severity_id = %s, risk_score = %s, description = %s
+                WHERE id = %s RETURNING incident_id;
                 """,
-                (
-                    agent_id,
-                    severity_id,
-                    alert.title,
-                    alert.description,
-                    alert.risk_score if alert.risk_score is not None else 0
-                )
+                (severity_id, final_score, alert.description, alert_id)
+            )
+            incident_id = cursor.fetchone()[0]
+
+            # Sección 28: CRÍTICO por score solo no alcanza -- hace
+            # falta evidencia fuerte además (honeyfile, correlación de
+            # al menos 3 reglas distintas, o al menos 2 reglas
+            # "fuertes" distintas coincidiendo).
+            strong_count = len(linked_names & STRONG_RULE_NAMES)
+            meets_incident_condition = (
+                final_score >= 75
+                and (is_honeyfile or distinct_rule_count >= 3 or strong_count >= 2)
             )
 
-            alert_id = cursor.fetchone()[0]
+            incident_created = False
 
-            # Qué regla(s) dispararon esta alerta y con qué peso --
-            # 'alert_rule' reemplaza al viejo 'alerts.rule_id' (que
-            # solo permitía una regla por alerta).
-            if rule_id is not None:
+            if incident_id is None and meets_incident_condition:
                 cursor.execute(
                     """
-                    INSERT INTO alert_rule (alert_id, rule_id, weight_applied)
-                    VALUES (%s, %s, %s);
+                    INSERT INTO incidents (agent_id, title, description)
+                    VALUES (%s, %s, %s)
+                    RETURNING id;
                     """,
-                    (alert_id, rule_id, rule_weight)
+                    (
+                        agent_id,
+                        alert.title,
+                        (
+                            f"Creado automáticamente por el motor heurístico -- "
+                            f"risk_score {final_score:.2f}, reglas: {', '.join(sorted(linked_names))}."
+                        )
+                    )
                 )
+                incident_id = cursor.fetchone()[0]
+
+                cursor.execute(
+                    "UPDATE alerts SET incident_id = %s WHERE id = %s;",
+                    (incident_id, alert_id)
+                )
+
+                incident_created = True
+
+            # Sección 30: la condición de aislamiento es DISTINTA de la
+            # de incidente, y solo se evalúa una vez que existe un
+            # incidente (la detección/contención del diagrama de la
+            # especificación pasa primero por "¿corresponde incidente?").
+            # No se ejecuta nada -- solo se deja constancia de que la
+            # condición se cumplió, para que un analista decida (sección
+            # 31: el aislamiento manual sigue siendo la única vía real).
+            isolation_recommended = False
+
+            if incident_id is not None:
+                strong_file_matched = linked_names & STRONG_FILE_ACTIVITY_RULES
+                condition_a = is_honeyfile and len(strong_file_matched) >= 1
+                condition_b = final_score >= 75 and len(strong_file_matched) >= 2
+
+                if condition_a or condition_b:
+                    cursor.execute(
+                        "SELECT id FROM host_isolations WHERE incident_id = %s AND status = 'RECOMMENDED';",
+                        (incident_id,)
+                    )
+                    if cursor.fetchone() is None:
+                        reason = (
+                            "Condición A: honeyfile activado + al menos un indicador fuerte de actividad de archivos "
+                            f"({', '.join(sorted(strong_file_matched))})."
+                            if condition_a else
+                            "Condición B: severidad CRÍTICA + al menos dos indicadores fuertes de actividad maliciosa "
+                            f"({', '.join(sorted(strong_file_matched))})."
+                        )
+                        cursor.execute(
+                            """
+                            INSERT INTO host_isolations (agent_id, incident_id, isolation_type, status, reason)
+                            VALUES (%s, %s, 'NETWORK', 'RECOMMENDED', %s);
+                            """,
+                            (agent_id, incident_id, reason)
+                        )
+                        isolation_recommended = True
 
             connection.commit()
 
         return {
             "message": "Alerta registrada",
-            "alert_id": alert_id
+            "alert_id": alert_id,
+            "risk_score": final_score,
+            "severity": severity_name,
+            "incident_id": incident_id,
+            "incident_created": incident_created,
+            "isolation_recommended": isolation_recommended,
         }
 
     finally:

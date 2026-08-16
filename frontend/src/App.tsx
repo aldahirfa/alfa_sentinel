@@ -45,8 +45,34 @@ export function roleLabelFrom(roles: string[]): string {
   return roles.map((r) => r.charAt(0).toUpperCase() + r.slice(1)).join(", ");
 }
 
+const getInitialPage = (): Page => {
+  const path = window.location.pathname;
+  if (path.startsWith("/endpoints")) return "endpoints";
+  if (path.startsWith("/alertas") || path.startsWith("/alerts")) return "alerts";
+  if (path.startsWith("/incidentes")) return "incidentes";
+  if (path.startsWith("/honeyfiles")) return "honeyfiles";
+  if (path.startsWith("/reglas")) return "reglas";
+  if (path.startsWith("/respuesta")) return "respuesta";
+  if (path.startsWith("/reportes")) return "reportes";
+  if (path.startsWith("/administracion")) return "administracion";
+  if (path.startsWith("/perfil")) return "perfil";
+  return "dashboard";
+};
+
+const getInitialAlertsSelection = () => {
+  const match = window.location.pathname.match(/\/(?:alertas|alerts)\/(\d+)/);
+  if (match) return { id: parseInt(match[1], 10) };
+  return null;
+};
+
+const getInitialIncidentesSelection = () => {
+  const match = window.location.pathname.match(/\/incidentes\/(\d+)/);
+  if (match) return { kind: "incident" as ItemKind, id: parseInt(match[1], 10) };
+  return null;
+};
+
 export default function App() {
-  const [page, setPage] = useState<Page>("dashboard");
+  const [page, setPage] = useState<Page>(getInitialPage);
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [userName, setUserName] = useState("Usuario");
   const [roleLabel, setRoleLabel] = useState("Usuario");
@@ -56,11 +82,11 @@ export default function App() {
   // se envuelve en un objeto nuevo en cada click para que AlertsPage
   // pueda reabrir el drawer aunque sea la misma alerta dos veces
   // seguidas (ver AlertsPage.tsx::initialAlertSelection).
-  const [alertsInitialSelection, setAlertsInitialSelection] = useState<{ id: number } | null>(null);
+  const [alertsInitialSelection, setAlertsInitialSelection] = useState<{ id: number } | null>(getInitialAlertsSelection);
   // Mismo patrón que arriba, pero para navegar a Incidentes y abrir un
   // incidente puntual -- usado desde "Ver incidente" en AlertDrawer.
   const [incidentesInitialSelection, setIncidentesInitialSelection] =
-    useState<{ kind: ItemKind; id: number } | null>(null);
+    useState<{ kind: ItemKind; id: number } | null>(getInitialIncidentesSelection);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -103,10 +129,54 @@ export default function App() {
     return () => clearInterval(id);
   }, [load]);
 
+  useEffect(() => {
+    let newUrl = "/";
+    if (page !== "dashboard") {
+      newUrl = `/${page}`;
+      if (page === "incidentes" && incidentesInitialSelection?.kind === "incident") {
+        newUrl = `/incidentes/${incidentesInitialSelection.id}`;
+      } else if (page === "alerts" && alertsInitialSelection) {
+        newUrl = `/alertas/${alertsInitialSelection.id}`;
+      }
+    }
+    if (window.location.pathname !== newUrl && !window.location.pathname.endsWith(".html")) {
+      window.history.pushState(null, "", newUrl);
+    }
+  }, [page, incidentesInitialSelection, alertsInitialSelection]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setPage(getInitialPage());
+      setAlertsInitialSelection(getInitialAlertsSelection());
+      setIncidentesInitialSelection(getInitialIncidentesSelection());
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Navegación "plana" (sidebar, "Mi perfil", "Ver todas las
+  // alertas") -- SIEMPRE limpia cualquier selección pendiente de una
+  // notificación anterior. Sin esto, entrar a Alertas/Incidentes por
+  // el sidebar después de haber llegado alguna vez desde una
+  // notificación reabría el mismo drawer de esa vez, porque
+  // alertsInitialSelection/incidentesInitialSelection quedaban en
+  // memoria entre navegaciones (viven acá, en App.tsx, no en la
+  // página que se desmonta). Este es el único lugar que debe "abrir
+  // sin querer" un drawer -- todo lo demás pasa por acá.
+  function navigateTo(next: Page) {
+    setAlertsInitialSelection(null);
+    setIncidentesInitialSelection(null);
+    setPage(next);
+  }
+
   // Navegación interna compartida entre pantallas -- reemplaza los
   // <a href="/incidentes/...">/<a href="/detecciones/...."> que
   // antes mandaban a Jinja2. "Ver incidente" desde una alerta y
-  // "Ver alerta original" desde un incidente usan esto mismo.
+  // "Ver alerta original" desde un incidente usan esto mismo. A
+  // diferencia de navigateTo(), estas SÍ dejan una selección pendiente
+  // a propósito -- son la excepción válida: hay una intención
+  // explícita de ver un registro concreto (ver también
+  // Topbar::onSelectAlert, misma función).
   function openAlert(id: number) {
     setAlertsInitialSelection({ id });
     setPage("alerts");
@@ -156,7 +226,13 @@ export default function App() {
   const meta = PAGE_META[page];
 
   return (
-    <div data-theme={theme} className="flex min-h-screen font-[Inter,system-ui,sans-serif] text-sm" style={wrapperStyle}>
+    <div id="app-shell" data-theme={theme} className="flex min-h-screen font-[Inter,system-ui,sans-serif] text-sm" style={wrapperStyle}>
+      {/* id="app-shell": los modales que usan un portal (ej.
+          RuleEditModal.tsx) lo apuntan acá en vez de a document.body --
+          las variables CSS del tema (--surf, --tx, etc.) se definen en
+          este div vía [data-theme], no en <html>/<body>, así que un
+          portal directo a document.body queda fuera de su alcance y
+          los colores salen transparentes/sin definir. */}
       {/* La barra lateral se mantiene siempre oscura, incluso en tema
           claro (pedido explícito) -- data-theme anidado resuelve las
           variables CSS del sidebar al set oscuro sin tocar el resto
@@ -165,7 +241,7 @@ export default function App() {
       <div data-theme="dark" className="contents">
         <Sidebar
           page={page}
-          onNavigate={setPage}
+          onNavigate={navigateTo}
           alertsActive={data.summary.alerts_active}
           incidentsActive={data.summary.incidents_active}
         />
@@ -183,8 +259,8 @@ export default function App() {
           onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           onLoggedOut={() => setNeedsLogin(true)}
           onSelectAlert={openAlert}
-          onViewAllAlerts={() => setPage("alerts")}
-          onOpenProfile={() => setPage("perfil")}
+          onViewAllAlerts={() => navigateTo("alerts")}
+          onOpenProfile={() => navigateTo("perfil")}
         />
 
         {page === "dashboard" ? (

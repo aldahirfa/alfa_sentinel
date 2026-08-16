@@ -8,20 +8,20 @@ interface Props {
 export default function EndpointsAtRisk({ endpoints }: Props) {
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 shadow-sm flex flex-col h-full"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
       <div className="flex items-center">
-        <h2 className="text-[14.5px] font-semibold m-0" style={{ color: "var(--tx)" }}>
+        <h2 className="text-[14px] font-bold tracking-tight m-0" style={{ color: "var(--tx)" }}>
           Endpoints que requieren atención
         </h2>
         <a
           href="/endpoints"
-          className="ml-auto text-xs no-underline flex items-center gap-1"
+          className="ml-auto text-xs font-bold no-underline flex items-center gap-1 transition-premium btn-hover"
           style={{ color: "var(--brand)" }}
         >
           Ver todos los endpoints
-          <i className="ph ph-arrow-right text-[13px]" />
+          <i className="ph-fill ph-arrow-right text-[13px]" />
         </a>
       </div>
 
@@ -36,38 +36,38 @@ export default function EndpointsAtRisk({ endpoints }: Props) {
             return (
               <div
                 key={ep.hostname}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-[9px]"
+                className="flex items-center gap-3 px-3.5 py-3 rounded-xl transition-premium hover:-translate-y-1 hover:shadow-md cursor-pointer"
                 style={{
-                  background: isCrit ? "var(--crit-soft)" : "var(--surf2)",
+                  background: isCrit ? "var(--crit-fill)" : "var(--surf2)",
                   border: `1px solid ${isCrit ? "var(--crit-soft)" : "var(--line-soft)"}`,
                   boxShadow: `inset 3px 0 0 ${SEVERITY_VAR[ep.severity]}`,
                 }}
               >
                 <i
-                  className="ph ph-desktop-tower text-[19px]"
+                  className={ep.os.toLowerCase().includes("win") ? "ph-fill ph-windows-logo text-[24px]" : ep.os.toLowerCase().includes("linux") ? "ph-fill ph-linux-logo text-[24px]" : "ph-fill ph-desktop text-[24px]"}
                   style={{ color: SEVERITY_VAR[ep.severity] }}
                 />
                 <div className="min-w-0">
-                  <div className="text-[13.5px] font-semibold" style={{ color: "var(--tx)" }}>
+                  <div className="text-[14px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>
                     {ep.hostname}
                   </div>
-                  <div className="text-[11px] mt-0.5" style={{ color: "var(--tx-mute)" }}>
+                  <div className="text-[11.5px] mt-0.5 font-medium" style={{ color: "var(--tx-mute)" }}>
                     {ep.os} · Último heartbeat: {ep.last_seen_ago}
                   </div>
                 </div>
                 <div className="ml-auto flex items-center gap-2.5 shrink-0">
-                  <span className="text-[11px]" style={{ color: "var(--tx-dim)" }}>
+                  <span className="text-[11.5px] font-medium" style={{ color: "var(--tx-dim)" }}>
                     Alertas activas: <b style={{ color: "var(--tx)" }}>{ep.alerts_count}</b>
                   </span>
                   <span
-                    className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded"
+                    className="text-[10px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                     style={severityPillStyle(ep.severity)}
                   >
                     {SEVERITY_LABEL[ep.severity].toUpperCase()}
                   </span>
                   <span
-                    className="text-[10.5px] font-medium px-2 py-0.5 rounded flex items-center gap-1"
-                    style={{ border: "1px solid var(--line)", color: "var(--tx-dim)" }}
+                    className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full flex items-center gap-1.5"
+                    style={{ border: "1px solid var(--line-soft)", color: "var(--tx-dim)", background: "var(--surf)" }}
                   >
                     <span
                       className="w-1.5 h-1.5 rounded-full"

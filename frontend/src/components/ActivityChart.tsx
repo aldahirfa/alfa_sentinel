@@ -102,7 +102,7 @@ export default function ActivityChart() {
 
   return (
     <section
-      className="rounded-[10px] border p-4 pb-3"
+      className="rounded-[10px] border p-4 pb-3 flex flex-col h-full"
       style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
     >
       <div className="flex items-center gap-3.5 flex-wrap">
@@ -141,7 +141,7 @@ export default function ActivityChart() {
         ))}
       </div>
 
-      <div className="relative mt-1.5" onMouseLeave={() => setHover(null)}>
+      <div className="relative mt-1.5 flex-1 flex flex-col justify-end" onMouseLeave={() => setHover(null)}>
         {loading || !chart ? (
           <div className="h-[240px] flex items-center justify-center text-xs" style={{ color: "var(--tx-mute)" }}>
             {loading ? "Cargando actividad..." : "Sin datos para este período."}

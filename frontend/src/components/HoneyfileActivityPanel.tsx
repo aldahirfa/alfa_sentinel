@@ -8,20 +8,20 @@ interface Props {
 export default function HoneyfileActivityPanel({ data }: Props) {
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 shadow-sm flex flex-col h-full"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
       <div className="flex items-center">
-        <h2 className="text-[14.5px] font-semibold m-0" style={{ color: "var(--tx)" }}>
+        <h2 className="text-[14px] font-bold tracking-tight m-0" style={{ color: "var(--tx)" }}>
           Actividad de honeyfiles
         </h2>
         <a
           href="/honeyfiles"
-          className="ml-auto text-xs no-underline flex items-center gap-1"
+          className="ml-auto text-xs font-bold no-underline flex items-center gap-1 transition-premium btn-hover"
           style={{ color: "var(--brand)" }}
         >
           Ver honeyfiles
-          <i className="ph ph-arrow-right text-[13px]" />
+          <i className="ph-fill ph-arrow-right text-[13px]" />
         </a>
       </div>
 

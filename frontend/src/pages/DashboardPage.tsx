@@ -44,8 +44,12 @@ export default function DashboardPage({ data }: Props) {
         <RecentAlertsTable alerts={data.recent_alerts} />
       </div>
       <div className="col-span-12 xl:col-span-4 flex flex-col gap-3.5">
-        <EndpointStatusPanel status={data.endpoint_status} />
-        <SystemStatusPanel status={data.system_status} />
+        <div className="flex-1 flex flex-col">
+          <EndpointStatusPanel status={data.endpoint_status} />
+        </div>
+        <div className="flex-1 flex flex-col">
+          <SystemStatusPanel status={data.system_status} />
+        </div>
       </div>
 
       <div className="col-span-12 xl:col-span-7">

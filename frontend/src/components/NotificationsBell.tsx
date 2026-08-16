@@ -34,10 +34,10 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
     <div className="relative" ref={ref}>
       <button
         onClick={toggle}
-        className="relative w-[34px] h-[34px] rounded-lg border grid place-items-center cursor-pointer"
+        className="relative w-9 h-9 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
         style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
       >
-        <i className="ph ph-bell" style={{ fontSize: "16px" }} />
+        <i className="ph-fill ph-bell" style={{ fontSize: "17px" }} />
         {count > 0 && (
           <span
             className="absolute top-[5px] right-1.5 w-1.5 h-1.5 rounded-full"
@@ -48,8 +48,8 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
 
       {open && (
         <div
-          className="absolute right-0 top-[42px] w-[320px] rounded-[10px] border z-30 overflow-hidden"
-          style={{ background: "var(--surf3)", borderColor: "var(--line)", boxShadow: "0 16px 40px rgba(0,0,0,.35)" }}
+          className="absolute right-0 top-[48px] w-[340px] rounded-xl border z-30 overflow-hidden"
+          style={{ background: "var(--surf)", borderColor: "var(--line-soft)", boxShadow: "var(--shadow-lg)" }}
         >
           <div className="px-3.5 py-3 border-b flex items-center" style={{ borderColor: "var(--line-soft)" }}>
             <span className="text-[13px] font-semibold" style={{ color: "var(--tx)" }}>
@@ -82,7 +82,7 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
                     setOpen(false);
                     onSelectAlert(a.id);
                   }}
-                  className="flex flex-col gap-1 px-3.5 py-2.5 border-b w-full text-left bg-transparent cursor-pointer"
+                  className="flex flex-col gap-1.5 px-4 py-3 border-b w-full text-left bg-transparent cursor-pointer transition-colors hover:bg-[var(--surf2)]"
                   style={{ borderColor: "var(--line-soft)" }}
                 >
                   <div className="flex items-center gap-2">
@@ -106,7 +106,7 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
               setOpen(false);
               onViewAll();
             }}
-            className="block w-full text-center text-xs font-medium bg-transparent border-0 cursor-pointer px-3.5 py-2.5"
+            className="block w-full text-center text-[12.5px] font-bold bg-transparent border-0 cursor-pointer px-4 py-3 transition-colors hover:bg-[var(--brand-soft)]"
             style={{ color: "var(--brand)" }}
           >
             Ver todas las alertas

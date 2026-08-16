@@ -62,3 +62,16 @@ export interface EnrollmentTokenResult {
   token_id: number;
   expires_at: string;
 }
+
+// GET /api/roles -- catálogo real de la tabla 'roles', usado para
+// poblar el selector de "Rol" en crear/editar usuario (2026-08-16, ver
+// PENDIENTES.md: antes era un <input type="text"> de texto libre).
+export interface Role {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
+export interface RolesResponse {
+  roles: Role[];
+}

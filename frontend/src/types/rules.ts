@@ -1,9 +1,7 @@
 // Tipos alineados 1:1 con GET /api/rules y PATCH /rules/{id}
-// (server/main.py). Solo 'weight' e 'is_active' se muestran editables
-// en la UI -- son los únicos dos campos que configuracion.html (la
-// consola real) también deja tocar; 'threshold'/'window_seconds' son
-// reales pero se muestran de solo lectura a propósito, para que esta
-// pantalla sea "comprensible, no una consola técnica".
+// (server/main.py). Pantalla ampliada 2026-08-16 (ver PENDIENTES.md)
+// para mostrar el modelo heurístico completo -- métrica, evento,
+// parámetros, actividad y auditoría -- no solo nombre + peso + estado.
 
 export interface HeuristicRule {
   id: number;
@@ -12,12 +10,27 @@ export interface HeuristicRule {
   description: string | null;
   weight: number;
   threshold: number;
-  window_seconds: number;
+  window_seconds: number | null;
   is_active: boolean;
+  created_at: string | null;
   updated_at: string | null;
+
+  event_type_name: string | null;
   event_type_label: string;
+  event_type_description: string | null;
+
+  metric_type_name: string | null;
+  metric_type_description: string | null;
+  metric_unit: string | null;
+
   alerts_30d: number;
   last_triggered_at: string | null;
+
+  // Calculados por el servidor (misma fuente de verdad que valida
+  // PATCH /rules/{id}) -- evita duplicar estos sets acá.
+  is_deferred: boolean;
+  is_honeyfile: boolean;
+  has_fixed_scoring: boolean;
 }
 
 export interface RulesSummary {
@@ -35,6 +48,8 @@ export interface RulesResponse {
 export interface RuleUpdatePayload {
   weight?: number;
   is_active?: boolean;
+  threshold?: number;
+  window_seconds?: number;
 }
 
 export interface RuleUpdateResult {
@@ -44,5 +59,6 @@ export interface RuleUpdateResult {
   weight: number;
   is_active: boolean;
   threshold: number;
-  window_seconds: number;
+  window_seconds: number | null;
+  updated_at: string | null;
 }

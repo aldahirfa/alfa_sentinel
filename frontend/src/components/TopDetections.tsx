@@ -9,10 +9,10 @@ export default function TopDetections({ data }: Props) {
 
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 shadow-sm flex flex-col h-full"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <h2 className="text-[14.5px] font-semibold m-0" style={{ color: "var(--tx)" }}>
+      <h2 className="text-[14px] font-bold tracking-tight m-0" style={{ color: "var(--tx)" }}>
         Principales tipos de detección
       </h2>
       <div className="text-[11.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>
@@ -24,12 +24,12 @@ export default function TopDetections({ data }: Props) {
           Todavía no hay detecciones registradas.
         </p>
       ) : (
-        <div className="flex flex-col gap-3.5 mt-4">
+        <div className="flex flex-col gap-3 mt-auto">
           {data.map((d) => (
             <div key={d.rule_name}>
-              <div className="flex text-[12.5px] mb-1.5">
+              <div className="flex text-[12.5px] font-bold mb-1.5">
                 <span style={{ color: "var(--tx-dim)" }}>{d.rule_label}</span>
-                <span className="ml-auto font-semibold" style={{ color: "var(--tx)" }}>{d.count}</span>
+                <span className="ml-auto" style={{ color: "var(--tx)" }}>{d.count}</span>
               </div>
               <div className="h-[7px] rounded overflow-hidden" style={{ background: "var(--surf3)" }}>
                 <div

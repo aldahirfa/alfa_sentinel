@@ -19,11 +19,11 @@ export default function QuickActions() {
           <a
             key={label}
             href={href}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-[7px] no-underline text-xs font-medium"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg no-underline text-xs font-bold tracking-wide transition-premium btn-hover shadow-sm"
             style={
               critical
-                ? { border: "1px solid var(--crit-soft)", background: "var(--crit-soft)", color: "var(--crit)" }
-                : { border: "1px solid var(--line)", background: "transparent", color: "var(--tx-dim)" }
+                ? { border: "1px solid var(--crit-soft)", background: "var(--crit-fill)", color: "var(--crit)" }
+                : { border: "1px solid var(--line-soft)", background: "var(--surf2)", color: "var(--tx-dim)" }
             }
           >
             <i className={icon} style={{ fontSize: "14px" }} />

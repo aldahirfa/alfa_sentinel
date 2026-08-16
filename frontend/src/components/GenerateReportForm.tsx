@@ -11,7 +11,7 @@ interface Props {
 
 const fieldStyle: React.CSSProperties = {
   background: "var(--surf2)",
-  border: "1px solid var(--line)",
+  border: "1px solid var(--line-soft)",
   color: "var(--tx)",
 };
 
@@ -43,10 +43,10 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
 
   return (
     <section
-      className="rounded-[10px] border p-4 flex flex-col gap-3.5"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 flex flex-col gap-3.5 shadow-sm"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <h3 className="text-[13px] font-semibold" style={{ color: "var(--tx)" }}>Generar nuevo informe</h3>
+      <h3 className="text-[14px] font-bold tracking-tight m-0" style={{ color: "var(--tx)" }}>Generar nuevo informe</h3>
 
       {error && (
         <div className="rounded-[8px] px-3 py-2 text-[12px]" style={{ background: "var(--crit-soft)", color: "var(--crit)" }}>
@@ -60,7 +60,7 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
           <select
             value={reportType}
             onChange={(e) => setReportType(e.target.value as ReportType)}
-            className="w-full px-2.5 py-2 rounded-[8px] text-[12.5px] outline-none cursor-pointer"
+            className="w-full px-3 py-2 rounded-lg text-[13px] outline-none cursor-pointer transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
             style={fieldStyle}
           >
             {reportTypeOptions.map((o) => (
@@ -74,7 +74,7 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value as ReportPeriod)}
-            className="w-full px-2.5 py-2 rounded-[8px] text-[12.5px] outline-none cursor-pointer"
+            className="w-full px-3 py-2 rounded-lg text-[13px] outline-none cursor-pointer transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
             style={fieldStyle}
           >
             {periodOptions.map((o) => (
@@ -88,7 +88,7 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
           <select
             value={endpointId}
             onChange={(e) => setEndpointId(e.target.value)}
-            className="w-full px-2.5 py-2 rounded-[8px] text-[12.5px] outline-none cursor-pointer"
+            className="w-full px-3 py-2 rounded-lg text-[13px] outline-none cursor-pointer transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
             style={fieldStyle}
           >
             <option value="">Todos los endpoints</option>
@@ -105,8 +105,8 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
               <button
                 key={f}
                 onClick={() => setFormat(f)}
-                className="flex-1 px-2.5 py-1.5 rounded-md text-[12px] font-semibold border-0 cursor-pointer"
-                style={format === f ? { background: "var(--brand)", color: "#fff" } : { background: "transparent", color: "var(--tx-mute)" }}
+                className="flex-1 px-2.5 py-1.5 rounded-md text-[12px] font-semibold border-0 cursor-pointer transition-premium btn-hover"
+                style={format === f ? { background: "var(--brand)", color: "#fff", boxShadow: "var(--shadow)" } : { background: "transparent", color: "var(--tx-mute)" }}
               >
                 {f}
               </button>
@@ -118,7 +118,7 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
       <button
         onClick={handleGenerate}
         disabled={saving}
-        className="self-start flex items-center gap-2 px-4 py-2 rounded-[9px] text-[12.5px] font-semibold border-0 cursor-pointer disabled:opacity-50"
+        className="self-start flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-bold border-0 cursor-pointer disabled:opacity-50 transition-premium btn-hover shadow-sm mt-1"
         style={{ background: "var(--brand)", color: "#fff" }}
       >
         <i className={saving ? "ph ph-spinner" : "ph ph-file-plus"} style={{ fontSize: "15px" }} />

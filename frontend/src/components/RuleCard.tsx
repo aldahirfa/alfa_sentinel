@@ -1,132 +1,143 @@
 import { useState } from "react";
 import type { HeuristicRule } from "../types/rules";
-import { updateRule } from "../api/client";
+import RuleEditModal from "./RuleEditModal";
 
 interface Props {
   rule: HeuristicRule;
   onChanged: (updated: HeuristicRule) => void;
 }
 
+function StatBlock({ label, value, valueColor, title }: { label: string; value: React.ReactNode; valueColor?: string; title?: string }) {
+  return (
+    <div title={title}>
+      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>{label}</div>
+      <div className="text-[12.5px] font-medium mt-1 truncate" style={{ color: valueColor ?? "var(--tx-dim)" }}>{value}</div>
+    </div>
+  );
+}
+
 export default function RuleCard({ rule, onChanged }: Props) {
-  const [weightInput, setWeightInput] = useState(String(rule.weight));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
-  const weightDirty = weightInput !== String(rule.weight) && weightInput.trim() !== "";
-
-  async function saveWeight() {
-    const parsed = Number(weightInput);
-    if (Number.isNaN(parsed) || parsed < 0) {
-      setError("El peso tiene que ser un número mayor o igual a 0.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await updateRule(rule.id, { weight: parsed });
-      onChanged({ ...rule, weight: res.weight });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo guardar el peso.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function toggleActive() {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await updateRule(rule.id, { is_active: !rule.is_active });
-      onChanged({ ...rule, is_active: res.is_active });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo cambiar el estado.");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const statusBadge = rule.is_deferred
+    ? { text: "Diferida", bg: "var(--surf2)", color: "var(--tx-mute)", border: "1px dashed var(--line)" }
+    : rule.is_active
+    ? { text: "Activa", bg: "var(--ok-soft)", color: "var(--ok)", border: "1px solid var(--ok)" }
+    : { text: "Inactiva", bg: "var(--surf2)", color: "var(--tx-mute)", border: "1px solid var(--line-soft)" };
 
   return (
     <div
-      className="rounded-[10px] border p-4"
+      className="rounded-xl border p-5 transition-premium hover:-translate-y-1 hover:shadow-lg"
       style={{
         background: "var(--surf)",
-        borderColor: rule.is_active ? "var(--line)" : "var(--line-soft)",
+        borderColor: rule.is_active ? "var(--line-soft)" : "var(--line)",
         boxShadow: "var(--shadow)",
-        opacity: rule.is_active ? 1 : 0.7,
+        opacity: rule.is_active || rule.is_deferred ? 1 : 0.7,
       }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[14.5px] font-semibold" style={{ color: "var(--tx)" }}>{rule.label}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-[15px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{rule.label}</div>
+            {rule.is_honeyfile && (
+              <span
+                title="Cualquier interacción con un honeyfile lleva el riesgo directamente a CRÍTICO (risk_score 100), sin depender de otras reglas."
+                className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full cursor-help"
+                style={{ background: "var(--crit)", color: "#fff" }}
+              >
+                REGLA ESPECIAL &middot; CRÍTICO AUTOMÁTICO
+              </span>
+            )}
+          </div>
           {rule.description && (
             <p className="text-[12px] mt-1 leading-relaxed" style={{ color: "var(--tx-mute)" }}>{rule.description}</p>
           )}
         </div>
-        <button
-          onClick={toggleActive}
-          disabled={saving}
-          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-semibold cursor-pointer disabled:opacity-50"
-          style={
-            rule.is_active
-              ? { background: "var(--ok-soft)", color: "var(--ok)", border: "1px solid var(--ok)" }
-              : { background: "var(--surf2)", color: "var(--tx-mute)", border: "1px solid var(--line)" }
-          }
-        >
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: rule.is_active ? "var(--ok)" : "var(--tx-mute)" }} />
-          {rule.is_active ? "Activa" : "Inactiva"}
-        </button>
+
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <span
+            title={rule.is_deferred ? "Requiere datos que el agente no recopila hoy -- ver la descripción de la regla." : undefined}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold ${rule.is_deferred ? "cursor-help" : ""}`}
+            style={{ background: statusBadge.bg, color: statusBadge.color, border: statusBadge.border }}
+          >
+            {!rule.is_deferred && <span className="w-1.5 h-1.5 rounded-full" style={{ background: rule.is_active ? "var(--ok)" : "var(--tx-mute)" }} />}
+            {rule.is_deferred && <i className="ph ph-clock-countdown" style={{ fontSize: "12px" }} />}
+            {statusBadge.text}
+          </span>
+          <button
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-premium btn-hover shadow-sm"
+            style={{ border: "1px solid var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
+          >
+            <i className="ph ph-pencil-simple" style={{ fontSize: "12px" }} />
+            Editar
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3.5 pt-3.5 border-t" style={{ borderColor: "var(--line-soft)" }}>
-        <div>
-          <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Tipo de evento</div>
-          <div className="text-[12px] font-medium mt-1" style={{ color: "var(--tx-dim)" }}>{rule.event_type_label}</div>
-        </div>
-        <div>
-          <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Umbral / ventana</div>
-          <div className="text-[12px] font-medium mt-1" style={{ color: "var(--tx-dim)" }}>
-            {rule.threshold} en {rule.window_seconds}s
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Alertas (30 días)</div>
-          <div className="text-[12px] font-medium mt-1" style={{ color: rule.alerts_30d > 0 ? "var(--warn)" : "var(--tx-dim)" }}>
-            {rule.alerts_30d}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Última activación</div>
-          <div className="text-[12px] font-medium mt-1" style={{ color: "var(--tx-dim)" }}>
-            {rule.last_triggered_at ?? "Nunca"}
-          </div>
-        </div>
+        <StatBlock
+          label="Métrica"
+          value={rule.metric_type_name ?? "—"}
+          title={rule.metric_type_description ?? undefined}
+        />
+        <StatBlock
+          label="Unidad"
+          value={rule.metric_unit ?? "—"}
+        />
+        <StatBlock
+          label="Tipo de evento"
+          value={rule.event_type_label}
+          title={rule.event_type_description ?? undefined}
+        />
+        <StatBlock
+          label="Estado"
+          value={rule.is_active ? "Evaluándose" : "No evaluándose"}
+          valueColor={rule.is_active ? "var(--ok)" : "var(--tx-mute)"}
+        />
+
+        <StatBlock
+          label="Threshold"
+          value={rule.has_fixed_scoring ? "No aplica" : `${rule.threshold}${rule.metric_unit ? ` ${rule.metric_unit}` : ""}`}
+        />
+        <StatBlock
+          label="Ventana"
+          value={rule.has_fixed_scoring ? "No aplica" : rule.window_seconds ? `${rule.window_seconds}s` : "—"}
+        />
+        <StatBlock
+          label="Peso en el score"
+          value={rule.is_honeyfile ? "100 (fijo)" : rule.has_fixed_scoring ? "Variable (+5/+10/+15)" : `${rule.weight} pts`}
+        />
+        <StatBlock
+          label="Alertas (30 días)"
+          value={rule.alerts_30d}
+          valueColor={rule.alerts_30d > 0 ? "var(--warn)" : "var(--tx-dim)"}
+        />
+
+        <StatBlock
+          label="Última activación"
+          value={rule.last_triggered_at ?? "Sin actividad registrada"}
+        />
+        <StatBlock
+          label="Creada"
+          value={rule.created_at ?? "No disponible"}
+        />
+        <StatBlock
+          label="Última actualización"
+          value={rule.updated_at ?? "No disponible"}
+        />
       </div>
 
-      <div className="flex items-end gap-2 mt-3.5 pt-3.5 border-t" style={{ borderColor: "var(--line-soft)" }}>
-        <div className="flex-1 max-w-[140px]">
-          <label className="text-[10px] block mb-1" style={{ color: "var(--tx-mute)" }}>Peso en el cálculo de riesgo</label>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={weightInput}
-            onChange={(e) => setWeightInput(e.target.value)}
-            className="w-full px-2.5 py-1.5 rounded-[8px] text-[13px] font-semibold tabular-nums outline-none"
-            style={{ background: "var(--surf2)", border: "1px solid var(--line)", color: "var(--tx)" }}
-          />
-        </div>
-        {weightDirty && (
-          <button
-            onClick={saveWeight}
-            disabled={saving}
-            className="px-3 py-1.5 rounded-[8px] text-[12px] font-semibold cursor-pointer border-0 disabled:opacity-50"
-            style={{ background: "var(--brand)", color: "#fff" }}
-          >
-            Guardar
-          </button>
-        )}
-        {error && <span className="text-[11px] ml-1" style={{ color: "var(--crit)" }}>{error}</span>}
-      </div>
+      {editing && (
+        <RuleEditModal
+          rule={rule}
+          onClose={() => setEditing(false)}
+          onSaved={(updated) => {
+            onChanged(updated);
+            setEditing(false);
+          }}
+        />
+      )}
     </div>
   );
 }

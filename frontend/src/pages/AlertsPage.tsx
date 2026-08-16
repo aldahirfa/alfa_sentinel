@@ -7,6 +7,7 @@ import AlertDrawer from "../components/AlertDrawer";
 import { fetchAlerts } from "../api/client";
 import type { AlertStatus, AlertsResponse } from "../types/alerts";
 import type { Severity } from "../types/dashboard";
+import { useRowFlash } from "../hooks/useRowFlash";
 
 const PAGE_SIZE = 15;
 const DEBOUNCE_MS = 300;
@@ -35,6 +36,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const flashId = useRowFlash(selectedId);
 
   useEffect(() => {
     if (initialAlertSelection != null) setSelectedId(initialAlertSelection.id);
@@ -108,6 +110,8 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
             loading={loading}
             hasFilters={hasFilters}
             onSelect={setSelectedId}
+            selectedId={selectedId}
+            flashId={flashId}
           />
           {data && (
             <AlertsPagination

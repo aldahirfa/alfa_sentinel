@@ -1,12 +1,16 @@
 import type { CombinedItem } from "../types/incidentes";
 import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
 import { statusBucketPillStyle } from "../lib/incidentStatus";
+import { rowSelectionStyle } from "../lib/rowSelection";
 
 interface Props {
   items: CombinedItem[];
   loading: boolean;
   hasFilters: boolean;
   onSelect: (item: CombinedItem) => void;
+  // Claves "kind:id" -- ver IncidentesPage.tsx.
+  selectedKey: string | null;
+  flashKey: string | null;
 }
 
 function rowAccent(item: CombinedItem): string | null {
@@ -31,15 +35,15 @@ function SkeletonRow() {
   );
 }
 
-export default function IncidentesTable({ items, loading, hasFilters, onSelect }: Props) {
+export default function IncidentesTable({ items, loading, hasFilters, onSelect, selectedKey, flashKey }: Props) {
   return (
     <section
-      className="rounded-[10px] border p-4"
-      style={{ background: "var(--surf)", borderColor: "var(--line)", boxShadow: "var(--shadow)" }}
+      className="rounded-xl border p-5 overflow-x-auto shadow-sm"
+      style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}
     >
-      <table className="w-full border-collapse text-[12.5px]">
+      <table className="w-full border-collapse text-[13px]">
         <thead>
-          <tr className="text-left text-[10.5px] tracking-wider uppercase" style={{ color: "var(--tx-mute)" }}>
+          <tr className="text-left text-[10.5px] tracking-widest uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
             <th className="pb-2 pr-3 font-semibold">Código</th>
             <th className="pb-2 pr-3 font-semibold">Endpoint</th>
             <th className="pb-2 pr-3 font-semibold">Regla</th>
@@ -66,28 +70,32 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect }
           ) : (
             items.map((item) => {
               const accent = rowAccent(item);
+              const key = `${item.kind}:${item.id}`;
+              const isSelected = key === selectedKey;
+              const isFlashing = key === flashKey;
+              const selStyle = rowSelectionStyle(isSelected, isFlashing);
               return (
                 <tr
-                  key={`${item.kind}-${item.id}`}
-                  className="border-t transition-colors"
-                  style={{ borderColor: "var(--line-soft)" }}
+                  key={key}
+                  className="border-t transition-colors cursor-pointer group"
+                  style={{ borderColor: "var(--line-soft)", ...selStyle }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surf2)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = selStyle.background as string)}
                 >
-                  <td className="py-2.5 pr-3" style={accent ? { boxShadow: `inset 3px 0 0 ${accent}` } : undefined}>
+                  <td className="py-3 pr-3" style={accent ? { boxShadow: `inset 3px 0 0 ${accent}` } : undefined}>
                     <div className="flex items-center gap-1.5 pl-2">
-                      <i className="ph-fill ph-siren" style={{ fontSize: "12px", color: "var(--tx-mute)" }} />
-                      <span className="font-semibold" style={{ color: "var(--tx)" }}>{item.code}</span>
+                      <i className="ph-fill ph-siren" style={{ fontSize: "13px", color: "var(--tx-mute)" }} />
+                      <span className="font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.code}</span>
                     </div>
                   </td>
-                  <td className="py-2.5 pr-3" style={{ color: "var(--tx-dim)" }}>{item.hostname}</td>
-                  <td className="py-2.5 pr-3" style={{ color: "var(--tx-mute)" }}>
+                  <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-dim)" }}>{item.hostname}</td>
+                  <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-mute)" }}>
                     <span className="truncate block max-w-[160px]">{item.rule_label}</span>
                   </td>
-                  <td className="py-2.5 pr-3">
+                  <td className="py-3 pr-3">
                     {item.severity ? (
                       <span
-                        className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded"
+                        className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
                         style={severityPillStyle(item.severity)}
                       >
                         {SEVERITY_LABEL[item.severity].toUpperCase()}
@@ -96,39 +104,39 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect }
                       <span style={{ color: "var(--tx-mute)" }}>—</span>
                     )}
                   </td>
-                  <td className="py-2.5 pr-3 tabular-nums font-medium" style={{ color: "var(--tx)" }}>
+                  <td className="py-3 pr-3 tabular-nums font-bold" style={{ color: "var(--tx)" }}>
                     {item.risk_score !== null ? item.risk_score.toFixed(1) : "—"}
                   </td>
-                  <td className="py-2.5 pr-3">
+                  <td className="py-3 pr-3">
                     <span
-                      className="text-[10.5px] font-medium px-2 py-0.5 rounded w-fit inline-block"
-                      style={statusBucketPillStyle(item.status_bucket)}
+                      className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full w-fit inline-block"
+                      style={{ ...statusBucketPillStyle(item.status_bucket), border: `1px solid ${statusBucketPillStyle(item.status_bucket).color}` }}
                     >
                       {item.status_label}
                     </span>
                   </td>
-                  <td className="py-2.5 pr-3" style={{ color: item.assigned_to_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>
+                  <td className="py-3 pr-3 font-medium" style={{ color: item.assigned_to_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>
                     {item.assigned_to_name ?? "Sin asignar"}
                   </td>
-                  <td className="py-2.5 pr-3" style={{ color: "var(--tx-dim)" }}>{item.created_at}</td>
-                  <td className="py-2.5">
+                  <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-dim)" }}>{item.created_at}</td>
+                  <td className="py-3">
                     <div className="flex items-center gap-2.5 justify-end">
                       <button
                         disabled
                         title="ALFA-Sentinel no puede aislar un host todavía: el agente no tiene forma de recibir ni ejecutar un comando remoto."
-                        className="flex items-center gap-1 text-[11.5px] font-medium px-2 py-1 rounded-md cursor-not-allowed opacity-50 whitespace-nowrap"
+                        className="flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 rounded cursor-not-allowed opacity-50 whitespace-nowrap transition-premium"
                         style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
                       >
-                        <i className="ph ph-plugs text-[12px]" />
+                        <i className="ph-fill ph-plugs text-[13px]" />
                         Aislar equipo
                       </button>
                       <button
                         onClick={() => onSelect(item)}
-                        className="flex items-center gap-1 text-[11.5px] font-medium border-0 bg-transparent cursor-pointer whitespace-nowrap"
+                        className="flex items-center gap-1.5 text-[11.5px] font-bold border-0 bg-transparent cursor-pointer whitespace-nowrap transition-premium btn-hover"
                         style={{ color: "var(--brand)" }}
                       >
                         Ver más detalles
-                        <i className="ph ph-arrow-right text-[12px]" />
+                        <i className="ph-fill ph-arrow-right text-[13px]" />
                       </button>
                     </div>
                   </td>

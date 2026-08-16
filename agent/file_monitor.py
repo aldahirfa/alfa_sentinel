@@ -18,15 +18,23 @@ class FileActivityHandler(FileSystemEventHandler):
         self.credential = credential
 
 
-    # Títulos/descripciones legibles por regla -- el score y el nivel
-    # de riesgo son reales (calculados por FileActivityAnalyzer), pero
-    # el texto que acompaña a cada uno es fijo por regla, no generado
-    # dinámicamente a partir de datos que no tenemos (proceso, usuario).
+    # Títulos/descripciones legibles por regla -- el título es fijo por
+    # regla (no generado dinámicamente a partir de datos que no
+    # tenemos, como proceso o usuario). El score, la severidad y qué
+    # reglas participaron (con su peso real) los calcula y registra el
+    # SERVIDOR (ver server/main.py::report_alert) a partir de la lista
+    # 'matched_rules' que se manda acá -- el agente ya no decide
+    # severidad ni risk_score (sección 1 de la especificación del
+    # motor heurístico: separar detección de cálculo de riesgo).
     RULE_TITLES = {
-        "ransomware_extension_rename": "Archivo renombrado a extensión de ransomware conocida",
-        "honeyfile_access": "Honeyfile activado",
-        "mass_deletion": "Borrado masivo de archivos",
-        "mass_file_activity": "Actividad de archivos sospechosa",
+        "modificacion_masiva_archivos": "Modificación masiva de archivos",
+        "renombrado_extension_anomala": "Renombrado con extensión de ransomware conocida",
+        "acceso_honeyfile": "Honeyfile activado",
+        "escritura_intensiva_archivos": "Escritura intensiva de archivos",
+        "acceso_recursos_compartidos": "Acceso masivo a recursos compartidos",
+        "creacion_masiva_temporales": "Creación masiva de archivos temporales",
+        "eliminacion_anomala_archivos": "Eliminación anómala de archivos",
+        "actividad_archivos_usuario": "Actividad repetitiva sobre archivos de usuario",
     }
 
     def register_file_event(self, file_path, event_type):
@@ -59,10 +67,9 @@ class FileActivityHandler(FileSystemEventHandler):
             }
         )
 
-        file_count = self.analyzer.register_event(file_path, event_type)
-
-        # Comprobar honeyfile
-
+        # Comprobar honeyfile ANTES de evaluar reglas: HR-03 es
+        # inmediata (sección 12 de la especificación), no depende de
+        # ninguna ventana ni se acumula con las demás reglas.
         is_honeyfile = self.honeyfile_monitor.is_honeyfile(file_path)
 
         if is_honeyfile:
@@ -72,53 +79,44 @@ class FileActivityHandler(FileSystemEventHandler):
             print(f"Archivo: {file_path}")
             print()
 
-            self.analyzer.register_honeyfile_detection()
+        matched_rules = self.analyzer.register_event(file_path, event_type, is_honeyfile=is_honeyfile)
 
-        # Evaluar riesgo
-
-        score = self.analyzer.calculate_score()
-
-        risk_level = self.analyzer.get_risk_level()
+        file_count = self.analyzer.get_unique_file_count()
 
         print(
-            f"Archivos únicos afectados en ventana: "
+            f"Archivos únicos afectados en ventana (HR-01): "
             f"{file_count}"
         )
 
         print(
-            f"Puntuación de riesgo: {score}"
+            f"Reglas activas: {matched_rules if matched_rules else 'ninguna'}"
         )
 
-        print(
-            f"Nivel de riesgo: {risk_level}"
-        )
-
-        if self.analyzer.is_suspicious():
+        if matched_rules:
 
             print(
                 "¡ACTIVIDAD SOSPECHOSA DETECTADA!"
             )
 
-            # Puede haber más de una regla disparada a la vez (ej.
-            # borrado masivo + honeyfile). El score ya suma todas;
-            # get_primary_rule() devuelve la de mayor peso para
-            # reportarla como 'rule_name' -- el servidor todavía solo
-            # acepta una regla por alerta (ver report_alert en
-            # server/main.py). "details"/"event_ids" siguen sin
-            # mandarse -- ver PENDIENTES.md.
-            primary_rule = self.analyzer.get_primary_rule() or "mass_file_activity"
+            # El agente ya no decide severidad/score/título compuesto:
+            # manda TODAS las reglas que coincidieron (matched_rules) y
+            # deja que el servidor calcule peso, correlación, score y
+            # severidad a partir de heuristic_rules (ver
+            # server/main.py::report_alert). 'title'/'description' son
+            # solo un resumen legible para el caso en que el servidor
+            # tenga que generar una alerta nueva -- si actualiza una
+            # existente, conserva su propio título.
+            primary_rule = matched_rules[0]
 
             send_alert(
                 self.credential,
                 {
-                    "severity": risk_level,
                     "title": self.RULE_TITLES.get(primary_rule, "Actividad de archivos sospechosa"),
                     "description": (
-                        f"{file_count} archivos únicos modificados "
-                        f"en los últimos {self.analyzer.window_seconds}s"
+                        f"{file_count} archivos únicos modificados en la ventana de HR-01; "
+                        f"reglas coincidentes: {', '.join(matched_rules)}"
                     ),
-                    "risk_score": score,
-                    "rule_name": primary_rule
+                    "matched_rules": matched_rules
                 }
             )
 
@@ -164,7 +162,7 @@ class FileActivityHandler(FileSystemEventHandler):
 
             # Se reporta 'dest_path' (el nombre/ruta nuevo), no
             # 'src_path' (el viejo, que ya no existe). Esto importa en
-            # particular para la regla ransomware_extension_rename: si
+            # particular para la regla renombrado_extension_anomala: si
             # se mira la extensión del nombre VIEJO, un rename a
             # "informe.docx.locked" nunca se detectaría porque la
             # extensión sospechosa está en el nombre nuevo.

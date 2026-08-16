@@ -119,36 +119,41 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
         style={{ background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 200ms ease" }}
       />
       <aside
-        className="fixed top-0 right-0 h-screen w-full sm:w-[440px] z-50 flex flex-col"
+        className="fixed top-0 right-0 h-screen w-full sm:w-[460px] z-50 flex flex-col shadow-2xl"
         style={{
           background: "var(--surf)",
           borderLeft: "1px solid var(--line)",
-          boxShadow: "-16px 0 40px rgba(0,0,0,.3)",
           transform: entered ? "translateX(0)" : "translateX(100%)",
           transition: "transform 220ms ease",
         }}
       >
         {/* Encabezado */}
-        <div className="px-5 py-4 border-b flex items-start gap-3" style={{ borderColor: "var(--line-soft)" }}>
-          <div className="min-w-0">
+        <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
+          {data && (
+            <i 
+              className={data.operating_system.toLowerCase().includes("win") ? "ph-fill ph-windows-logo mt-1" : data.operating_system.toLowerCase().includes("linux") ? "ph-fill ph-linux-logo mt-1" : "ph-fill ph-desktop mt-1"} 
+              style={{ fontSize: "28px", color: "var(--tx-dim)" }} 
+            />
+          )}
+          <div className="min-w-0 flex-1">
             <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
               Detalles del endpoint
             </div>
-            <div className="text-[17px] font-semibold mt-1 truncate" style={{ color: "var(--tx)" }}>
+            <div className="text-[18px] font-bold mt-1 tracking-tight truncate" style={{ color: "var(--tx)" }}>
               {data?.hostname ?? "Cargando..."}
             </div>
             {data && (
-              <div className="text-[11.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+              <div className="text-[11.5px] mt-1.5 font-medium" style={{ color: "var(--tx-mute)" }}>
                 {data.operating_system} {data.os_version} · {data.ip_address} · {data.agent_code}
               </div>
             )}
           </div>
           <button
             onClick={onClose}
-            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer"
+            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
             style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
           >
-            <i className="ph ph-x" style={{ fontSize: "15px" }} />
+            <i className="ph-fill ph-x" style={{ fontSize: "15px" }} />
           </button>
         </div>
 
@@ -172,16 +177,16 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
               {/* Estado principal */}
               <div className="px-5 py-4">
                 <div
-                  className="rounded-[10px] border p-3.5"
+                  className="rounded-xl border p-4 shadow-sm"
                   style={{
-                    background: data.risk_bucket === "CRITICAL" ? "var(--crit-soft)" : "var(--surf2)",
-                    borderColor: data.risk_bucket === "CRITICAL" ? "var(--crit)" : "var(--line)",
+                    background: data.risk_bucket === "CRITICAL" ? "var(--crit-fill)" : "var(--surf2)",
+                    borderColor: data.risk_bucket === "CRITICAL" ? "var(--crit-soft)" : "var(--line-soft)",
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Nivel de riesgo</span>
+                    <span className="text-[11px] font-bold" style={{ color: "var(--tx-mute)" }}>Nivel de riesgo</span>
                     <span
-                      className="text-[11px] font-bold tracking-wide px-2 py-0.5 rounded"
+                      className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                       style={severityPillStyle(data.risk_bucket)}
                     >
                       {SEVERITY_LABEL[data.risk_bucket].toUpperCase()}
@@ -237,16 +242,16 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                   value={`${data.incidents_total} (${data.incidents_active} activo${data.incidents_active === 1 ? "" : "s"})`}
                 />
                 {data.latest_alert && (
-                  <div className="mt-2.5 rounded-[9px] p-2.5" style={{ background: "var(--surf2)" }}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9.5px] font-bold tracking-wide px-1.5 py-0.5 rounded" style={severityPillStyle(data.latest_alert.severity)}>
+                  <div className="mt-3 rounded-xl border p-3.5 shadow-sm transition-premium hover:-translate-y-1" style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full" style={severityPillStyle(data.latest_alert.severity)}>
                         {SEVERITY_LABEL[data.latest_alert.severity].toUpperCase()}
                       </span>
-                      <span className="text-[11.5px]" style={{ color: "var(--tx-mute)" }}>{data.latest_alert.created_at}</span>
+                      <span className="text-[11.5px] font-medium" style={{ color: "var(--tx-mute)" }}>{data.latest_alert.created_at}</span>
                     </div>
-                    <div className="text-[12.5px] font-medium mt-1.5" style={{ color: "var(--tx)" }}>{data.latest_alert.title}</div>
+                    <div className="text-[13px] font-bold tracking-tight mt-2" style={{ color: "var(--tx)" }}>{data.latest_alert.title}</div>
                     {data.latest_alert.rule_name && (
-                      <div className="text-[11.5px] mt-0.5" style={{ color: "var(--tx-dim)" }}>
+                      <div className="text-[11.5px] font-medium mt-1" style={{ color: "var(--tx-dim)" }}>
                         Indicador: {data.latest_alert.rule_name}
                       </div>
                     )}
@@ -285,16 +290,16 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
               {/* Actividad reciente */}
               {timeline.length > 0 && (
                 <Section title="Actividad reciente">
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-0 relative before:absolute before:inset-y-2 before:left-[5px] before:w-px before:bg-[var(--line)]">
                     {timeline.map((item, i) => (
-                      <div key={i} className="flex gap-2.5">
-                        <i className={item.icon} style={{ fontSize: "13px", color: item.color, marginTop: "2px" }} />
+                      <div key={i} className="flex gap-3.5 relative py-2">
+                        <div className="w-[11px] h-[11px] rounded-full mt-1 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: item.color }} />
                         <div className="min-w-0">
-                          <div className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>{item.label}</div>
+                          <div className="text-[12.5px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.label}</div>
                           {item.detail && (
-                            <div className="text-[11px] truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
+                            <div className="text-[11px] mt-0.5 font-medium truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
                           )}
-                          <div className="text-[10.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{item.time}</div>
+                          <div className="text-[10.5px] mt-1 font-medium" style={{ color: "var(--tx-dim)" }}>{item.time}</div>
                         </div>
                       </div>
                     ))}
@@ -304,14 +309,14 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
 
               {/* Alertas */}
               <Section title="Alertas">
-                <a
-                  href={`/detecciones?agent_id=${data.id}`}
-                  className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-[12px] font-medium no-underline"
-                  style={{ border: "1px solid var(--line)", color: "var(--tx-dim)" }}
-                >
-                  Ver alertas de este endpoint
-                  <i className="ph ph-arrow-right text-[13px]" />
-                </a>
+                  <a
+                    href={`/detecciones?agent_id=${data.id}`}
+                    className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12.5px] font-bold no-underline border transition-premium btn-hover shadow-sm"
+                    style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "transparent" }}
+                  >
+                    Ver alertas de este endpoint
+                    <i className="ph-fill ph-arrow-right text-[14px]" />
+                  </a>
               </Section>
 
               {/* Acción de aislamiento */}
