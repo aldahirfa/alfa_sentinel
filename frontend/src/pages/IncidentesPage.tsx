@@ -10,7 +10,18 @@ import type { Severity } from "../types/dashboard";
 
 const DEBOUNCE_MS = 300;
 
-export default function IncidentesPage() {
+interface Props {
+  // Selección de incidente a abrir de entrada (viene de "Ver
+  // incidente" en AlertDrawer). Mismo patrón que
+  // AlertsPage::initialAlertSelection -- objeto nuevo en cada click
+  // para poder reabrir el mismo incidente dos veces seguidas.
+  initialSelection?: { kind: ItemKind; id: number } | null;
+  // Navega a Alertas y abre la alerta indicada -- usado por
+  // IncidentDrawer en "Ver alerta original" (Alerta de origen).
+  onViewAlert: (id: number) => void;
+}
+
+export default function IncidentesPage({ initialSelection = null, onViewAlert }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusBucket | "">("");
@@ -23,6 +34,10 @@ export default function IncidentesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ kind: ItemKind; id: number } | null>(null);
+
+  useEffect(() => {
+    if (initialSelection != null) setSelected(initialSelection);
+  }, [initialSelection]);
 
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput), DEBOUNCE_MS);
@@ -112,6 +127,7 @@ export default function IncidentesPage() {
         assignableUsers={data?.filters.assignable_users ?? []}
         onClose={() => setSelected(null)}
         onChanged={load}
+        onViewAlert={onViewAlert}
       />
     </main>
   );

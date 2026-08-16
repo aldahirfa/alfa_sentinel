@@ -18,6 +18,8 @@ interface Props {
   assignableUsers: AssignableUser[];
   onClose: () => void;
   onChanged: () => void;
+  // Navega a Alertas y abre la alerta de origen de este incidente.
+  onViewAlert: (id: number) => void;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -46,7 +48,7 @@ const selectStyle: React.CSSProperties = {
   color: "var(--tx)",
 };
 
-export default function IncidentDrawer({ selected, assignableUsers, onClose, onChanged }: Props) {
+export default function IncidentDrawer({ selected, assignableUsers, onClose, onChanged, onViewAlert }: Props) {
   const [render, setRender] = useState(false);
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<IncidenteDrawerData | null>(null);
@@ -306,6 +308,44 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       ))}
                     </select>
                   </div>
+                </Section>
+              )}
+
+              {/* Alerta de origen -- la primera alerta (por fecha) que
+                  quedó vinculada a este incidente, sea porque el motor
+                  automático lo generó o porque un analista la escaló
+                  a mano desde Alertas. Permite volver a esa alerta sin
+                  duplicar toda su información acá. */}
+              {selected.kind === "incident" && data.origin_alert && (
+                <Section title="Alerta de origen">
+                  <div className="rounded-[9px] p-2.5 flex flex-col gap-1.5" style={{ background: "var(--surf2)" }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>
+                        {data.origin_alert.code}
+                      </span>
+                      {data.origin_alert.severity && (
+                        <span
+                          className="text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded"
+                          style={severityPillStyle(data.origin_alert.severity)}
+                        >
+                          {SEVERITY_LABEL[data.origin_alert.severity].toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <Field
+                      label="Risk score"
+                      value={data.origin_alert.risk_score !== null ? data.origin_alert.risk_score.toFixed(1) : "—"}
+                    />
+                    <Field label="Endpoint" value={data.hostname} />
+                  </div>
+                  <button
+                    onClick={() => onViewAlert(data.origin_alert!.id)}
+                    className="mt-2.5 flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-[12px] font-medium cursor-pointer"
+                    style={{ border: "1px solid var(--brand)", color: "var(--brand)", background: "transparent" }}
+                  >
+                    Ver alerta original
+                    <i className="ph ph-arrow-right text-[13px]" />
+                  </button>
                 </Section>
               )}
 

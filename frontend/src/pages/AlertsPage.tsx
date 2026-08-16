@@ -11,7 +11,18 @@ import type { Severity } from "../types/dashboard";
 const PAGE_SIZE = 15;
 const DEBOUNCE_MS = 300;
 
-export default function AlertsPage() {
+interface Props {
+  // Selección de alerta a abrir de entrada (viene de la campana de
+  // notificaciones en Topbar). Se envuelve en un objeto nuevo en cada
+  // click (ver App.tsx) para que el efecto se dispare también cuando
+  // se hace click dos veces seguidas sobre la misma alerta.
+  initialAlertSelection?: { id: number } | null;
+  // Navega a Incidentes y abre el incidente indicado -- usado por
+  // AlertDrawer cuando la alerta ya está asociada a un incidente.
+  onViewIncident: (id: number) => void;
+}
+
+export default function AlertsPage({ initialAlertSelection = null, onViewIncident }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
@@ -25,6 +36,10 @@ export default function AlertsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  useEffect(() => {
+    if (initialAlertSelection != null) setSelectedId(initialAlertSelection.id);
+  }, [initialAlertSelection]);
+
   // Debounce del buscador -- no dispara un pedido por cada tecla.
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput), DEBOUNCE_MS);
@@ -36,7 +51,7 @@ export default function AlertsPage() {
     setPage(1);
   }, [search, severity, status, since, rule]);
 
-  useEffect(() => {
+  function load() {
     let cancelled = false;
     setLoading(true);
     fetchAlerts({ search, severity, status, since, rule, page, page_size: PAGE_SIZE })
@@ -55,7 +70,9 @@ export default function AlertsPage() {
     return () => {
       cancelled = true;
     };
-  }, [search, severity, status, since, rule, page]);
+  }
+
+  useEffect(load, [search, severity, status, since, rule, page]);
 
   const hasFilters = Boolean(search || severity || status || since || rule);
 
@@ -104,7 +121,12 @@ export default function AlertsPage() {
         </>
       )}
 
-      <AlertDrawer alertId={selectedId} onClose={() => setSelectedId(null)} />
+      <AlertDrawer
+        alertId={selectedId}
+        onClose={() => setSelectedId(null)}
+        onChanged={load}
+        onViewIncident={onViewIncident}
+      />
     </main>
   );
 }

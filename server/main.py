@@ -543,6 +543,53 @@ def change_password(
     return {"message": "Contraseña actualizada"}
 
 
+@app.get("/api/perfil")
+def api_perfil(user: dict = Depends(get_current_user)):
+    """Versión JSON de /perfil (misma consulta exacta que perfil_page,
+    reusada tal cual) para la pantalla Perfil en React -- pedida
+    explícitamente para reemplazar el enlace que antes mandaba a la
+    página Jinja2 (perfil.html), que tiene un diseño completamente
+    distinto al sistema Nocturne del resto de la app. La página
+    Jinja2 no se tocó -- sigue existiendo tal cual, esta es una
+    segunda forma de llegar a los mismos datos reales, no una fuente
+    de verdad paralela. 'roles' sale de la sesión (ya calculado en el
+    login, no hace falta otra consulta); 'is_active' se agrega acá
+    porque perfil_page no la seleccionaba, pero es una columna real
+    de 'users' -- no un valor inventado."""
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT username, full_name, email, is_active, created_at, last_login_at
+                FROM users
+                WHERE id = %s;
+                """,
+                (user["id"],)
+            )
+
+            row = cursor.fetchone()
+
+    finally:
+        connection.close()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    return {
+        "username": row[0],
+        "full_name": row[1],
+        "email": row[2],
+        "is_active": row[3],
+        "created_at": row[4].strftime("%d/%m/%Y") if row[4] else None,
+        "last_login_at": row[5].strftime("%d/%m/%Y %H:%M:%S") if row[5] else None,
+        "roles": user.get("roles", []),
+    }
+
+
 @app.get("/perfil")
 def perfil_page(request: Request):
 
@@ -5669,14 +5716,27 @@ def api_incidentes(
     """Versión JSON de /incidentes (Jinja2) para la pantalla Incidentes
     en React -- misma consulta (COMBINED_CTE), mismos filtros, mismos
     KPIs. No es una fuente de verdad paralela: se reusa la función de
-    armado de filtros/paginación tal cual la usa incidentes_page."""
+    armado de filtros/paginación tal cual la usa incidentes_page.
 
-    status_bucket = status_bucket if status_bucket in STATUS_BUCKET_LABELS_ES else ""
+    A diferencia de la vista Jinja2 (que unifica incidentes agrupados
+    y alertas sueltas en una sola matriz), esta pantalla en React
+    muestra solo incidentes agrupados -- pedido explícito (2026-08-15)
+    para que la lista sea más rápida de leer. Las alertas sueltas ya
+    tienen su propia pantalla dedicada (Alertas)."""
+
+    # Solo los 4 buckets que de verdad puede tener un incidente
+    # (OPEN/IN_PROGRESS/CONTAINED/CLOSED) -- 'confirmado' y
+    # 'falso_positivo' son exclusivos de alerts.status y ahora que esta
+    # lista no muestra alertas sueltas, ofrecerlos como filtro siempre
+    # devolvería vacío.
+    INCIDENT_STATUS_BUCKETS = {"nuevo", "investigando", "contenido", "cerrado"}
+
+    status_bucket = status_bucket if status_bucket in INCIDENT_STATUS_BUCKETS else ""
     severity = severity if severity in ALERT_SEVERITY_LABELS_ES else ""
     rule = rule if rule in ALERT_RULE_LABELS_ES else ""
     since = since if since in INCIDENTES_SINCE_OPTIONS else ""
 
-    where_clauses = []
+    where_clauses = ["kind = 'incident'"]
     params = {}
 
     if agent_id:
@@ -5794,7 +5854,10 @@ def api_incidentes(
             "mttr_minutes": mttr_minutes,
         },
         "filters": {
-            "status_options": [{"value": k, "label": v} for k, v in STATUS_BUCKET_LABELS_ES.items()],
+            "status_options": [
+                {"value": k, "label": v} for k, v in STATUS_BUCKET_LABELS_ES.items()
+                if k in INCIDENT_STATUS_BUCKETS
+            ],
             "severity_options": [{"value": k, "label": v} for k, v in ALERT_SEVERITY_LABELS_ES.items()],
             "rule_options": [{"value": k, "label": v} for k, v in ALERT_RULE_LABELS_ES.items()],
             "since_options": [{"value": k, "label": v[0]} for k, v in INCIDENTES_SINCE_OPTIONS.items()],
@@ -5842,8 +5905,10 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 
                 cursor.execute(
                     """
-                    SELECT alerts.created_at, heuristic_rules.name
+                    SELECT alerts.id, alerts.created_at, heuristic_rules.name,
+                           severity_levels.name, alerts.risk_score
                     FROM alerts
+                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
                     LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
                     LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                     WHERE alerts.incident_id = %s
@@ -5852,8 +5917,8 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                     (item_id,)
                 )
                 linked = cursor.fetchall()
-                anchor_ts = linked[0][0] if linked else opened_at
-                is_honeyfile = any(r[1] == "honeyfile_access" for r in linked)
+                anchor_ts = linked[0][1] if linked else opened_at
+                is_honeyfile = any(r[2] == "honeyfile_access" for r in linked)
                 code = f"INC-{inc_id:05d}"
                 status_label = INCIDENT_STATUS_LABELS_ES.get(status, status)
 
@@ -5862,6 +5927,24 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 incident_id_val = None
                 resolved_at_val = None
                 matched_rules = []
+
+                # "Alerta de origen": la primera alerta (por fecha) que
+                # quedó vinculada a este incidente -- ya sea porque
+                # create_incident() la escaló manualmente, o porque el
+                # motor automático la generó. Si más adelante se
+                # vincularon más alertas al mismo incidente
+                # (POST /incidents/{id}/alerts), esta sigue siendo la
+                # que dio origen al caso, no la última.
+                origin_alert = None
+                if linked:
+                    origin_row = linked[0]
+                    origin_alert = {
+                        "id": origin_row[0],
+                        "code": f"ALT-{origin_row[0]:05d}",
+                        "severity": origin_row[3],
+                        "severity_label": ALERT_SEVERITY_LABELS_ES.get(origin_row[3], origin_row[3]),
+                        "risk_score": float(origin_row[4]) if origin_row[4] is not None else None,
+                    }
 
             else:
 
@@ -5892,6 +5975,9 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 assigned_to = None
                 assigned_to_name = None
                 detection_count = 1
+                # No aplica a una alerta suelta -- 'origin_alert' solo
+                # tiene sentido para un incidente agrupado, ver arriba.
+                origin_alert = None
 
                 # Reglas asociadas (alert_rule) -- puede haber más de una
                 # regla contribuyendo a la misma alerta, por eso es una
@@ -6015,7 +6101,17 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
         "incident_id": incident_id_val,
         "resolved_at": resolved_at_val.strftime("%d/%m/%Y %H:%M:%S") if resolved_at_val else None,
         "rules": matched_rules,
-        "timeline": timeline
+        "timeline": timeline,
+        # 'anchor_ts' ya se calculaba antes (para la ventana de la
+        # cadena de evidencia) pero nunca se devolvía -- se agrega acá
+        # tal cual, sin inventar nada nuevo. Para una alerta suelta es
+        # su fecha de creación real; para un incidente, la de la
+        # primera alerta vinculada (o su apertura si no tiene ninguna).
+        "created_at": anchor_ts.strftime("%d/%m/%Y %H:%M:%S") if anchor_ts else None,
+        # Solo viene poblado para kind == 'incident': la alerta que dio
+        # origen al caso (la primera por fecha entre las vinculadas),
+        # para el bloque "Alerta de origen" del drawer.
+        "origin_alert": origin_alert,
     }
 
 

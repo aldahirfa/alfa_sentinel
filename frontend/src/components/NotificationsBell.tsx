@@ -6,9 +6,11 @@ import { useClickOutside } from "../hooks/useClickOutside";
 
 interface Props {
   count: number;
+  onSelectAlert: (id: number) => void;
+  onViewAll: () => void;
 }
 
-export default function NotificationsBell({ count }: Props) {
+export default function NotificationsBell({ count, onSelectAlert, onViewAll }: Props) {
   const [open, setOpen] = useState(false);
   const [alerts, setAlerts] = useState<OpenAlert[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -74,10 +76,13 @@ export default function NotificationsBell({ count }: Props) {
               </div>
             ) : (
               alerts.map((a) => (
-                <a
+                <button
                   key={a.id}
-                  href="/incidentes"
-                  className="flex flex-col gap-1 px-3.5 py-2.5 border-b no-underline"
+                  onClick={() => {
+                    setOpen(false);
+                    onSelectAlert(a.id);
+                  }}
+                  className="flex flex-col gap-1 px-3.5 py-2.5 border-b w-full text-left bg-transparent cursor-pointer"
                   style={{ borderColor: "var(--line-soft)" }}
                 >
                   <div className="flex items-center gap-2">
@@ -91,18 +96,21 @@ export default function NotificationsBell({ count }: Props) {
                     <span className="ml-auto text-[10.5px]" style={{ color: "var(--tx-mute)" }}>{a.created_at}</span>
                   </div>
                   <div className="text-[11.5px]" style={{ color: "var(--tx-dim)" }}>{a.title}</div>
-                </a>
+                </button>
               ))
             )}
           </div>
 
-          <a
-            href="/incidentes"
-            className="block text-center text-xs font-medium no-underline px-3.5 py-2.5"
+          <button
+            onClick={() => {
+              setOpen(false);
+              onViewAll();
+            }}
+            className="block w-full text-center text-xs font-medium bg-transparent border-0 cursor-pointer px-3.5 py-2.5"
             style={{ color: "var(--brand)" }}
           >
             Ver todas las alertas
-          </a>
+          </button>
         </div>
       )}
     </div>

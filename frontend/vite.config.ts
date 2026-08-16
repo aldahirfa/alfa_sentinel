@@ -75,6 +75,14 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // GET /perfil (menú de usuario > "Mi perfil") -- página Jinja2
+      // real, todavía no migrada a React. Sin esto cae en el fallback
+      // de SPA de Vite y "redirige" al dashboard (mismo bug ya visto
+      // con /me, /logout, etc.).
+      '/perfil': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       // Reusa los logos reales del servidor (server/static/) en vez de
       // duplicarlos en el proyecto React -- un solo archivo fuente.
       '/static': {

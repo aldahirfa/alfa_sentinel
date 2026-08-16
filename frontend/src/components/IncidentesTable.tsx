@@ -48,7 +48,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect }
             <th className="pb-2 pr-3 font-semibold">Estado</th>
             <th className="pb-2 pr-3 font-semibold">Responsable</th>
             <th className="pb-2 pr-3 font-semibold">Fecha</th>
-            <th className="pb-2 font-semibold" />
+            <th className="pb-2 font-semibold" style={{ minWidth: "170px" }} />
           </tr>
         </thead>
         <tbody>
@@ -59,8 +59,8 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect }
               <td colSpan={9} className="text-center py-10" style={{ color: "var(--tx-mute)" }}>
                 <i className="ph ph-magnifying-glass text-xl block mb-2" />
                 {hasFilters
-                  ? "Ningún incidente o alerta coincide con la búsqueda o los filtros aplicados."
-                  : "Todavía no hay incidentes ni alertas registrados."}
+                  ? "Ningún incidente coincide con la búsqueda o los filtros aplicados."
+                  : "Todavía no hay incidentes registrados."}
               </td>
             </tr>
           ) : (
@@ -76,10 +76,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect }
                 >
                   <td className="py-2.5 pr-3" style={accent ? { boxShadow: `inset 3px 0 0 ${accent}` } : undefined}>
                     <div className="flex items-center gap-1.5 pl-2">
-                      <i
-                        className={item.kind === "incident" ? "ph-fill ph-siren" : "ph ph-warning"}
-                        style={{ fontSize: "12px", color: "var(--tx-mute)" }}
-                      />
+                      <i className="ph-fill ph-siren" style={{ fontSize: "12px", color: "var(--tx-mute)" }} />
                       <span className="font-semibold" style={{ color: "var(--tx)" }}>{item.code}</span>
                     </div>
                   </td>
@@ -115,14 +112,25 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect }
                   </td>
                   <td className="py-2.5 pr-3" style={{ color: "var(--tx-dim)" }}>{item.created_at}</td>
                   <td className="py-2.5">
-                    <button
-                      onClick={() => onSelect(item)}
-                      className="flex items-center gap-1 text-[11.5px] font-medium border-0 bg-transparent cursor-pointer whitespace-nowrap"
-                      style={{ color: "var(--brand)" }}
-                    >
-                      Detalles
-                      <i className="ph ph-arrow-right text-[12px]" />
-                    </button>
+                    <div className="flex items-center gap-2.5 justify-end">
+                      <button
+                        disabled
+                        title="ALFA-Sentinel no puede aislar un host todavía: el agente no tiene forma de recibir ni ejecutar un comando remoto."
+                        className="flex items-center gap-1 text-[11.5px] font-medium px-2 py-1 rounded-md cursor-not-allowed opacity-50 whitespace-nowrap"
+                        style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
+                      >
+                        <i className="ph ph-plugs text-[12px]" />
+                        Aislar equipo
+                      </button>
+                      <button
+                        onClick={() => onSelect(item)}
+                        className="flex items-center gap-1 text-[11.5px] font-medium border-0 bg-transparent cursor-pointer whitespace-nowrap"
+                        style={{ color: "var(--brand)" }}
+                      >
+                        Ver más detalles
+                        <i className="ph ph-arrow-right text-[12px]" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

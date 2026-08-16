@@ -68,6 +68,16 @@ export interface MatchedRule {
   matched_at: string;
 }
 
+// Alerta que dio origen a un incidente agrupado (la primera por fecha
+// entre las vinculadas) -- solo viene poblado cuando kind === "incident".
+export interface OriginAlert {
+  id: number;
+  code: string;
+  severity: Severity | null;
+  severity_label: string;
+  risk_score: number | null;
+}
+
 // Respuesta de /api/incidentes/{kind}/{id}/drawer -- compartida entre
 // "incident" y "alert". Para una alerta suelta, classification/
 // assigned_to siempre vienen null (no aplican).
@@ -97,4 +107,6 @@ export interface IncidenteDrawerData {
   resolved_at: string | null;
   rules: MatchedRule[];
   timeline: TimelineEntry[];
+  created_at: string | null;
+  origin_alert: OriginAlert | null;
 }

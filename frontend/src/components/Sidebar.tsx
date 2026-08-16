@@ -4,7 +4,11 @@
 // React (ver App.tsx, navegación interna sin recargar) -- la
 // migración progresiva desde Jinja2 terminó acá (2026-08-15).
 
-export type Page = "dashboard" | "endpoints" | "alerts" | "incidentes" | "honeyfiles" | "reglas" | "respuesta" | "reportes" | "administracion";
+// "perfil" no está en NAV_ITEMS -- se llega a esa pantalla desde el
+// menú de usuario ("Mi perfil" en UserMenu.tsx), no desde el sidebar,
+// igual que en la vieja página Jinja2 (perfil.html tampoco estaba en
+// el nav lateral).
+export type Page = "dashboard" | "endpoints" | "alerts" | "incidentes" | "honeyfiles" | "reglas" | "respuesta" | "reportes" | "administracion" | "perfil";
 
 interface Props {
   alertsActive: number;

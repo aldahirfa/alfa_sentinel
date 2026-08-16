@@ -25,6 +25,7 @@ import type {
   UserUpdatePayload,
   UsersResponse,
 } from "../types/admin";
+import type { PasswordChangePayload, ProfileResponse, ProfileUpdatePayload } from "../types/perfil";
 
 // Todo pasa por el proxy de Vite (ver vite.config.ts) -- rutas
 // relativas, sin host, para que la cookie de sesión viaje como
@@ -403,4 +404,43 @@ export async function login(username: string, password: string): Promise<LoginRe
   // mostrar el nombre real de quien inició sesión en el topbar, en
   // vez de un texto genérico fijo.
   return res.json() as Promise<LoginResult>;
+}
+
+// GET /api/perfil -- versión JSON de /perfil (Jinja2), misma consulta
+// exacta reusada tal cual. Para la pantalla Perfil en React.
+export function fetchProfile(): Promise<ProfileResponse> {
+  return request<ProfileResponse>("/api/perfil");
+}
+
+// PUT /me -- endpoint real ya existente (update_profile). Cada quien
+// solo puede editar su propio nombre/correo, sale de la sesión, no
+// del body.
+export async function updateProfile(payload: ProfileUpdatePayload): Promise<{ message: string }> {
+  const res = await fetch("/me", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || "No se pudo actualizar el perfil");
+  }
+  return res.json();
+}
+
+// POST /me/password -- endpoint real ya existente (change_password).
+// Exige la contraseña actual correcta antes de aceptar la nueva.
+export async function changePassword(payload: PasswordChangePayload): Promise<{ message: string }> {
+  const res = await fetch("/me/password", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || "No se pudo cambiar la contraseña");
+  }
+  return res.json();
 }

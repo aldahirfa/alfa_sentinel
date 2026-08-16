@@ -4,10 +4,16 @@ import type { IncidenteDrawerData } from "../types/alerts";
 import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import type { AlertStatus } from "../types/alerts";
+import EscalateAlertModal from "./EscalateAlertModal";
 
 interface Props {
   alertId: number | null;
   onClose: () => void;
+  // Refresca la lista/resumen de Alertas después de escalar (mismo
+  // patrón que onChanged en IncidentDrawer.tsx).
+  onChanged: () => void;
+  // Navega a Incidentes y abre el incidente asociado a esta alerta.
+  onViewIncident: (id: number) => void;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -30,20 +36,25 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default function AlertDrawer({ alertId, onClose }: Props) {
+export default function AlertDrawer({ alertId, onClose, onChanged, onViewIncident }: Props) {
   const [render, setRender] = useState(false);
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<IncidenteDrawerData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showEscalate, setShowEscalate] = useState(false);
+
+  function loadDrawer(id: number) {
+    setData(null);
+    setError(null);
+    fetchAlertDrawer(id)
+      .then(setData)
+      .catch(() => setError("No se pudo cargar la información de esta alerta."));
+  }
 
   useEffect(() => {
     if (alertId !== null) {
       setRender(true);
-      setData(null);
-      setError(null);
-      fetchAlertDrawer(alertId)
-        .then(setData)
-        .catch(() => setError("No se pudo cargar la información de esta alerta."));
+      loadDrawer(alertId);
       const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
       return () => cancelAnimationFrame(raf);
     } else if (render) {
@@ -212,21 +223,44 @@ export default function AlertDrawer({ alertId, onClose }: Props) {
                 </Section>
               )}
 
-              {/* Incidente relacionado */}
+              {/* Incidente relacionado -- el sistema tiene su propio
+                  mecanismo automático de escalamiento (motor
+                  heurístico), pero un analista puede decidir que una
+                  alerta amerita tratarse como incidente aunque el
+                  sistema todavía no la haya escalado. Ambos caminos
+                  terminan en el mismo lugar: alerts.incident_id. */}
               <Section title="Incidente relacionado">
                 {data.incident_id ? (
-                  <a
-                    href={`/incidentes/${data.incident_id}`}
-                    className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-[12px] font-medium no-underline"
-                    style={{ border: "1px solid var(--brand)", color: "var(--brand)" }}
-                  >
-                    Ver incidente #{data.incident_id}
-                    <i className="ph ph-arrow-right text-[13px]" />
-                  </a>
+                  <>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="text-[12px]" style={{ color: "var(--tx-mute)" }}>Incidente asociado</span>
+                      <span className="text-[12.5px] font-semibold tabular-nums" style={{ color: "var(--tx)" }}>
+                        INC-{String(data.incident_id).padStart(5, "0")}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onViewIncident(data.incident_id!)}
+                      className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-[12px] font-medium cursor-pointer border-0"
+                      style={{ border: "1px solid var(--brand)", color: "var(--brand)", background: "transparent" }}
+                    >
+                      Ver incidente
+                      <i className="ph ph-arrow-right text-[13px]" />
+                    </button>
+                  </>
                 ) : (
-                  <p className="text-[12px]" style={{ color: "var(--tx-mute)" }}>
-                    Esta alerta no forma parte de un incidente agrupado.
-                  </p>
+                  <>
+                    <p className="text-[12px] mb-2.5" style={{ color: "var(--tx-mute)" }}>
+                      Sin incidente. Esta alerta todavía no forma parte de un caso agrupado.
+                    </p>
+                    <button
+                      onClick={() => setShowEscalate(true)}
+                      className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12.5px] font-semibold cursor-pointer"
+                      style={{ border: "1px solid var(--brand)", color: "var(--brand)", background: "var(--brand-soft)" }}
+                    >
+                      <i className="ph-fill ph-siren" style={{ fontSize: "14px" }} />
+                      Escalar a incidente
+                    </button>
+                  </>
                 )}
               </Section>
 
@@ -267,6 +301,18 @@ export default function AlertDrawer({ alertId, onClose }: Props) {
           )}
         </div>
       </aside>
+
+      {showEscalate && data && (
+        <EscalateAlertModal
+          alert={data}
+          onClose={() => setShowEscalate(false)}
+          onEscalated={() => {
+            setShowEscalate(false);
+            loadDrawer(data.id);
+            onChanged();
+          }}
+        />
+      )}
     </>
   );
 }

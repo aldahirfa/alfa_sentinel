@@ -12,8 +12,10 @@ import RulesPage from "./pages/RulesPage";
 import RespuestaPage from "./pages/RespuestaPage";
 import ReportsPage from "./pages/ReportsPage";
 import AdministracionPage from "./pages/AdministracionPage";
+import PerfilPage from "./pages/PerfilPage";
 import { ApiError, fetchDashboardOverview, fetchMe } from "./api/client";
 import type { DashboardOverview } from "./types/dashboard";
+import type { ItemKind } from "./types/incidentes";
 
 const POLL_INTERVAL_MS = 20_000;
 const THEME_KEY = "alfa_sentinel_theme";
@@ -30,12 +32,15 @@ const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
   respuesta: { title: "Acciones de respuesta", subtitle: "Contención de endpoints ante una amenaza" },
   reportes: { title: "Reports", subtitle: "Informes de seguridad, endpoints e incidentes" },
   administracion: { title: "Administración", subtitle: "Usuarios, agentes, configuración y auditoría" },
+  perfil: { title: "Mi perfil", subtitle: "Información de tu cuenta en ALFA_SENTINEL" },
 };
 
 // No hay tabla de roles->etiqueta en el servidor (ver server/templates/
 // usuarios.html: "Hoy solo existe el rol admin"). Se capitaliza el
 // valor real tal cual viene de la sesión, sin inventar una etiqueta.
-function roleLabelFrom(roles: string[]): string {
+// Exportada porque PerfilPage necesita el mismo texto que ya se
+// muestra en el topbar/menú de usuario -- una sola fuente de verdad.
+export function roleLabelFrom(roles: string[]): string {
   if (roles.length === 0) return "Usuario";
   return roles.map((r) => r.charAt(0).toUpperCase() + r.slice(1)).join(", ");
 }
@@ -47,6 +52,15 @@ export default function App() {
   const [roleLabel, setRoleLabel] = useState("Usuario");
   const [isAdmin, setIsAdmin] = useState(false);
   const [needsLogin, setNeedsLogin] = useState(false);
+  // Selección de alerta pedida desde la campana de notificaciones --
+  // se envuelve en un objeto nuevo en cada click para que AlertsPage
+  // pueda reabrir el drawer aunque sea la misma alerta dos veces
+  // seguidas (ver AlertsPage.tsx::initialAlertSelection).
+  const [alertsInitialSelection, setAlertsInitialSelection] = useState<{ id: number } | null>(null);
+  // Mismo patrón que arriba, pero para navegar a Incidentes y abrir un
+  // incidente puntual -- usado desde "Ver incidente" en AlertDrawer.
+  const [incidentesInitialSelection, setIncidentesInitialSelection] =
+    useState<{ kind: ItemKind; id: number } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -89,6 +103,19 @@ export default function App() {
     return () => clearInterval(id);
   }, [load]);
 
+  // Navegación interna compartida entre pantallas -- reemplaza los
+  // <a href="/incidentes/...">/<a href="/detecciones/...."> que
+  // antes mandaban a Jinja2. "Ver incidente" desde una alerta y
+  // "Ver alerta original" desde un incidente usan esto mismo.
+  function openAlert(id: number) {
+    setAlertsInitialSelection({ id });
+    setPage("alerts");
+  }
+  function openIncident(id: number) {
+    setIncidentesInitialSelection({ kind: "incident", id });
+    setPage("incidentes");
+  }
+
   const wrapperStyle = { background: "var(--bg)", color: "var(--tx)" };
 
   if (needsLogin) {
@@ -130,12 +157,19 @@ export default function App() {
 
   return (
     <div data-theme={theme} className="flex min-h-screen font-[Inter,system-ui,sans-serif] text-sm" style={wrapperStyle}>
-      <Sidebar
-        page={page}
-        onNavigate={setPage}
-        alertsActive={data.summary.alerts_active}
-        incidentsActive={data.summary.incidents_active}
-      />
+      {/* La barra lateral se mantiene siempre oscura, incluso en tema
+          claro (pedido explícito) -- data-theme anidado resuelve las
+          variables CSS del sidebar al set oscuro sin tocar el resto
+          de la app. display:contents para que no agregue una caja
+          extra al layout flex de afuera. */}
+      <div data-theme="dark" className="contents">
+        <Sidebar
+          page={page}
+          onNavigate={setPage}
+          alertsActive={data.summary.alerts_active}
+          incidentsActive={data.summary.incidents_active}
+        />
+      </div>
 
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar
@@ -148,6 +182,9 @@ export default function App() {
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           onLoggedOut={() => setNeedsLogin(true)}
+          onSelectAlert={openAlert}
+          onViewAllAlerts={() => setPage("alerts")}
+          onOpenProfile={() => setPage("perfil")}
         />
 
         {page === "dashboard" ? (
@@ -155,9 +192,9 @@ export default function App() {
         ) : page === "endpoints" ? (
           <EndpointsPage />
         ) : page === "alerts" ? (
-          <AlertsPage />
+          <AlertsPage initialAlertSelection={alertsInitialSelection} onViewIncident={openIncident} />
         ) : page === "incidentes" ? (
-          <IncidentesPage />
+          <IncidentesPage initialSelection={incidentesInitialSelection} onViewAlert={openAlert} />
         ) : page === "honeyfiles" ? (
           <HoneyfilesPage />
         ) : page === "reglas" ? (
@@ -166,8 +203,10 @@ export default function App() {
           <RespuestaPage />
         ) : page === "reportes" ? (
           <ReportsPage />
-        ) : (
+        ) : page === "administracion" ? (
           <AdministracionPage isAdmin={isAdmin} />
+        ) : (
+          <PerfilPage roleLabel={roleLabel} />
         )}
       </div>
     </div>

@@ -6,9 +6,10 @@ interface Props {
   userName: string;
   roleLabel: string;
   onLoggedOut: () => void;
+  onOpenProfile: () => void;
 }
 
-export default function UserMenu({ userName, roleLabel, onLoggedOut }: Props) {
+export default function UserMenu({ userName, roleLabel, onLoggedOut, onOpenProfile }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false));
@@ -54,14 +55,17 @@ export default function UserMenu({ userName, roleLabel, onLoggedOut }: Props) {
             <div className="text-[12.5px] font-semibold" style={{ color: "var(--tx)" }}>{userName}</div>
             <div className="text-[11px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{roleLabel}</div>
           </div>
-          <a
-            href="/perfil"
-            className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] no-underline"
+          <button
+            onClick={() => {
+              setOpen(false);
+              onOpenProfile();
+            }}
+            className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] w-full text-left bg-transparent border-0 cursor-pointer"
             style={{ color: "var(--tx-dim)" }}
           >
             <i className="ph ph-user-circle" style={{ fontSize: "15px" }} />
             Mi perfil
-          </a>
+          </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] w-full text-left bg-transparent border-0 cursor-pointer border-t"

@@ -11,6 +11,9 @@ interface TopbarProps {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onLoggedOut: () => void;
+  onSelectAlert: (id: number) => void;
+  onViewAllAlerts: () => void;
+  onOpenProfile: () => void;
 }
 
 export default function Topbar({
@@ -23,6 +26,9 @@ export default function Topbar({
   theme,
   onToggleTheme,
   onLoggedOut,
+  onSelectAlert,
+  onViewAllAlerts,
+  onOpenProfile,
 }: TopbarProps) {
   return (
     <header
@@ -65,11 +71,11 @@ export default function Topbar({
           <i className={theme === "dark" ? "ph ph-sun" : "ph ph-moon"} style={{ fontSize: "16px" }} />
         </button>
 
-        <NotificationsBell count={notificationCount} />
+        <NotificationsBell count={notificationCount} onSelectAlert={onSelectAlert} onViewAll={onViewAllAlerts} />
 
         <div className="w-px h-[26px]" style={{ background: "var(--line)" }} />
 
-        <UserMenu userName={userName} roleLabel={roleLabel} onLoggedOut={onLoggedOut} />
+        <UserMenu userName={userName} roleLabel={roleLabel} onLoggedOut={onLoggedOut} onOpenProfile={onOpenProfile} />
       </div>
     </header>
   );
