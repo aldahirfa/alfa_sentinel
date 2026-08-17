@@ -15,7 +15,6 @@ export interface EndpointListItem {
   ip_address: string;
   conn_status: ConnStatus;
   risk: Severity;
-  risk_label: string;
   agent_health: AgentHealth;
   last_seen_ago: string;
   alerts_count: number;
@@ -81,7 +80,6 @@ export interface EndpointDrawerData {
   enrolled_at: string;
   risk_bucket: Severity;
   risk_score: number;
-  risk_label: string;
   is_isolated: boolean;
   alerts_active: number;
   incidents_total: number;

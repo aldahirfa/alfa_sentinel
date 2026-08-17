@@ -1,5 +1,5 @@
 import type { AlertListItem } from "../types/alerts";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import { rowSelectionStyle } from "../lib/rowSelection";
 
@@ -17,9 +17,9 @@ interface Props {
 }
 
 function rowAccent(a: AlertListItem): string | null {
-  if (a.severity === "CRITICAL") return "var(--crit)";
-  if (a.severity === "HIGH") return "var(--high)";
-  if (a.severity === "SUSPICIOUS") return "var(--warn)";
+  if (a.severity === "CRÍTICO") return "var(--crit)";
+  if (a.severity === "ALTO") return "var(--high)";
+  if (a.severity === "MEDIO") return "var(--warn)";
   return null;
 }
 
@@ -88,7 +88,7 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
                       className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
                       style={severityPillStyle(a.severity)}
                     >
-                      {SEVERITY_LABEL[a.severity].toUpperCase()}
+                      {a.severity.toUpperCase()}
                     </span>
                   </td>
                   <td className="py-3 pr-3">

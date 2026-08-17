@@ -7,6 +7,8 @@ from honeyfile_monitor import HoneyfileMonitor
 
 from client import send_event, send_alert
 
+from adapters import get_process_for_file_event
+
 import os
 
 class FileActivityHandler(FileSystemEventHandler):
@@ -26,15 +28,20 @@ class FileActivityHandler(FileSystemEventHandler):
     # 'matched_rules' que se manda acá -- el agente ya no decide
     # severidad ni risk_score (sección 1 de la especificación del
     # motor heurístico: separar detección de cálculo de riesgo).
+    # Claves iguales a las de heuristic_engine.RULE_NAMES/DEFAULT_RULES
+    # (coinciden con 'heuristic_rules.name' en la base real, ver
+    # comentario en heuristic_engine.py) -- si cambian ahí, cambian acá.
     RULE_TITLES = {
-        "modificacion_masiva_archivos": "Modificación masiva de archivos",
-        "renombrado_extension_anomala": "Renombrado con extensión de ransomware conocida",
-        "acceso_honeyfile": "Honeyfile activado",
-        "escritura_intensiva_archivos": "Escritura intensiva de archivos",
-        "acceso_recursos_compartidos": "Acceso masivo a recursos compartidos",
-        "creacion_masiva_temporales": "Creación masiva de archivos temporales",
-        "eliminacion_anomala_archivos": "Eliminación anómala de archivos",
-        "actividad_archivos_usuario": "Actividad repetitiva sobre archivos de usuario",
+        "Modificacion Masiva Archivos": "Modificación masiva de archivos",
+        "Renombrado Extension Anomala": "Renombrado con extensión de ransomware conocida",
+        "Acceso Honeyfile": "Honeyfile activado",
+        "Escritura Intensiva Archivos": "Escritura intensiva de archivos",
+        "Proceso Sospechoso": "Proceso sospechoso detectado",
+        "Acceso Recursos Compartidos": "Acceso masivo a recursos compartidos",
+        "Creacion Masiva Temporales": "Creación masiva de archivos temporales",
+        "Eliminacion Anomala Archivos": "Eliminación anómala de archivos",
+        "Actividad Archivos Usuario": "Actividad repetitiva sobre archivos de usuario",
+        "Actividad Repetitiva Automatizada": "Actividad automatizada del mismo proceso",
     }
 
     def register_file_event(self, file_path, event_type):
@@ -49,17 +56,38 @@ class FileActivityHandler(FileSystemEventHandler):
             f"Extensión: {extension}"
         )
 
+        # Enriquecimiento de eventos (2026-08-16, ver PENDIENTES.md):
+        # intenta identificar qué proceso tiene este archivo abierto
+        # AHORA MISMO (agent/adapters/) -- best-effort, honesto: si no
+        # se puede determinar (el proceso ya cerró el archivo, o no
+        # hay permisos para inspeccionarlo), process_info queda en
+        # None y el evento se reporta igual, sin inventar
+        # process_id/process_name (sección 8 de la especificación).
+        process_info = get_process_for_file_event(file_path, event_type)
+
+        if process_info:
+            print(
+                f"Proceso atribuido: PID {process_info.get('process_id')} "
+                f"({process_info.get('process_name')})"
+            )
+
         # Reportar el evento crudo al servidor (tabla 'events'). Antes
         # esto capturaba el event_id de la respuesta para vincular la
         # alerta a los eventos que la dispararon (tabla 'alert_events'),
         # pero esa tabla no existe en la nueva estructura (alfa_sentinel)
         # -- ver PENDIENTES.md. Se sigue mandando el evento igual, solo
-        # que ya no se hace nada con el id de vuelta.
+        # que ya no se hace nada con el id de vuelta. 'executable_path'
+        # no viaja acá -- 'events' no tiene columna para eso (sección 15
+        # de la especificación: no se inventa una columna nueva sin
+        # necesidad real comprobada); process_id/process_name sí, esas
+        # columnas ya existían.
         send_event(
             self.credential,
             {
                 "event_type": event_type,
                 "description": f"{event_type} en {file_path}",
+                "process_id": process_info.get("process_id") if process_info else None,
+                "process_name": process_info.get("process_name") if process_info else None,
                 "metadata": {
                     "file_path": file_path,
                     "extension": extension
@@ -79,7 +107,9 @@ class FileActivityHandler(FileSystemEventHandler):
             print(f"Archivo: {file_path}")
             print()
 
-        matched_rules = self.analyzer.register_event(file_path, event_type, is_honeyfile=is_honeyfile)
+        matched_rules = self.analyzer.register_event(
+            file_path, event_type, is_honeyfile=is_honeyfile, process_info=process_info
+        )
 
         file_count = self.analyzer.get_unique_file_count()
 
@@ -162,7 +192,7 @@ class FileActivityHandler(FileSystemEventHandler):
 
             # Se reporta 'dest_path' (el nombre/ruta nuevo), no
             # 'src_path' (el viejo, que ya no existe). Esto importa en
-            # particular para la regla renombrado_extension_anomala: si
+            # particular para la regla "Renombrado Extension Anomala": si
             # se mira la extensión del nombre VIEJO, un rename a
             # "informe.docx.locked" nunca se detectaría porque la
             # extensión sospechosa está en el nombre nuevo.
@@ -172,9 +202,10 @@ class FileActivityHandler(FileSystemEventHandler):
 def start_file_monitor(path, credential, known_honeyfile_paths=None, rule_policy=None):
 
     # 'rule_policy' es la lista 'rules' que devuelve GET /agent/rule-policy
-    # (ver agent/main.py, agent/client.py::get_rule_policy) -- None o
-    # lista vacía si no se pudo pedir, en cuyo caso from_policy() cae
-    # en los valores por defecto de siempre.
+    # (ver agent/main.py, agent/client.py::get_rule_policy) -- la
+    # política EFECTIVA ya resuelta por el servidor (global + override
+    # de agent_rule para este agente). None (no lista vacía) significa
+    # "no se pudo ni pedir" -- ver FileActivityAnalyzer.from_policy.
     analyzer = FileActivityAnalyzer.from_policy(rule_policy)
 
     honeyfile_monitor = HoneyfileMonitor(
@@ -225,4 +256,10 @@ def start_file_monitor(path, credential, known_honeyfile_paths=None, rule_policy
 
     observer.start()
 
-    return observer
+    # Se devuelve también 'analyzer' -- agent/main.py lo usa para leer
+    # la configuración YA RESUELTA de reglas que no se evalúan acá
+    # (ej. "Consumo CPU Elevado", que arranca su propio hilo aparte,
+    # ver cpu_monitor.py) sin tener que volver a parsear 'rule_policy'
+    # por su cuenta -- una sola fuente de verdad para "qué está activo
+    # y con qué parámetros para este agente".
+    return observer, analyzer

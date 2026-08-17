@@ -1,6 +1,5 @@
 import type { Severity } from "../types/dashboard";
 import type { AlertStatus, RuleOption } from "../types/alerts";
-import { SEVERITY_LABEL } from "../lib/severity";
 import { STATUS_LABEL } from "../lib/alertStatus";
 
 interface Props {
@@ -17,7 +16,7 @@ interface Props {
   rules: RuleOption[];
 }
 
-const SEVERITY_OPTIONS: (Severity | "")[] = ["", "SUSPICIOUS", "HIGH", "CRITICAL"];
+const SEVERITY_OPTIONS: (Severity | "")[] = ["", "MEDIO", "ALTO", "CRÍTICO"];
 const STATUS_OPTIONS: (AlertStatus | "")[] = ["", "NEW", "ACKNOWLEDGED", "ESCALATED", "CLOSED", "FALSE_POSITIVE"];
 const SINCE_OPTIONS: { value: "24h" | "7d" | "30d" | ""; label: string }[] = [
   { value: "", label: "Todo" },
@@ -80,7 +79,7 @@ export default function AlertsFilters({
                 className="px-2.5 py-1 rounded-md text-[11.5px] font-medium border-0 cursor-pointer"
                 style={segStyle(severity === opt)}
               >
-                {opt ? SEVERITY_LABEL[opt] : "Todas"}
+                {opt || "Todas"}
               </button>
             ))}
           </div>

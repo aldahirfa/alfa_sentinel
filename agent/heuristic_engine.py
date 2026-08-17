@@ -67,26 +67,62 @@ def _is_user_path(file_path):
     return bool(parts & USER_FOLDER_MARKERS)
 
 
+# Carpetas donde suele vivir software instalado "legítimamente" -- para
+# HR-05 (sección 7 de la especificación de implementación final:
+# "ejecución desde directorios temporales; ejecución desde ubicaciones
+# de usuario; rutas no habituales"). Es una aproximación honesta, no
+# una lista blanca exhaustiva de todo lo legítimo que puede existir en
+# un equipo real -- un proceso legítimo instalado en una ruta rara
+# puede generar un falso positivo, y uno malicioso copiado a
+# Program Files no se detectaría por esta señal sola. Por eso HR-05 es
+# una heurística de peso bajo (10, ver database/schema.sql), no una
+# afirmación categórica.
+STANDARD_PROGRAM_MARKERS = {
+    "program files", "program files (x86)", "windows", "system32", "syswow64",
+    "usr", "bin", "sbin", "opt", "lib", "lib64",
+}
+
+
+def _is_suspicious_executable_path(executable_path):
+    """HR-05: ¿el EJECUTABLE del proceso responsable corre desde una
+    ubicación atípica? Reutiliza los mismos marcadores de "temporal" y
+    "carpeta de usuario" que ya se usan para HR-08/HR-10 sobre el
+    archivo tocado, pero acá se aplican sobre la ruta del proceso, no
+    sobre la del archivo -- son preguntas distintas ("¿qué tocaron?"
+    vs. "¿desde dónde corre quien lo tocó?")."""
+
+    if not executable_path:
+        return False
+    if _is_temp_path(executable_path) or _is_user_path(executable_path):
+        return True
+    parts = {p.lower() for p in executable_path.replace("\\", "/").split("/") if p}
+    return not bool(parts & STANDARD_PROGRAM_MARKERS)
+
+
 # Nombres de regla que el AGENTE puede evaluar con los datos que
-# recopila hoy (ruta + tipo de evento). Deben coincidir con
-# 'heuristic_rules.name' en database/schema.sql.
+# recopila hoy (ruta + tipo de evento, y desde el 2026-08-16 también
+# atribución de proceso vía agent/adapters/ y muestreo de CPU vía
+# agent/cpu_monitor.py -- ver PENDIENTES.md, "Implementación
+# final del motor heurístico y configuración por endpoint"). Deben
+# coincidir EXACTO (case-sensitive) con el valor real de
+# 'heuristic_rules.name' en tu base -- no con lo que trae
+# database/schema.sql por defecto necesariamente, sino con lo que la
+# base tenga cargado de verdad.
 #
-# HR-05 (proceso_sospechoso), HR-06 (consumo_cpu_elevado) y HR-11
-# (actividad_repetitiva_automatizada) NO están acá: requieren datos que el
-# agente no recopila (atribución de proceso a evento de archivo, CPU
-# por proceso) -- se siembran is_active=FALSE en la base y no se
-# simulan (sección 40 de la especificación). HR-12
-# (correlacion_multiples_indicadores) tampoco: la calcula el servidor, no el
-# agente.
+# "Correlacion Multiples Indicadores" (HR-12) no está acá: la calcula
+# el servidor, no el agente (sección 20 de la especificación).
 RULE_NAMES = {
-    "modificacion_masiva_archivos",
-    "renombrado_extension_anomala",
-    "acceso_honeyfile",
-    "escritura_intensiva_archivos",
-    "acceso_recursos_compartidos",
-    "creacion_masiva_temporales",
-    "eliminacion_anomala_archivos",
-    "actividad_archivos_usuario",
+    "Modificacion Masiva Archivos",
+    "Renombrado Extension Anomala",
+    "Acceso Honeyfile",
+    "Escritura Intensiva Archivos",
+    "Proceso Sospechoso",
+    "Consumo CPU Elevado",
+    "Acceso Recursos Compartidos",
+    "Creacion Masiva Temporales",
+    "Eliminacion Anomala Archivos",
+    "Actividad Archivos Usuario",
+    "Actividad Repetitiva Automatizada",
 }
 
 # Valores por defecto -- exactamente los que siembra database/schema.sql
@@ -95,14 +131,17 @@ RULE_NAMES = {
 # detectar nada, solo sin la última configuración editada desde
 # /configuracion).
 DEFAULT_RULES = {
-    "modificacion_masiva_archivos":     {"threshold": 20, "window_seconds": 10},
-    "renombrado_extension_anomala":     {"threshold": 5,  "window_seconds": 15},
-    "acceso_honeyfile":                 {"threshold": 1,  "window_seconds": None},
-    "escritura_intensiva_archivos":     {"threshold": 50, "window_seconds": 10},
-    "acceso_recursos_compartidos":      {"threshold": 20, "window_seconds": 15},
-    "creacion_masiva_temporales":       {"threshold": 30, "window_seconds": 15},
-    "eliminacion_anomala_archivos":     {"threshold": 20, "window_seconds": 15},
-    "actividad_archivos_usuario":       {"threshold": 30, "window_seconds": 20},
+    "Modificacion Masiva Archivos":     {"threshold": 20, "window_seconds": 10},
+    "Renombrado Extension Anomala":     {"threshold": 5,  "window_seconds": 15},
+    "Acceso Honeyfile":                 {"threshold": 1,  "window_seconds": None},
+    "Escritura Intensiva Archivos":     {"threshold": 50, "window_seconds": 10},
+    "Proceso Sospechoso":               {"threshold": 1,  "window_seconds": 30},
+    "Consumo CPU Elevado":              {"threshold": 80, "window_seconds": 10},
+    "Acceso Recursos Compartidos":      {"threshold": 20, "window_seconds": 15},
+    "Creacion Masiva Temporales":       {"threshold": 30, "window_seconds": 15},
+    "Eliminacion Anomala Archivos":     {"threshold": 20, "window_seconds": 15},
+    "Actividad Archivos Usuario":       {"threshold": 30, "window_seconds": 20},
+    "Actividad Repetitiva Automatizada": {"threshold": 40, "window_seconds": 15},
 }
 
 
@@ -123,18 +162,40 @@ class FileActivityAnalyzer:
         self._user_events = deque()       # timestamps (HR-10)
         self._modified_events = deque()   # (ts, file_path) -- HR-01, cuenta únicos
         self._rename_events = deque()     # timestamps -- HR-02, solo renombrados con extensión sospechosa
+        self._suspicious_process_events = deque()  # timestamps -- HR-05
+        self._process_activity = {}       # pid -> deque(timestamps) -- HR-11, UNA ventana por proceso
 
     @classmethod
     def from_policy(cls, policy_rules):
         """policy_rules: lista de dicts {name, weight, threshold,
-        window_seconds} que devuelve GET /agent/rule-policy. Cualquier
-        nombre que el agente no sepa evaluar (ej.
-        correlacion_multiples_indicadores, o una regla diferida is_active=
-        FALSE que ni siquiera llega acá) se ignora sin romper nada."""
+        window_seconds} que devuelve GET /agent/rule-policy -- YA es
+        la política EFECTIVA (heuristic_rules + override de agent_rule
+        para este agente, sección 5/6 de la especificación de
+        implementación final), y ya viene filtrada a solo las reglas
+        cuyo is_active efectivo es TRUE. Cualquier nombre que el
+        agente no sepa evaluar (ej. "Correlacion Multiples
+        Indicadores", que calcula el servidor) se ignora sin romper
+        nada.
 
-        rules = dict(DEFAULT_RULES)
+        'policy_rules' es None -- a propósito, DISTINTO de una lista
+        vacía -- cuando no se pudo ni siquiera contactar al servidor
+        (problema de red): ahí sí se cae por completo a DEFAULT_RULES
+        para no dejar al agente sin detectar nada (sección 6: "valores
+        de respaldo para continuidad operativa"). Si el servidor SÍ
+        contestó pero la lista viene vacía o sin alguna regla puntual,
+        eso es una respuesta real ("esta regla está desactivada para
+        este endpoint") y se respeta tal cual -- no se completa con el
+        valor por defecto de esa regla, porque eso sería el agente
+        manteniendo su propia configuración en paralelo a la de la
+        base (sección 6: "no mantener una segunda configuración manual
+        para cada regla")."""
 
-        for row in (policy_rules or []):
+        if policy_rules is None:
+            return cls(rules=dict(DEFAULT_RULES))
+
+        rules = {}
+
+        for row in policy_rules:
             if row["name"] not in RULE_NAMES:
                 continue
             rules[row["name"]] = {
@@ -153,13 +214,22 @@ class FileActivityAnalyzer:
                 break
             dq.popleft()
 
-    def register_event(self, file_path, event_type, is_honeyfile=False):
+    def register_event(self, file_path, event_type, is_honeyfile=False, process_info=None):
         """Registra un evento de archivo y devuelve la lista de
         nombres de regla que están activas justo después de
         incorporarlo (puede ser más de una a la vez, ej. borrado
         masivo + actividad de usuario). No multiplica el peso por
         cantidad de eventos -- el llamador (file_monitor.py) decide
-        qué hacer con la lista, y el peso real lo aplica el servidor."""
+        qué hacer con la lista, y el peso real lo aplica el servidor.
+
+        'process_info' (2026-08-16): {"process_id", "process_name",
+        "executable_path"} si agent/adapters/ pudo atribuir el proceso
+        responsable de este evento, o None si no se pudo determinar
+        (ver PENDIENTES.md -- limitación honesta, no se inventa).
+        Habilita HR-05 (Proceso Sospechoso) y HR-11 (Actividad
+        Repetitiva Automatizada); si es None, ambas reglas
+        simplemente no evalúan nada para este evento puntual -- no
+        se cuenta como "no sospechoso", no hay dato."""
 
         now = time()
         matched = []
@@ -167,62 +237,98 @@ class FileActivityAnalyzer:
         # HR-03: inmediata, sin ventana ni acumulación -- cualquier
         # interacción con un honeyfile es suficiente (sección 12 de la
         # especificación).
-        if is_honeyfile and "acceso_honeyfile" in self.rules:
-            matched.append("acceso_honeyfile")
+        if is_honeyfile and "Acceso Honeyfile" in self.rules:
+            matched.append("Acceso Honeyfile")
 
         extension = os.path.splitext(file_path)[1].lower()
 
         if event_type == "file_modified":
-            if "modificacion_masiva_archivos" in self.rules:
-                cfg = self.rules["modificacion_masiva_archivos"]
+            if "Modificacion Masiva Archivos" in self.rules:
+                cfg = self.rules["Modificacion Masiva Archivos"]
                 self._modified_events.append((now, file_path))
                 self._prune(self._modified_events, cfg["window_seconds"], now, key=True)
                 unique_files = {p for _, p in self._modified_events}
                 if len(unique_files) >= cfg["threshold"]:
-                    matched.append("modificacion_masiva_archivos")
+                    matched.append("Modificacion Masiva Archivos")
 
-            if "escritura_intensiva_archivos" in self.rules:
-                cfg = self.rules["escritura_intensiva_archivos"]
+            if "Escritura Intensiva Archivos" in self.rules:
+                cfg = self.rules["Escritura Intensiva Archivos"]
                 self._write_events.append(now)
                 self._prune(self._write_events, cfg["window_seconds"], now)
                 if len(self._write_events) >= cfg["threshold"]:
-                    matched.append("escritura_intensiva_archivos")
+                    matched.append("Escritura Intensiva Archivos")
 
-        if event_type == "file_renamed" and "renombrado_extension_anomala" in self.rules:
+        if event_type == "file_renamed" and "Renombrado Extension Anomala" in self.rules:
             if extension in RANSOMWARE_EXTENSIONS:
-                cfg = self.rules["renombrado_extension_anomala"]
+                cfg = self.rules["Renombrado Extension Anomala"]
                 self._rename_events.append(now)
                 self._prune(self._rename_events, cfg["window_seconds"], now)
                 if len(self._rename_events) >= cfg["threshold"]:
-                    matched.append("renombrado_extension_anomala")
+                    matched.append("Renombrado Extension Anomala")
 
-        if event_type == "file_deleted" and "eliminacion_anomala_archivos" in self.rules:
-            cfg = self.rules["eliminacion_anomala_archivos"]
+        if event_type == "file_deleted" and "Eliminacion Anomala Archivos" in self.rules:
+            cfg = self.rules["Eliminacion Anomala Archivos"]
             self._deletion_events.append(now)
             self._prune(self._deletion_events, cfg["window_seconds"], now)
             if len(self._deletion_events) >= cfg["threshold"]:
-                matched.append("eliminacion_anomala_archivos")
+                matched.append("Eliminacion Anomala Archivos")
 
-        if event_type == "file_created" and "creacion_masiva_temporales" in self.rules and _is_temp_path(file_path):
-            cfg = self.rules["creacion_masiva_temporales"]
+        if event_type == "file_created" and "Creacion Masiva Temporales" in self.rules and _is_temp_path(file_path):
+            cfg = self.rules["Creacion Masiva Temporales"]
             self._temp_events.append(now)
             self._prune(self._temp_events, cfg["window_seconds"], now)
             if len(self._temp_events) >= cfg["threshold"]:
-                matched.append("creacion_masiva_temporales")
+                matched.append("Creacion Masiva Temporales")
 
-        if "acceso_recursos_compartidos" in self.rules and _is_shared_path(file_path):
-            cfg = self.rules["acceso_recursos_compartidos"]
+        if "Acceso Recursos Compartidos" in self.rules and _is_shared_path(file_path):
+            cfg = self.rules["Acceso Recursos Compartidos"]
             self._shared_events.append(now)
             self._prune(self._shared_events, cfg["window_seconds"], now)
             if len(self._shared_events) >= cfg["threshold"]:
-                matched.append("acceso_recursos_compartidos")
+                matched.append("Acceso Recursos Compartidos")
 
-        if "actividad_archivos_usuario" in self.rules and _is_user_path(file_path):
-            cfg = self.rules["actividad_archivos_usuario"]
+        if "Actividad Archivos Usuario" in self.rules and _is_user_path(file_path):
+            cfg = self.rules["Actividad Archivos Usuario"]
             self._user_events.append(now)
             self._prune(self._user_events, cfg["window_seconds"], now)
             if len(self._user_events) >= cfg["threshold"]:
-                matched.append("actividad_archivos_usuario")
+                matched.append("Actividad Archivos Usuario")
+
+        # HR-05: requiere haber podido atribuir el proceso responsable
+        # de este evento (process_info no es None) -- sin eso no hay
+        # ruta de ejecutable que evaluar.
+        if process_info and "Proceso Sospechoso" in self.rules:
+            if _is_suspicious_executable_path(process_info.get("executable_path")):
+                cfg = self.rules["Proceso Sospechoso"]
+                self._suspicious_process_events.append(now)
+                self._prune(self._suspicious_process_events, cfg["window_seconds"], now)
+                if len(self._suspicious_process_events) >= cfg["threshold"]:
+                    matched.append("Proceso Sospechoso")
+
+        # HR-11: EL MISMO proceso (por process_id) con muchas
+        # operaciones de archivo dentro de la ventana -- a diferencia
+        # de HR-01/HR-04, que cuentan actividad del endpoint completo
+        # sin distinguir quién la generó. También requiere process_info.
+        if process_info and "Actividad Repetitiva Automatizada" in self.rules:
+            pid = process_info.get("process_id")
+            if pid is not None:
+                cfg = self.rules["Actividad Repetitiva Automatizada"]
+                pid_events = self._process_activity.setdefault(pid, deque())
+                pid_events.append(now)
+                self._prune(pid_events, cfg["window_seconds"], now)
+                if len(pid_events) >= cfg["threshold"]:
+                    matched.append("Actividad Repetitiva Automatizada")
+                # Nota: 'self._process_activity' acumula una entrada
+                # por cada PID distinto que alguna vez tocó un archivo
+                # -- no se podan los PIDs que dejaron de aparecer
+                # (solo se podan sus timestamps viejos si vuelven a
+                # aparecer). Con la arquitectura actual del agente
+                # (proceso de una sola pasada, ver agent/main.py --
+                # arranca, monitorea, se detiene con ENTER, no es un
+                # daemon de días/semanas) esto no llega a ser un
+                # problema real de memoria. Si el agente pasara a
+                # correr como servicio de larga duración, acá haría
+                # falta un barrido periódico de PIDs inactivos.
 
         return matched
 
@@ -231,7 +337,7 @@ class FileActivityAnalyzer:
         cuántos archivos únicos modificados hay en la ventana de
         HR-01 ahora mismo."""
 
-        cfg = self.rules.get("modificacion_masiva_archivos")
+        cfg = self.rules.get("Modificacion Masiva Archivos")
         if not cfg:
             return 0
         now = time()

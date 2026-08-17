@@ -1,5 +1,5 @@
 import type { CombinedItem } from "../types/incidentes";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import { statusBucketPillStyle } from "../lib/incidentStatus";
 import { rowSelectionStyle } from "../lib/rowSelection";
 
@@ -14,9 +14,9 @@ interface Props {
 }
 
 function rowAccent(item: CombinedItem): string | null {
-  if (item.severity === "CRITICAL") return "var(--crit)";
-  if (item.severity === "HIGH") return "var(--high)";
-  if (item.severity === "SUSPICIOUS") return "var(--warn)";
+  if (item.severity === "CRÍTICO") return "var(--crit)";
+  if (item.severity === "ALTO") return "var(--high)";
+  if (item.severity === "MEDIO") return "var(--warn)";
   return null;
 }
 
@@ -98,7 +98,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                         className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
                         style={severityPillStyle(item.severity)}
                       >
-                        {SEVERITY_LABEL[item.severity].toUpperCase()}
+                        {item.severity.toUpperCase()}
                       </span>
                     ) : (
                       <span style={{ color: "var(--tx-mute)" }}>—</span>

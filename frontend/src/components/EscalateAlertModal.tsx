@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { escalateAlertToIncident } from "../api/client";
 import type { IncidenteDrawerData } from "../types/alerts";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 
 interface Props {
   alert: IncidenteDrawerData;
@@ -108,7 +108,7 @@ export default function EscalateAlertModal({ alert, onClose, onEscalated }: Prop
                       className="text-[10.5px] font-bold tracking-wide px-1.5 py-0.5 rounded"
                       style={severityPillStyle(alert.severity)}
                     >
-                      {SEVERITY_LABEL[alert.severity].toUpperCase()}
+                      {alert.severity.toUpperCase()}
                     </span>
                   ) : (
                     "—"

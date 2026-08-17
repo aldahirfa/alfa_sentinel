@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchEndpointDrawer } from "../api/client";
 import type { EndpointDrawerData } from "../types/endpoints";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import {
   AGENT_HEALTH_LABEL,
   AGENT_HEALTH_VAR,
@@ -9,6 +9,7 @@ import {
   CONN_STATUS_VAR,
 } from "../lib/endpointStatus";
 import type { ConnStatus } from "../types/endpoints";
+import AgentRulesModal from "./AgentRulesModal";
 
 interface Props {
   endpointId: number | null;
@@ -45,6 +46,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<EndpointDrawerData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
 
   useEffect(() => {
     if (endpointId !== null) {
@@ -179,8 +181,8 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 <div
                   className="rounded-xl border p-4 shadow-sm"
                   style={{
-                    background: data.risk_bucket === "CRITICAL" ? "var(--crit-fill)" : "var(--surf2)",
-                    borderColor: data.risk_bucket === "CRITICAL" ? "var(--crit-soft)" : "var(--line-soft)",
+                    background: data.risk_bucket === "CRÍTICO" ? "var(--crit-fill)" : "var(--surf2)",
+                    borderColor: data.risk_bucket === "CRÍTICO" ? "var(--crit-soft)" : "var(--line-soft)",
                   }}
                 >
                   <div className="flex items-center justify-between">
@@ -189,7 +191,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                       className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                       style={severityPillStyle(data.risk_bucket)}
                     >
-                      {SEVERITY_LABEL[data.risk_bucket].toUpperCase()}
+                      {data.risk_bucket.toUpperCase()}
                     </span>
                   </div>
 
@@ -245,7 +247,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                   <div className="mt-3 rounded-xl border p-3.5 shadow-sm transition-premium hover:-translate-y-1" style={{ background: "var(--surf)", borderColor: "var(--line-soft)" }}>
                     <div className="flex items-center gap-2.5">
                       <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full" style={severityPillStyle(data.latest_alert.severity)}>
-                        {SEVERITY_LABEL[data.latest_alert.severity].toUpperCase()}
+                        {data.latest_alert.severity.toUpperCase()}
                       </span>
                       <span className="text-[11.5px] font-medium" style={{ color: "var(--tx-mute)" }}>{data.latest_alert.created_at}</span>
                     </div>
@@ -319,6 +321,22 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                   </a>
               </Section>
 
+              {/* Configuración de reglas por endpoint (2026-08-16, ver
+                  PENDIENTES.md) -- override puntual sobre 'agent_rule',
+                  reusa GET/PATCH/DELETE /api/agents/{agent_id}/rules.
+                  data.id acá ES el agent_id: /api/endpoints/{agent_id}/drawer
+                  devuelve agents.id, no endpoints.id (ver server/main.py). */}
+              <Section title="Configuración de reglas">
+                <button
+                  onClick={() => setRulesModalOpen(true)}
+                  className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12.5px] font-bold cursor-pointer border transition-premium btn-hover shadow-sm"
+                  style={{ borderColor: "var(--line)", color: "var(--tx)", background: "var(--surf2)" }}
+                >
+                  <i className="ph-fill ph-sliders-horizontal" style={{ fontSize: "14px" }} />
+                  Configurar reglas de este endpoint
+                </button>
+              </Section>
+
               {/* Acción de aislamiento */}
               {!data.is_isolated && (
                 <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
@@ -340,6 +358,14 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
           )}
         </div>
       </aside>
+
+      {rulesModalOpen && data && (
+        <AgentRulesModal
+          agentId={data.id}
+          hostnameHint={data.hostname}
+          onClose={() => setRulesModalOpen(false)}
+        />
+      )}
     </>
   );
 }

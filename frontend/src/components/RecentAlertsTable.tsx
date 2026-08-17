@@ -1,5 +1,5 @@
 import type { RecentAlert } from "../types/dashboard";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import { textOrPlaceholder } from "../lib/placeholder";
 
 interface Props {
@@ -52,7 +52,7 @@ export default function RecentAlertsTable({ alerts }: Props) {
                     className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded"
                     style={severityPillStyle(a.severity)}
                   >
-                    {SEVERITY_LABEL[a.severity].toUpperCase()}
+                    {a.severity.toUpperCase()}
                   </span>
                 </td>
                 <td className="py-2.5 pr-2.5 font-medium" style={{ color: "var(--tx)" }}>{a.hostname}</td>

@@ -3,9 +3,23 @@ import react from '@vitejs/plugin-react'
 
 // El servidor real (FastAPI) corre en :8000, este dev server en :5173.
 // El proxy hace que el navegador solo hable con :5173 -- todo pedido a
-// /api o /login se reenvía a :8000 del lado del servidor de Vite, así
-// que la cookie de sesión queda como same-origin de verdad, sin
-// depender de la configuración de SameSite/CORS del navegador.
+// /api (y a las rutas reales listadas abajo) se reenvía a :8000 del
+// lado del servidor de Vite, así que la cookie de sesión queda como
+// same-origin de verdad, sin depender de la configuración de
+// SameSite/CORS del navegador.
+//
+// React es hoy la única interfaz web (el frontend Jinja2 se eliminó
+// completo, ver PENDIENTES.md) y maneja su propio ruteo client-side
+// para /dashboard, /endpoints, /alertas, /incidentes, /honeyfiles,
+// /reglas, /respuesta, /reportes, /administracion, /perfil (ver
+// App.tsx::getInitialPage). Esas rutas NO se proxean acá a propósito:
+// tienen que caer en el fallback de SPA de Vite (sirve index.html) y
+// no en el servidor real, que ya no tiene una página que devolver ahí.
+// Los prefijos de abajo son distintos de esos nombres de página
+// justamente para no pisarlos (p.ej. /incidents en inglés vs
+// /incidentes en español) -- la única excepción real era /reportes,
+// que colisionaba con la página del mismo nombre; se resuelve con
+// rutas exactas en vez de por prefijo.
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -14,6 +28,11 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // POST /login (formulario de LoginGate.tsx) -- único método real
+      // que queda acá (GET /login, la página Jinja2, se eliminó). Nada
+      // en la app arma un link a "/login" como URL propia -- LoginGate
+      // se muestra como componente in-place, no por ruta -- así que en
+      // uso normal esto no se pisa con el fallback de SPA.
       '/login': {
         target: 'http://localhost:8000',
         changeOrigin: true,
@@ -27,8 +46,9 @@ export default defineConfig({
         changeOrigin: true,
       },
       // POST /logout (menú de usuario) y GET /alerts/open (dropdown
-      // de la campana de notificaciones) -- mismos endpoints reales
-      // que ya usa la consola Jinja2, no se creó nada nuevo.
+      // de la campana de notificaciones) -- endpoints reales, no
+      // colisionan con la página "Alertas" (esa vive en /alertas, con
+      // acento, ver App.tsx).
       '/logout': {
         target: 'http://localhost:8000',
         changeOrigin: true,
@@ -39,32 +59,37 @@ export default defineConfig({
       },
       // PATCH/POST /incidents/... (drawer de Incidentes: cambiar
       // estado, responsable, clasificación, escalar una alerta suelta)
-      // -- mismos endpoints reales que ya usa incidentes.html.
+      // -- no colisiona con la página "Incidentes" (esa vive en
+      // /incidentes, en español).
       '/incidents': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      // PATCH /rules/{id} (pantalla Reglas Heurísticas: peso/estado) --
-      // mismo endpoint real que ya usa configuracion.html.
+      // PATCH /rules/{id} (pantalla Reglas Heurísticas: peso/estado).
       '/rules': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
       // POST /reportes/generar y GET /reportes/{id}/archivo (pantalla
-      // Reports: generar y descargar) -- mismos endpoints reales que
-      // ya usa reportes.html.
-      '/reportes': {
+      // Reports: generar y descargar). A diferencia del resto, esto NO
+      // se puede proxear por prefijo ("/reportes") porque colisiona
+      // con la página React del mismo nombre -- un refresh en
+      // /reportes tiene que caer en la SPA, no en el servidor.
+      '^/reportes/generar$': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '^/reportes/\\d+/archivo$': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
       // POST /users, PATCH /users/{id} (Administración > Usuarios y
-      // Roles) -- mismos endpoints reales que ya usa usuarios.html.
+      // Roles).
       '/users': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      // PATCH /settings/{key} (Administración > Configuración) --
-      // mismo endpoint real que ya usa configuracion.html.
+      // PATCH /settings/{key} (Administración > Configuración).
       '/settings': {
         target: 'http://localhost:8000',
         changeOrigin: true,
@@ -72,14 +97,6 @@ export default defineConfig({
       // POST /enrollment-tokens (Administración > Agentes: generar
       // token de enrolamiento) -- endpoint real ya existente.
       '/enrollment-tokens': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      // GET /perfil (menú de usuario > "Mi perfil") -- página Jinja2
-      // real, todavía no migrada a React. Sin esto cae en el fallback
-      // de SPA de Vite y "redirige" al dashboard (mismo bug ya visto
-      // con /me, /logout, etc.).
-      '/perfil': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },

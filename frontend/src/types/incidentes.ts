@@ -29,7 +29,6 @@ export interface CombinedItem {
   ip_address: string;
   agent_id: number;
   severity: Severity | null;
-  severity_label: string;
   risk_score: number | null;
   rule_label: string;
   detection_count: number;

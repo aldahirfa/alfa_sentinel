@@ -8,7 +8,7 @@ import {
 } from "../api/client";
 import type { IncidenteDrawerData } from "../types/alerts";
 import type { AssignableUser, IncidentClassification, IncidentStatus, ItemKind } from "../types/incidentes";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import type { AlertStatus } from "../types/alerts";
 import { INCIDENT_CLASSIFICATION_LABEL, INCIDENT_STATUS_LABEL } from "../lib/incidentStatus";
@@ -173,8 +173,8 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 <div
                   className="rounded-xl border p-4 shadow-sm"
                   style={{
-                    background: data.severity === "CRITICAL" ? "var(--crit-fill)" : "var(--surf2)",
-                    borderColor: data.severity === "CRITICAL" ? "var(--crit-soft)" : "var(--line-soft)",
+                    background: data.severity === "CRÍTICO" ? "var(--crit-fill)" : "var(--surf2)",
+                    borderColor: data.severity === "CRÍTICO" ? "var(--crit-soft)" : "var(--line-soft)",
                   }}
                 >
                   <div className="flex items-center justify-between">
@@ -184,7 +184,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                         className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                         style={severityPillStyle(data.severity)}
                       >
-                        {SEVERITY_LABEL[data.severity].toUpperCase()}
+                        {data.severity.toUpperCase()}
                       </span>
                     )}
                   </div>
@@ -327,7 +327,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                           className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
                           style={severityPillStyle(data.origin_alert.severity)}
                         >
-                          {SEVERITY_LABEL[data.origin_alert.severity].toUpperCase()}
+                          {data.origin_alert.severity.toUpperCase()}
                         </span>
                       )}
                     </div>

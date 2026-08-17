@@ -10,7 +10,6 @@ export type AlertStatus = "NEW" | "ACKNOWLEDGED" | "ESCALATED" | "CLOSED" | "FAL
 export interface AlertListItem {
   id: number;
   severity: Severity;
-  severity_label: string;
   title: string;
   hostname: string;
   risk_score: number;
@@ -74,7 +73,6 @@ export interface OriginAlert {
   id: number;
   code: string;
   severity: Severity | null;
-  severity_label: string;
   risk_score: number | null;
 }
 
@@ -90,7 +88,6 @@ export interface IncidenteDrawerData {
   status: string;
   status_label: string;
   severity: Severity | null;
-  severity_label: string;
   risk_score: number | null;
   classification: string | null;
   classification_label: string | null;

@@ -2,7 +2,6 @@ import os
 
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, Query
 from fastapi.responses import RedirectResponse, JSONResponse, Response
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -14,7 +13,6 @@ from security import verify_password, hash_password
 
 import secrets
 import hashlib
-import json
 import csv
 import io
 from datetime import datetime, timedelta
@@ -61,13 +59,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-templates = Jinja2Templates(directory="templates")
-
-
 def time_ago(value):
-    """Filtro de Jinja2 para 'hace X minutos' -- lo usa el dashboard
-    en varios lugares (alertas recientes, actividad reciente,
-    honeyfiles) en vez de mostrar la fecha completa cada vez."""
+    """'hace X minutos' -- lo usa el Panel de Control y varias APIs
+    JSON (alertas recientes, actividad reciente, honeyfiles, endpoints)
+    en vez de mostrar la fecha completa cada vez."""
 
     if value is None:
         return "—"
@@ -94,14 +89,6 @@ def time_ago(value):
 
     return f"hace {days} d"
 
-
-templates.env.filters["timeago"] = time_ago
-
-# Para pasarle datos reales (ya calculados en Python) a Chart.js del
-# lado del cliente sin reescribir la consulta en JS -- json.dumps
-# normal, nada de HTML-escaping raro (default=str por si se cuela un
-# tipo no serializable como Decimal).
-templates.env.filters["tojson"] = lambda obj: json.dumps(obj, default=str)
 
 # Umbral para considerar que un agente ONLINE está "al día": si su
 # último heartbeat es más viejo que esto, lo marcamos como "requiere
@@ -164,8 +151,8 @@ def log_audit(cursor, user_id, action, entity_type=None, entity_id=None, descrip
     )
 
 
-# Sirve server/static/* en /static/* -- ahí vive el logo (logo-icon.png,
-# logo-full.png).
+# Sirve server/static/* en /static/* -- ahí vive el logo (logo-icon.png)
+# que usa el frontend React (LoginGate.tsx, Sidebar.tsx).
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -255,6 +242,24 @@ class RuleUpdate(BaseModel):
     is_active: bool | None = None
     threshold: float | None = None
     window_seconds: int | None = None
+
+
+class AgentRuleUpdate(BaseModel):
+    """Override de una regla para UN endpoint puntual (tabla
+    'agent_rule', 2026-08-16 -- ver PENDIENTES.md). A diferencia de
+    RuleUpdate (heuristic_rules, campos NOT NULL), acá un campo en
+    'null' es una instrucción válida y distinta de "no mandar el
+    campo": 'null' significa "volver a heredar el valor global para
+    ESE campo puntual" (sección 4 de la especificación -- no hay que
+    repetir todos los parámetros para personalizar uno solo). Por eso
+    el endpoint no puede usar "if payload.x is not None" como
+    RuleUpdate -- necesita distinguir "campo ausente" de "campo
+    presente con valor null", y para eso usa payload.model_fields_set
+    en vez de mirar los valores solos."""
+    threshold: float | None = None
+    window_seconds: int | None = None
+    weight: float | None = None
+    is_active: bool | None = None
 
 
 class ReportGenerate(BaseModel):
@@ -552,17 +557,10 @@ def change_password(
 
 @app.get("/api/perfil")
 def api_perfil(user: dict = Depends(get_current_user)):
-    """Versión JSON de /perfil (misma consulta exacta que perfil_page,
-    reusada tal cual) para la pantalla Perfil en React -- pedida
-    explícitamente para reemplazar el enlace que antes mandaba a la
-    página Jinja2 (perfil.html), que tiene un diseño completamente
-    distinto al sistema Nocturne del resto de la app. La página
-    Jinja2 no se tocó -- sigue existiendo tal cual, esta es una
-    segunda forma de llegar a los mismos datos reales, no una fuente
-    de verdad paralela. 'roles' sale de la sesión (ya calculado en el
-    login, no hace falta otra consulta); 'is_active' se agrega acá
-    porque perfil_page no la seleccionaba, pero es una columna real
-    de 'users' -- no un valor inventado."""
+    """Datos de la pantalla Perfil en React (menú de usuario > "Mi
+    perfil"). 'roles' sale de la sesión (ya calculado en el login, no
+    hace falta otra consulta); 'is_active' se agrega acá porque es una
+    columna real de 'users' -- no un valor inventado."""
 
     connection = get_connection()
 
@@ -595,48 +593,6 @@ def api_perfil(user: dict = Depends(get_current_user)):
         "last_login_at": row[5].strftime("%d/%m/%Y %H:%M:%S") if row[5] else None,
         "roles": user.get("roles", []),
     }
-
-
-@app.get("/perfil")
-def perfil_page(request: Request):
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT username, full_name, email, created_at, last_login_at
-                FROM users
-                WHERE id = %s;
-                """,
-                (user["id"],)
-            )
-
-            row = cursor.fetchone()
-
-    finally:
-        connection.close()
-
-    account = {
-        "username": row[0],
-        "full_name": row[1],
-        "email": row[2],
-        "created_at": row[3],
-        "last_login_at": row[4]
-    }
-
-    return templates.TemplateResponse(
-        request,
-        "perfil.html",
-        {"user": user, "active_page": None, "account": account}
-    )
 
 
 @app.get("/api/roles")
@@ -862,15 +818,6 @@ def root():
     }
 
 
-@app.get("/login")
-def login_page(request: Request):
-    """La página con el formulario. Distinta de POST /login, que es
-    la que de verdad procesa usuario+contraseña -- esta solo sirve el
-    HTML."""
-
-    return templates.TemplateResponse(request, "login.html")
-
-
 def require_session_user(request: Request):
     """Versión 'de página' de get_current_user: en vez de devolver 401
     en JSON, devuelve None para que la ruta que llama decida mandar al
@@ -878,555 +825,6 @@ def require_session_user(request: Request):
     página protegida."""
 
     return request.session.get("user")
-
-
-def render_placeholder(request: Request, active_page: str, title: str, description: str):
-    """Páginas del menú que todavía no tienen funcionalidad real detrás
-    (la tabla existe en la BD pero nada la llena todavía, o la
-    funcionalidad ni siquiera está construida). Se ven consistentes con
-    el resto de la consola y son honestas sobre qué falta, en vez de
-    simular datos que no existen."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    return templates.TemplateResponse(
-        request,
-        "placeholder.html",
-        {
-            "user": user,
-            "active_page": active_page,
-            "title": title,
-            "description": description
-        }
-    )
-
-
-@app.get("/dashboard")
-def dashboard_page(request: Request):
-    """Página protegida. A diferencia de las rutas de API (que
-    devuelven 401 en JSON), aquí si no hay sesión mandamos al
-    navegador de vuelta al login -- es lo que espera un humano
-    navegando, no un programa consumiendo la API.
-
-    Si la base de datos no responde, la página igual se renderiza
-    (con un aviso arriba) en vez de devolver un error 500 en blanco --
-    en una consola de seguridad, que el dashboard se caiga cuando la
-    BD falla es peor que mostrar "no disponible" con claridad."""
-
-    user = request.session.get("user")
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    try:
-        connection = get_connection()
-    except Exception:
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "user": user,
-                "active_page": "dashboard",
-                "db_ok": False,
-                "summary": None
-            }
-        )
-
-    try:
-        with connection.cursor() as cursor:
-
-            # --- Tarjetas de resumen ---
-
-            cursor.execute("SELECT COUNT(*) FROM agents;")
-            total_endpoints = cursor.fetchone()[0]
-
-            cursor.execute("SELECT COUNT(*) FROM agents WHERE status = 'ONLINE';")
-            connected_endpoints = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM alerts
-                WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';
-                """
-            )
-            detections_24h = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM incidents WHERE status = 'OPEN';"
-            )
-            incidents_active = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM incidents WHERE status = 'IN_PROGRESS';"
-            )
-            incidents_investigating = cursor.fetchone()[0]
-
-            # Distribución de riesgo: severidad de las alertas TODAVÍA
-            # abiertas (status = 'NEW'). "Normal" no es una severidad
-            # que el agente reporte -- se calcula acá como "endpoints
-            # sin ninguna alerta abierta".
-            cursor.execute(
-                """
-                SELECT severity_levels.name, COUNT(DISTINCT alerts.agent_id) AS n
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
-                GROUP BY severity_levels.name;
-                """
-            )
-            severity_rows = dict(cursor.fetchall())
-
-            critical_n = severity_rows.get("CRITICAL", 0)
-            high_n = severity_rows.get("HIGH", 0)
-            suspicious_n = severity_rows.get("SUSPICIOUS", 0)
-
-            cursor.execute(
-                "SELECT COUNT(DISTINCT agent_id) FROM alerts WHERE status = 'NEW';"
-            )
-            agents_with_open_alerts = cursor.fetchone()[0]
-
-            normal_n = max(total_endpoints - agents_with_open_alerts, 0)
-
-            # Riesgo actual: por el peor caso presente, no por volumen
-            # -- un solo CRÍTICO pesa más que diez SOSPECHOSAS. Es una
-            # regla simple a propósito; si más adelante definimos un
-            # modelo de riesgo con pesos, este es el lugar donde iría.
-            if critical_n > 0:
-                overall_risk = "CRÍTICO"
-            elif high_n > 0:
-                overall_risk = "ALTO"
-            elif suspicious_n > 0:
-                overall_risk = "SOSPECHOSO"
-            else:
-                overall_risk = "NORMAL"
-
-            # Colores fijados acá (no en el template) para que Chart.js
-            # los reciba como hex literal -- un <canvas> no resuelve
-            # var(--css-var) como sí lo hace un <svg style="...">, así
-            # que se calculan del lado del servidor, en el mismo lugar
-            # que ya es la fuente de verdad del mapeo de severidad
-            # (Normal=verde, Sospechoso=amarillo, Alto=naranja, Crítico=rojo).
-            risk_distribution = [
-                {"label": "Crítico", "key": "CRITICAL", "count": critical_n, "color": "#dc2626"},
-                {"label": "Alto", "key": "HIGH", "count": high_n, "color": "#ea580c"},
-                {"label": "Medio", "key": "SUSPICIOUS", "count": suspicious_n, "color": "#ca8a04"},
-                {"label": "Bajo", "key": "NORMAL", "count": normal_n, "color": "#16a34a"},
-            ]
-            risk_max = max((r["count"] for r in risk_distribution), default=0) or 1
-
-            # Para el donut de "Distribución de riesgo": porcentaje de
-            # cada franja + dónde empieza su arco. Con pathLength="100"
-            # en el <circle> del SVG, estos números se pueden usar
-            # directo como stroke-dasharray/stroke-dashoffset sin tener
-            # que calcular circunferencias.
-            risk_total = sum(r["count"] for r in risk_distribution)
-            cumulative_pct = 0.0
-
-            for r in risk_distribution:
-                r["pct"] = round((r["count"] / risk_total * 100), 2) if risk_total else 0
-                r["dash_offset"] = round(-cumulative_pct, 2)
-                cumulative_pct += r["pct"]
-
-            # --- Alertas recientes (solo las que siguen sin revisar) ---
-
-            cursor.execute(
-                """
-                SELECT alerts.id, severity_levels.name, alerts.title,
-                       endpoints.hostname, alerts.created_at
-                FROM alerts
-                JOIN agents ON agents.id = alerts.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
-                ORDER BY alerts.created_at DESC
-                LIMIT 6;
-                """
-            )
-            recent_alerts = cursor.fetchall()
-
-            # --- Endpoints con mayor riesgo ---
-
-            cursor.execute(
-                """
-                SELECT agents.id, endpoints.hostname, agents.status, endpoints.ip_address,
-                       MAX(
-                           CASE severity_levels.name
-                               WHEN 'CRITICAL' THEN 4
-                               WHEN 'HIGH' THEN 3
-                               WHEN 'SUSPICIOUS' THEN 2
-                               ELSE 1
-                           END
-                       ) AS risk_rank,
-                       COUNT(*) AS detection_count
-                FROM alerts
-                JOIN agents ON agents.id = alerts.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
-                GROUP BY agents.id, endpoints.hostname, agents.status, endpoints.ip_address
-                ORDER BY risk_rank DESC, detection_count DESC
-                LIMIT 5;
-                """
-            )
-            rank_labels = {4: "CRITICAL", 3: "HIGH", 2: "SUSPICIOUS", 1: "NORMAL"}
-            top_risk_endpoints = [
-                {
-                    "agent_id": row[0],
-                    "hostname": row[1],
-                    "status": row[2],
-                    "ip_address": row[3],
-                    "severity": rank_labels[row[4]],
-                    "detection_count": row[5]
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # --- Estado de agentes (3 estados, a partir de status +
-            # antigüedad del último heartbeat) ---
-
-            cursor.execute("SELECT status, last_seen_at FROM agents;")
-            agent_rows = cursor.fetchall()
-
-            stale_seconds = get_agent_stale_seconds(cursor)
-
-            agents_ok = 0
-            agents_attention = 0
-            agents_offline = 0
-            last_heartbeat = None
-
-            for status, last_seen_at in agent_rows:
-
-                if last_seen_at and (last_heartbeat is None or last_seen_at > last_heartbeat):
-                    last_heartbeat = last_seen_at
-
-                if status != "ONLINE":
-                    agents_offline += 1
-                elif last_seen_at and (datetime.now(last_seen_at.tzinfo) - last_seen_at).total_seconds() <= stale_seconds:
-                    agents_ok += 1
-                else:
-                    agents_attention += 1
-
-            # --- Honeyfiles: resumen ---
-
-            cursor.execute("SELECT COUNT(*) FROM honeyfiles;")
-            honeyfiles_total = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM alerts
-                JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE heuristic_rules.name = 'acceso_honeyfile'
-                  AND alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';
-                """
-            )
-            honeyfile_activations_24h = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT endpoints.hostname, alerts.created_at
-                FROM alerts
-                JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                JOIN agents ON agents.id = alerts.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE heuristic_rules.name = 'acceso_honeyfile'
-                ORDER BY alerts.created_at DESC
-                LIMIT 1;
-                """
-            )
-            last_honeyfile_row = cursor.fetchone()
-            last_honeyfile = (
-                {"hostname": last_honeyfile_row[0], "created_at": last_honeyfile_row[1]}
-                if last_honeyfile_row else None
-            )
-
-            # --- Incidentes: resumen por severidad (de la alerta que
-            # los originó), solo los abiertos ---
-
-            cursor.execute(
-                """
-                SELECT severity_levels.name, COUNT(*)
-                FROM incidents
-                JOIN alerts ON alerts.incident_id = incidents.id
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE incidents.status = 'OPEN'
-                GROUP BY severity_levels.name;
-                """
-            )
-            incident_severity = dict(cursor.fetchall())
-
-            # --- Respuesta: acciones de aislamiento de host. Hoy no
-            # hay ningún endpoint que escriba en 'host_isolations', así
-            # que esto va a mostrar 0/0/0 -- y eso es correcto: es el
-            # dato real, no un placeholder. Cuando el módulo de
-            # Respuesta exista, esta misma consulta ya lo va a reflejar
-            # sin tocar nada acá. ---
-
-            cursor.execute(
-                "SELECT status, COUNT(*) FROM host_isolations GROUP BY status;"
-            )
-            isolation_status = dict(cursor.fetchall())
-
-            response_pending = isolation_status.get("REQUESTED", 0)
-            response_executed = isolation_status.get("EXECUTED", 0)
-            response_failed = isolation_status.get("FAILED", 0)
-
-            # --- Actividad reciente del sistema: alertas + eventos
-            # crudos mezclados, lo más nuevo primero. Distinto de
-            # "Alertas recientes": esto es un feed general, no solo lo
-            # que requiere atención. ---
-
-            cursor.execute(
-                """
-                (
-                    SELECT 'alert' AS kind, severity_levels.name AS sev,
-                           alerts.title AS label, endpoints.hostname AS hostname,
-                           alerts.created_at AS ts,
-                           NULL AS file_path
-                    FROM alerts
-                    JOIN agents ON agents.id = alerts.agent_id
-                    JOIN endpoints ON endpoints.id = agents.endpoint_id
-                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                    ORDER BY alerts.created_at DESC
-                    LIMIT 15
-                )
-                UNION ALL
-                (
-                    SELECT 'event' AS kind, NULL AS sev,
-                           event_types.description AS label, endpoints.hostname AS hostname,
-                           events.detected_at AS ts,
-                           events.file_path AS file_path
-                    FROM events
-                    JOIN agents ON agents.id = events.agent_id
-                    JOIN endpoints ON endpoints.id = agents.endpoint_id
-                    JOIN event_types ON event_types.id = events.event_type_id
-                    ORDER BY events.detected_at DESC
-                    LIMIT 15
-                )
-                ORDER BY ts DESC
-                LIMIT 15;
-                """
-            )
-
-            # 'label' de eventos ya viene traducido desde la BD
-            # (event_types.description, vía el UNION ALL de arriba) --
-            # no se mantiene una copia paralela en Python. Para las
-            # detecciones, el "tipo" específico es la severidad -- eso
-            # es lo que distingue una alerta de otra, no el hecho
-            # genérico de que sea una "detección".
-            SEVERITY_TYPE_LABELS = {
-                "CRITICAL": "Detección crítica",
-                "HIGH": "Detección alta",
-                "SUSPICIOUS": "Detección sospechosa",
-            }
-
-            activity_feed = []
-
-            for row in cursor.fetchall():
-
-                kind, sev, raw_label, hostname, ts, file_path = row
-
-                if kind == "alert":
-                    type_label = SEVERITY_TYPE_LABELS.get(sev, "Detección")
-                    description = raw_label  # el título de la alerta
-                else:
-                    type_label = raw_label
-                    # Para eventos, el "tipo" ya dice qué pasó (p. ej.
-                    # "Archivo modificado") -- la descripción entonces
-                    # es dónde pasó, no repetir qué pasó.
-                    description = file_path or type_label
-
-                activity_feed.append({
-                    "kind": kind,
-                    "severity": sev,
-                    "type_label": type_label,
-                    "description": description,
-                    "hostname": hostname,
-                    "ts": ts,
-                    "file_path": file_path
-                })
-
-            # --- Estado del servidor: la comunicación con agentes se
-            # infiere de si alguno mandó heartbeat hace poco. La BD y
-            # la API ya están "probadas" con solo haber llegado hasta
-            # acá sin excepción. No reportamos "motor de detección"
-            # porque ese corre en el agente, no en el servidor -- no
-            # tenemos forma honesta de verlo desde acá. ---
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM agents
-                WHERE last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes';
-                """
-            )
-            agents_communicating = cursor.fetchone()[0]
-
-            # --- Riesgo global numérico: el peor risk_score entre las
-            # alertas todavía abiertas. Es un dato real (lo calcula
-            # agent/heuristic_engine.py -- calculate_score(), combos
-            # posibles 0/30/60/90), a diferencia de 'overall_risk' que
-            # es la etiqueta categórica (CRÍTICO/ALTO/...). Mostramos
-            # las dos: la etiqueta para el color, el número para el
-            # detalle. ---
-
-            cursor.execute(
-                "SELECT COALESCE(MAX(risk_score), 0) FROM alerts WHERE status = 'NEW';"
-            )
-            global_risk_score = cursor.fetchone()[0]
-
-            # --- Motor heurístico: estado real de cada regla. La nueva
-            # 'heuristic_rules' (alfa_sentinel) ya no tiene columnas
-            # 'severity' ni 'auto_isolate' -- la severidad ahora es una
-            # propiedad de la ALERTA (severity_id, según el score),
-            # no de la regla que la disparó, y 'auto_isolate' no tenía
-            # ningún código que lo leyera de todos modos. Se muestra
-            # 'weight' en su lugar (el peso real que la regla aporta
-            # al score cuando se cumple).
-
-            cursor.execute(
-                """
-                SELECT name, threshold, window_seconds, weight, is_active
-                FROM heuristic_rules
-                ORDER BY id;
-                """
-            )
-            heuristic_rule_rows = cursor.fetchall()
-
-            # --- Vectores de amenaza: desglose por regla de las
-            # alertas abiertas (mismo criterio de "abiertas" que el
-            # resto del dashboard). 'alert_rule' reemplaza al viejo
-            # 'alerts.rule_id'. Reutiliza el mismo cálculo de
-            # pct/dash_offset que la dona de riesgo. ---
-
-            cursor.execute(
-                """
-                SELECT heuristic_rules.name, COUNT(*) AS n
-                FROM alerts
-                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE alerts.status = 'NEW'
-                GROUP BY heuristic_rules.name
-                ORDER BY n DESC;
-                """
-            )
-            vector_rows = cursor.fetchall()
-
-            # --- Telemetría últimas 24h: volumen de eventos por hora.
-            # Se completan las horas sin actividad con 0 -- si no, el
-            # gráfico saltearía huecos y parecería que el tiempo no
-            # pasó. ---
-
-            cursor.execute(
-                """
-                SELECT date_trunc('hour', detected_at) AS hour, COUNT(*)
-                FROM events
-                WHERE detected_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
-                GROUP BY hour
-                ORDER BY hour;
-                """
-            )
-            telemetry_rows = dict(cursor.fetchall())
-
-    finally:
-        connection.close()
-
-    vector_total = sum(n for _, n in vector_rows) if vector_rows else 0
-    vector_cumulative = 0.0
-    threat_vectors = []
-
-    for rule_name, n in vector_rows:
-        if rule_name is None:
-            continue
-        pct = round((n / vector_total * 100), 2) if vector_total else 0
-        threat_vectors.append({
-            "rule_name": rule_name,
-            "rule_label": rule_name,
-            "count": n,
-            "pct": pct,
-            "dash_offset": round(-vector_cumulative, 2),
-            "color": "#3059d6" if rule_name == "modificacion_masiva_archivos" else "#0d9488"
-        })
-        vector_cumulative += pct
-
-    heuristic_rules_status = [
-        {
-            "name": row[0],
-            "rule_label": row[0],
-            "threshold": row[1],
-            "window_seconds": row[2],
-            "weight": row[3],
-            "is_active": row[4]
-        }
-        for row in heuristic_rule_rows
-    ]
-
-    # Buckets de las últimas 24h, más viejo primero, para dibujar de
-    # izquierda a derecha. 'now' se trunca a la hora para que el
-    # bucket más nuevo coincida con lo que Postgres devolvió.
-    now_hour = datetime.now().replace(minute=0, second=0, microsecond=0)
-    telemetry_buckets = []
-    for i in range(23, -1, -1):
-        bucket_time = now_hour - timedelta(hours=i)
-        count = 0
-        for ts, n in telemetry_rows.items():
-            if ts.replace(minute=0, second=0, microsecond=0) == bucket_time:
-                count = n
-                break
-        telemetry_buckets.append({"hour": bucket_time.strftime("%H:00"), "count": count})
-    telemetry_max = max((b["count"] for b in telemetry_buckets), default=0) or 1
-
-    summary = {
-        "total_endpoints": total_endpoints,
-        "connected_endpoints": connected_endpoints,
-        "disconnected_endpoints": total_endpoints - connected_endpoints,
-        "detections_24h": detections_24h,
-        "incidents_active": incidents_active,
-        "overall_risk": overall_risk,
-        "critical_n": critical_n,
-        "high_n": high_n,
-        "suspicious_n": suspicious_n,
-        "global_risk_score": global_risk_score,
-        "incidents_investigating": incidents_investigating,
-        "updated_at": datetime.now().strftime("%H:%M")
-    }
-
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "user": user,
-            "active_page": "dashboard",
-            "db_ok": True,
-            "summary": summary,
-            "risk_distribution": risk_distribution,
-            "risk_max": risk_max,
-            "recent_alerts": recent_alerts,
-            "top_risk_endpoints": top_risk_endpoints,
-            "agents_ok": agents_ok,
-            "agents_attention": agents_attention,
-            "agents_offline": agents_offline,
-            "last_heartbeat": last_heartbeat,
-            "honeyfiles_total": honeyfiles_total,
-            "honeyfile_activations_24h": honeyfile_activations_24h,
-            "last_honeyfile": last_honeyfile,
-            "incidents_active_count": incidents_active,
-            "incident_severity": incident_severity,
-            "response_pending": response_pending,
-            "response_executed": response_executed,
-            "response_failed": response_failed,
-            "activity_feed": activity_feed,
-            "agents_communicating": agents_communicating,
-            "heuristic_rules_status": heuristic_rules_status,
-            "threat_vectors": threat_vectors,
-            "telemetry_buckets": telemetry_buckets,
-            "telemetry_max": telemetry_max
-        }
-    )
 
 
 def _endpoint_cte(stale_seconds):
@@ -1440,14 +838,7 @@ def _endpoint_cte(stale_seconds):
     return """
     WITH endpoint_risk AS (
         SELECT alerts.agent_id,
-               MAX(
-                   CASE severity_levels.name
-                       WHEN 'CRITICAL' THEN 4
-                       WHEN 'HIGH' THEN 3
-                       WHEN 'SUSPICIOUS' THEN 2
-                       ELSE 1
-                   END
-               ) AS risk_rank
+               MAX(severity_levels.min_score) AS worst_min_score
         FROM alerts
         JOIN severity_levels ON severity_levels.id = alerts.severity_id
         WHERE alerts.status = 'NEW'
@@ -1462,40 +853,97 @@ def _endpoint_cte(stale_seconds):
                    WHEN agents.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '{stale_seconds} seconds' THEN 'ok'
                    ELSE 'attention'
                END AS status_bucket,
-               CASE COALESCE(endpoint_risk.risk_rank, 1)
-                   WHEN 4 THEN 'CRITICAL'
-                   WHEN 3 THEN 'HIGH'
-                   WHEN 2 THEN 'SUSPICIOUS'
-                   ELSE 'NORMAL'
-               END AS risk_bucket
+               -- 'Peor severidad' de este endpoint: se busca en
+               -- severity_levels la fila cuyo min_score coincide con
+               -- el máximo alcanzado (sin alertas -> se usa la fila
+               -- de menor min_score, el nivel más bajo del catálogo).
+               -- Sin CASE ni diccionario hardcodeado -- el nombre y el
+               -- orden salen enteramente de la tabla real.
+               COALESCE(worst_sev.name, lowest_sev.name) AS risk_bucket
         FROM agents
         JOIN endpoints ON endpoints.id = agents.endpoint_id
         LEFT JOIN endpoint_risk ON endpoint_risk.agent_id = agents.id
+        LEFT JOIN severity_levels AS worst_sev ON worst_sev.min_score = endpoint_risk.worst_min_score
+        CROSS JOIN (SELECT name FROM severity_levels ORDER BY min_score ASC LIMIT 1) AS lowest_sev
     )
 """.format(stale_seconds=stale_seconds)
 
 ENDPOINTS_PAGE_SIZE = 25
 
-# Etiquetas actualizadas 2026-08-16 a los 4 niveles que pide la
-# especificación definitiva del motor heurístico: BAJO/MEDIO/ALTO/
-# CRÍTICO. Los valores internos de 'severity_levels.name' (NORMAL/
-# SUSPICIOUS/HIGH/CRITICAL) NO se renombran -- son un identificador
-# usado como literal en decenas de consultas; solo cambia la
-# traducción que ve el usuario. Ver database/schema.sql para el
-# comentario completo de esta decisión.
-RISK_LABELS_ES = {"NORMAL": "Bajo", "SUSPICIOUS": "Medio", "HIGH": "Alto", "CRITICAL": "Crítico"}
+
+def _effective_agent_rules_cte():
+    """Motor heurístico -- configuración por endpoint (2026-08-16, ver
+    PENDIENTES.md, "Implementación final del motor heurístico y
+    configuración por endpoint"). 'heuristic_rules' es la configuración
+    GLOBAL de una regla; 'agent_rule' es un override OPCIONAL para un
+    (agent_id, rule_id) puntual -- no se crea ninguna tabla nueva, esta
+    es exactamente la que ya existía para este propósito.
+
+    Resolución de la configuración EFECTIVA (la que el agente debe
+    aplicar y la que el servidor debe usar para calcular el score):
+    - threshold/window_seconds/weight: COALESCE(agent_rule.x,
+      heuristic_rules.x) -- si el override existe pero ese campo
+      puntual quedó en NULL, se hereda el valor global campo por
+      campo, sin obligar a repetir todos los parámetros (sección 4 de
+      la especificación).
+    - is_active: si existe una fila en 'agent_rule' para ese
+      (agent_id, rule_id), manda agent_rule.is_active (aunque sea
+      TRUE, aunque el override no toque threshold/window/weight) --
+      la sola presencia de la fila es la señal de "este endpoint tiene
+      un override para esta regla". Si no existe fila, manda
+      heuristic_rules.is_active (sección 17).
+
+    Se parametriza con %(agent_id)s -- quien arme la consulta final
+    debe pasar ese parámetro (y los que agregue el WHERE/SELECT que
+    siga a este CTE)."""
+
+    return """
+    WITH effective_rules AS (
+        SELECT
+            heuristic_rules.id,
+            heuristic_rules.name,
+            heuristic_rules.description,
+            heuristic_rules.event_type_id,
+            heuristic_rules.metric_type_id,
+            COALESCE(agent_rule.weight, heuristic_rules.weight) AS effective_weight,
+            COALESCE(agent_rule.threshold, heuristic_rules.threshold) AS effective_threshold,
+            COALESCE(agent_rule.window_seconds, heuristic_rules.window_seconds) AS effective_window_seconds,
+            CASE
+                WHEN agent_rule.id IS NOT NULL THEN agent_rule.is_active
+                ELSE heuristic_rules.is_active
+            END AS effective_is_active,
+            heuristic_rules.weight AS global_weight,
+            heuristic_rules.threshold AS global_threshold,
+            heuristic_rules.window_seconds AS global_window_seconds,
+            heuristic_rules.is_active AS global_is_active,
+            agent_rule.id AS override_id,
+            agent_rule.weight AS override_weight,
+            agent_rule.threshold AS override_threshold,
+            agent_rule.window_seconds AS override_window_seconds,
+            agent_rule.is_active AS override_is_active
+        FROM heuristic_rules
+        LEFT JOIN agent_rule
+            ON agent_rule.rule_id = heuristic_rules.id
+           AND agent_rule.agent_id = %(agent_id)s
+    )
+    """
 
 # EVENT_TYPE_LABELS_ES y ALERT_RULE_LABELS_ES se eliminaron (2026-08-16,
 # ver PENDIENTES.md, auditoría de catálogos duplicados): duplicaban
 # event_types.description y heuristic_rules.name respectivamente. Los
-# tipos de evento se leen en vivo con _event_type_labels(cursor)
-# (definida más abajo, junto a _eventos_kpis); los nombres de regla se
-# muestran tal cual vienen de heuristic_rules.name, sin traducir.
+# nombres de regla se muestran tal cual vienen de heuristic_rules.name,
+# sin traducir.
 
-# Severidad real de 'alerts' -- en la práctica NORMAL (Bajo) casi
-# nunca aparece: report_alert exige matched_rules no vacío, así que la
+# RISK_LABELS_ES y ALERT_SEVERITY_LABELS_ES se eliminaron (2026-08-16,
+# corrección arquitectónica: "si un dato existe en un catálogo de
+# PostgreSQL, ese dato es la fuente de verdad"). 'severity_levels.name'
+# ahora ES el nombre definitivo en español (BAJO/MEDIO/ALTO/CRÍTICO,
+# ver migración en database/migration_2026-08-16_severity_levels_espanol.sql) -- ya no
+# hace falta traducir nada, el valor que devuelve cualquier consulta a
+# 'severity_levels'/'alerts.severity_id' es directamente lo que se le
+# muestra al usuario. En la práctica BAJO casi nunca aparece en
+# 'alerts': report_alert exige matched_rules no vacío, así que la
 # alerta siempre nace con al menos un peso > 0.
-ALERT_SEVERITY_LABELS_ES = {"SUSPICIOUS": "Medio", "HIGH": "Alto", "CRITICAL": "Crítico"}
 
 # La nueva 'alerts.status' (alfa_sentinel) es un VARCHAR sin CHECK
 # constraint -- estos 5 valores ya no vienen impuestos por la base,
@@ -1612,198 +1060,6 @@ INCIDENTES_SINCE_OPTIONS = {
 }
 
 
-@app.get("/endpoints")
-def endpoints_page(
-    request: Request,
-    status: str = Query(""),
-    risk: str = Query(""),
-    search: str = Query(""),
-    os_filter: str = Query("", alias="os"),
-    page: int = Query(1, ge=1)
-):
-    """Inventario operativo de endpoints -- a propósito, esta vista NO
-    mezcla severidad de amenazas con el estado de conexión (por eso
-    conectividad usa En línea/Advertencia/Desconectado, en azul, y
-    riesgo usa Normal/Sospechoso/Alto/Crítico, en su propia paleta).
-    Son dos preguntas distintas: ¿está funcionando el agente? y
-    ¿tiene este endpoint algo de qué preocuparse ahora mismo?"""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    status = status if status in ("ok", "attention", "offline") else ""
-    risk = risk if risk in ("NORMAL", "SUSPICIOUS", "HIGH", "CRITICAL") else ""
-
-    where_clauses = []
-    params = {}
-
-    if status:
-        where_clauses.append("status_bucket = %(status)s")
-        params["status"] = status
-
-    if risk:
-        where_clauses.append("risk_bucket = %(risk)s")
-        params["risk"] = risk
-
-    if search:
-        where_clauses.append(
-            "(hostname ILIKE %(search)s OR host(ip_address) ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
-        )
-        params["search"] = f"%{search}%"
-
-    if os_filter:
-        where_clauses.append("operating_system = %(os)s")
-        params["os"] = os_filter
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            stale_seconds = get_agent_stale_seconds(cursor)
-
-            # Totales globales -- sin filtrar, para las 4 tarjetas de
-            # resumen. Si filtráramos esto también, las tarjetas
-            # cambiarían con la búsqueda y dejarían de responder
-            # "¿cuántos endpoints hay en total?".
-            cursor.execute(
-                """
-                SELECT
-                    COUNT(*) FILTER (WHERE status = 'ONLINE' AND last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '{stale_seconds} seconds') AS ok_n,
-                    COUNT(*) FILTER (WHERE status = 'ONLINE' AND (last_seen_at IS NULL OR last_seen_at < CURRENT_TIMESTAMP - INTERVAL '{stale_seconds} seconds')) AS attention_n,
-                    COUNT(*) FILTER (WHERE status != 'ONLINE') AS offline_n,
-                    COUNT(*) AS total_n
-                FROM agents;
-                """.format(stale_seconds=stale_seconds)
-            )
-            endpoints_ok, endpoints_attention, endpoints_offline, total_endpoints = cursor.fetchone()
-
-            cursor.execute(
-                "SELECT COUNT(DISTINCT agent_id) FROM alerts WHERE status = 'NEW';"
-            )
-            endpoints_with_alerts = cursor.fetchone()[0]
-
-            # Equipos en Riesgo (Alto o Crítico)
-            cursor.execute(
-                _endpoint_cte(stale_seconds) + "SELECT COUNT(*) FROM endpoint_data WHERE risk_bucket IN ('HIGH', 'CRITICAL');"
-            )
-            endpoints_in_risk = cursor.fetchone()[0]
-
-            # Equipos Aislados
-            cursor.execute(
-                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED') AND released_at IS NULL;"
-            )
-            endpoints_isolated = cursor.fetchone()[0]
-
-            # Set de IDs aislados
-            cursor.execute(
-                "SELECT DISTINCT agent_id FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED') AND released_at IS NULL;"
-            )
-            isolated_agent_ids = {r[0] for r in cursor.fetchall()}
-
-            cursor.execute("SELECT DISTINCT os FROM endpoints ORDER BY os;")
-            distinct_os = [row[0] for row in cursor.fetchall()]
-
-            count_params = dict(params)
-            cursor.execute(_endpoint_cte(stale_seconds) + f"SELECT COUNT(*) FROM endpoint_data {where_sql};", count_params)
-            filtered_total = cursor.fetchone()[0]
-
-            total_pages = max(1, -(-filtered_total // ENDPOINTS_PAGE_SIZE))
-            current_page = min(page, total_pages)
-            offset = (current_page - 1) * ENDPOINTS_PAGE_SIZE
-
-            page_params = dict(params)
-            page_params["limit"] = ENDPOINTS_PAGE_SIZE
-            page_params["offset"] = offset
-
-            cursor.execute(
-                _endpoint_cte(stale_seconds) + f"""
-                SELECT * FROM endpoint_data
-                {where_sql}
-                ORDER BY id DESC
-                LIMIT %(limit)s OFFSET %(offset)s;
-                """,
-                page_params
-            )
-
-            rows = cursor.fetchall()
-
-    finally:
-        connection.close()
-
-    risk_score_map = {"NORMAL": 0, "SUSPICIOUS": 35, "HIGH": 65, "CRITICAL": 85}
-
-    # Orden real de columnas de ENDPOINT_CTE.endpoint_data (ya no
-    # incluye 'architecture' -- 'endpoints' no tiene esa columna):
-    # id, hostname, operating_system, os_version, ip_address,
-    # agent_version, status, last_seen_at, enrolled_at, status_bucket,
-    # risk_bucket.
-    endpoints = [
-        {
-            "id": row[0],
-            "agent_code": f"AGT-{row[0]:06d}",
-            "hostname": row[1],
-            "operating_system": row[2],
-            "os_version": row[3],
-            "ip_address": str(row[4]) if row[4] else "127.0.0.1",
-            "agent_version": row[5] or "v1.0.0",
-            "status": row[6],
-            "last_seen_at": row[7],
-            "enrolled_at": row[8],
-            "status_bucket": row[9],
-            "risk_bucket": row[10],
-            "risk_label": RISK_LABELS_ES[row[10]],
-            "risk_score": risk_score_map.get(row[10], 0),
-            "is_isolated": row[0] in isolated_agent_ids,
-            "is_live": (row[9] == "ok" and row[7] is not None)
-        }
-        for row in rows
-    ]
-
-    base_filters = {k: v for k, v in {"search": search, "os": os_filter, "risk": risk}.items() if v}
-
-    filter_qs = urlencode({**base_filters, **({"status": status} if status else {})})
-    qs_all = urlencode(base_filters)
-    qs_ok = urlencode({**base_filters, "status": "ok"})
-    qs_attention = urlencode({**base_filters, "status": "attention"})
-    qs_offline = urlencode({**base_filters, "status": "offline"})
-
-    return templates.TemplateResponse(
-        request,
-        "endpoints.html",
-        {
-            "user": user,
-            "active_page": "endpoints",
-            "endpoints": endpoints,
-            "total_endpoints": total_endpoints,
-            "endpoints_ok": endpoints_ok,
-            "endpoints_attention": endpoints_attention,
-            "endpoints_offline": endpoints_offline,
-            "endpoints_with_alerts": endpoints_with_alerts,
-            "endpoints_in_risk": endpoints_in_risk,
-            "endpoints_isolated": endpoints_isolated,
-            "distinct_os": distinct_os,
-            "risk_options": [("NORMAL", "Normal"), ("SUSPICIOUS", "Sospechoso"), ("HIGH", "Alto"), ("CRITICAL", "Crítico")],
-            "current_status": status,
-            "current_risk": risk,
-            "current_search": search,
-            "current_os": os_filter,
-            "filter_qs": filter_qs,
-            "qs_all": qs_all,
-            "qs_ok": qs_ok,
-            "qs_attention": qs_attention,
-            "qs_offline": qs_offline,
-            "current_page": current_page,
-            "total_pages": total_pages,
-            "filtered_total": filtered_total
-        }
-    )
-
-
 @app.get("/api/endpoints/{agent_id}/drawer")
 def get_endpoint_drawer_data(agent_id: int, request: Request):
     """API para obtener la información completa del Host Drawer (panel lateral)."""
@@ -1859,20 +1115,32 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             )
             incidents_total, incidents_active = cursor.fetchone()
 
-            # Nivel de riesgo
+            # Nivel de riesgo -- se ordena por severity_levels.min_score
+            # (no por un CASE con nombres hardcodeados: el orden real
+            # de severidad ya está en la tabla). Si el endpoint no
+            # tiene alertas abiertas, se cae al nivel más bajo del
+            # catálogo, el que quede.
             cursor.execute(
                 """
-                SELECT severity_levels.name FROM alerts
+                SELECT severity_levels.name, severity_levels.min_score, severity_levels.max_score
+                FROM alerts
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
                 WHERE alerts.agent_id = %s AND alerts.status = 'NEW'
-                ORDER BY CASE severity_levels.name WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'SUSPICIOUS' THEN 2 ELSE 1 END DESC
+                ORDER BY severity_levels.min_score DESC
                 LIMIT 1;
                 """,
                 (agent_id,)
             )
             risk_row = cursor.fetchone()
-            risk_bucket = risk_row[0] if risk_row else "NORMAL"
-            risk_scores = {"NORMAL": 0, "SUSPICIOUS": 35, "HIGH": 65, "CRITICAL": 85}
+            if risk_row is None:
+                cursor.execute("SELECT name, min_score, max_score FROM severity_levels ORDER BY min_score ASC LIMIT 1;")
+                risk_row = cursor.fetchone()
+            risk_bucket, risk_min_score, risk_max_score = risk_row
+            # Score representativo del nivel (punto medio del rango
+            # real en severity_levels) -- reemplaza al diccionario fijo
+            # que había antes (peor caso, no se conoce el score exacto
+            # de la última alerta acá, solo el nivel).
+            representative_risk_score = (float(risk_min_score) + float(risk_max_score)) / 2
 
             # Aislamiento activo -- hoy siempre va a dar "no aislado":
             # ningún endpoint del servidor escribe en host_isolations
@@ -1950,8 +1218,7 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
                 "last_seen_ago": time_ago(row[7]),
                 "enrolled_at": row[8].strftime("%d/%m/%Y") if row[8] else "",
                 "risk_bucket": risk_bucket,
-                "risk_score": risk_scores.get(risk_bucket, 0),
-                "risk_label": RISK_LABELS_ES.get(risk_bucket, "Normal"),
+                "risk_score": representative_risk_score,
                 "is_isolated": is_isolated,
                 "alerts_active": alerts_active,
                 "incidents_total": incidents_total,
@@ -1965,1158 +1232,6 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
         connection.close()
 
 
-@app.post("/api/enrollment-tokens")
-def generate_enrollment_token_api(request: Request, body: dict = None):
-    """API para generar token de enrolamiento con duración dinámica."""
-    user = require_session_user(request)
-    if user is None:
-        return JSONResponse({"error": "No autorizado"}, status_code=401)
-
-    created_by = user.get("id") if isinstance(user, dict) else None
-    duration = (body or {}).get("duration", "24h") if body else "24h"
-
-    if duration == "1h":
-        interval_sql = "1 hour"
-    elif duration == "7d":
-        interval_sql = "7 days"
-    elif duration == "15m":
-        interval_sql = "15 minutes"
-    else:
-        interval_sql = "24 hours"
-
-    token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                INSERT INTO enrollment_tokens (token_hash, created_by, expires_at)
-                VALUES (%s, %s, CURRENT_TIMESTAMP + INTERVAL '{interval_sql}')
-                RETURNING id, expires_at;
-                """,
-                (token_hash, created_by)
-            )
-            res = cursor.fetchone()
-            connection.commit()
-
-            host = request.headers.get("host", "localhost:8000")
-            server_url = f"http://{host}"
-            command = f"python agent/main.py --enroll {token} --server {server_url}"
-
-            return {
-                "token": token,
-                "token_id": res[0],
-                "expires_at": res[1].strftime("%d/%m/%Y %H:%M:%S") if res[1] else "",
-                "command": command
-            }
-    finally:
-        connection.close()
-
-
-@app.get("/endpoints/{agent_id}")
-def endpoint_detail_page(agent_id: int, request: Request):
-    """Detalle de un endpoint puntual. Todo lo que se muestra acá sale
-    de datos reales -- donde el agente todavía no reporta algo (p. ej.
-    monitoreo de procesos), se dice explícitamente en vez de simular
-    un estado 'funcionando' que no podemos verificar."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
-                       endpoints.ip_address, agents.agent_version, agents.status,
-                       agents.last_seen_at, agents.enrolled_at
-                FROM agents
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE agents.id = %s;
-                """,
-                (agent_id,)
-            )
-
-            row = cursor.fetchone()
-
-            if row is None:
-                raise HTTPException(status_code=404, detail="Endpoint no encontrado")
-
-            (endpoint_id, hostname, operating_system, os_version,
-             ip_address, agent_version, status, last_seen_at, enrolled_at) = row
-
-            stale_seconds = get_agent_stale_seconds(cursor)
-
-            if status != "ONLINE":
-                status_bucket = "offline"
-            elif last_seen_at and (datetime.now(last_seen_at.tzinfo) - last_seen_at).total_seconds() <= stale_seconds:
-                status_bucket = "ok"
-            else:
-                status_bucket = "attention"
-
-            # Monitoreo de archivos: no tenemos un "heartbeat" propio
-            # del watcher de archivos, así que la mejor señal honesta
-            # es si alguna vez llegó un evento de este agente.
-            cursor.execute(
-                "SELECT MAX(detected_at) FROM events WHERE agent_id = %s;",
-                (agent_id,)
-            )
-            last_file_event = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM honeyfiles WHERE agent_id = %s;",
-                (agent_id,)
-            )
-            honeyfiles_count = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM alerts WHERE agent_id = %s AND status = 'NEW';",
-                (agent_id,)
-            )
-            active_detections = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM incidents WHERE agent_id = %s;",
-                (agent_id,)
-            )
-            associated_incidents = cursor.fetchone()[0]
-
-            # Riesgo actual del endpoint -- misma regla que la lista de
-            # Endpoints y que "Endpoints con mayor riesgo" del dashboard:
-            # el nivel más alto entre sus alertas abiertas, o Normal si
-            # no tiene ninguna.
-            cursor.execute(
-                """
-                SELECT MAX(
-                    CASE severity_levels.name
-                        WHEN 'CRITICAL' THEN 4
-                        WHEN 'HIGH' THEN 3
-                        WHEN 'SUSPICIOUS' THEN 2
-                        ELSE 1
-                    END
-                )
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.agent_id = %s AND alerts.status = 'NEW';
-                """,
-                (agent_id,)
-            )
-            risk_rank_row = cursor.fetchone()[0]
-            risk_bucket = {4: "CRITICAL", 3: "HIGH", 2: "SUSPICIOUS"}.get(risk_rank_row, "NORMAL")
-
-            cursor.execute(
-                """
-                SELECT severity_levels.name, alerts.title, alerts.created_at
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.agent_id = %s
-                ORDER BY alerts.created_at DESC
-                LIMIT 5;
-                """,
-                (agent_id,)
-            )
-            latest_detections = [
-                {"severity": sev, "title": title, "created_at": ts}
-                for sev, title, ts in cursor.fetchall()
-            ]
-
-            # Credencial del agente -- si nunca completó enrollment (no
-            # debería pasar, pero por las dudas) status queda None y
-            # lo mostramos como "Sin credencial" en vez de asumir activa.
-            cursor.execute(
-                "SELECT status FROM agent_credentials WHERE agent_id = %s;",
-                (agent_id,)
-            )
-            credential_row = cursor.fetchone()
-            credential_active = (credential_row[0] == "ACTIVE") if credential_row else None
-
-            cursor.execute(
-                """
-                (
-                    SELECT 'alert' AS kind, severity_levels.name AS sev,
-                           alerts.title AS label, alerts.created_at AS ts
-                    FROM alerts
-                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                    WHERE alerts.agent_id = %(agent_id)s
-                    ORDER BY alerts.created_at DESC
-                    LIMIT 8
-                )
-                UNION ALL
-                (
-                    SELECT 'event' AS kind, NULL AS sev,
-                           event_types.description AS label, events.detected_at AS ts
-                    FROM events
-                    JOIN event_types ON event_types.id = events.event_type_id
-                    WHERE events.agent_id = %(agent_id)s
-                    ORDER BY events.detected_at DESC
-                    LIMIT 8
-                )
-                ORDER BY ts DESC
-                LIMIT 8;
-                """,
-                {"agent_id": agent_id}
-            )
-
-            SEVERITY_TYPE_LABELS_LOCAL = {
-                "CRITICAL": "Detección crítica",
-                "HIGH": "Detección alta",
-                "SUSPICIOUS": "Detección sospechosa",
-            }
-
-            recent_activity = []
-
-            for kind, sev, raw_label, ts in cursor.fetchall():
-                if kind == "alert":
-                    type_label = SEVERITY_TYPE_LABELS_LOCAL.get(sev, "Detección")
-                else:
-                    # 'label' de eventos ya viene traducido desde la BD
-                    # (event_types.description) -- no hace falta diccionario.
-                    type_label = raw_label
-                recent_activity.append({
-                    "kind": kind, "severity": sev, "type_label": type_label,
-                    "label": raw_label if kind == "alert" else type_label, "ts": ts
-                })
-
-    finally:
-        connection.close()
-
-    monitoring = [
-        {
-            "label": "Comunicación con el servidor (heartbeat)",
-            "state": status_bucket,
-            "detail": (
-                f"Último heartbeat {time_ago(last_seen_at)}" if last_seen_at
-                else "Todavía no se ha recibido un heartbeat"
-            )
-        },
-        {
-            "label": "Monitoreo de archivos",
-            "state": "ok" if last_file_event else "unknown",
-            "detail": (
-                f"Última actividad {time_ago(last_file_event)}" if last_file_event
-                else "Sin actividad registrada todavía"
-            )
-        },
-        {
-            "label": "Honeyfiles",
-            "state": "ok" if honeyfiles_count > 0 else "unknown",
-            "detail": (
-                f"{honeyfiles_count} honeyfile(s) registrados" if honeyfiles_count > 0
-                else "Sin honeyfiles registrados para este endpoint"
-            )
-        },
-        {
-            "label": "Monitoreo de procesos",
-            "state": "not_implemented",
-            "detail": "El agente todavía no envía esta información al servidor"
-        },
-    ]
-
-    endpoint = {
-        "id": endpoint_id,
-        "agent_code": f"AGT-{endpoint_id:06d}",
-        "hostname": hostname,
-        "operating_system": operating_system,
-        "os_version": os_version,
-        "ip_address": ip_address,
-        "agent_version": agent_version,
-        "status": status,
-        "status_bucket": status_bucket,
-        "last_seen_at": last_seen_at,
-        "enrolled_at": enrolled_at,
-        "risk_bucket": risk_bucket,
-        "risk_label": RISK_LABELS_ES[risk_bucket],
-        "credential_active": credential_active
-    }
-
-    return templates.TemplateResponse(
-        request,
-        "endpoint_detail.html",
-        {
-            "user": user,
-            "active_page": "endpoints",
-            "e": endpoint,
-            "monitoring": monitoring,
-            "active_detections": active_detections,
-            "associated_incidents": associated_incidents,
-            "honeyfiles_count": honeyfiles_count,
-            "latest_detections": latest_detections,
-            "recent_activity": recent_activity
-        }
-    )
-
-
-EVENTOS_PAGE_SIZE = 50
-
-EVENTOS_SINCE_OPTIONS = {
-    "15m": ("Últimos 15 minutos", "15 minutes"),
-    "1h": ("Última hora", "1 hour"),
-    "24h": ("Últimas 24 horas", "24 hours"),
-}
-
-
-EVENTOS_CATEGORY_LABELS_ES = {
-    "honeyfile": "🍯 Honeyfile",
-    "file": "📁 Archivo regular",
-}
-
-# Filtro/columna "Categoría" que pide el mockup no es una columna real
-# de 'events' -- se deriva comparando events.file_path contra la ruta
-# de un honeyfile real de ese mismo agente ('honeyfiles.file_path').
-# No existen las categorías "Proceso" ni "Sistema" del mockup: el
-# agente no reporta creación de procesos (ver PENDIENTES.md) y los
-# heartbeats nunca se guardan en 'events'.
-EVENT_IS_HONEYFILE_SQL = """
-    EXISTS (
-        SELECT 1 FROM honeyfiles
-        WHERE honeyfiles.agent_id = events.agent_id
-          AND honeyfiles.file_path = events.file_path
-    )
-"""
-
-
-def _eventos_where(agent_id, type_filter, category, since, search, params):
-    where_clauses = []
-
-    if agent_id:
-        where_clauses.append("events.agent_id = %(agent_id)s")
-        params["agent_id"] = agent_id
-
-    if type_filter:
-        where_clauses.append("event_types.name = %(type)s")
-        params["type"] = type_filter
-
-    if category == "honeyfile":
-        where_clauses.append(EVENT_IS_HONEYFILE_SQL)
-    elif category == "file":
-        where_clauses.append(f"NOT {EVENT_IS_HONEYFILE_SQL}")
-
-    if since:
-        where_clauses.append(
-            "events.detected_at >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s"
-        )
-        params["since_interval"] = EVENTOS_SINCE_OPTIONS[since][1]
-
-    if search:
-        where_clauses.append(
-            "(endpoints.hostname ILIKE %(search)s "
-            "OR events.file_path ILIKE %(search)s)"
-        )
-        params["search"] = f"%{search}%"
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-
-    return where_sql
-
-
-def _event_type_labels(cursor) -> dict:
-    """Diccionario event_types.name -> event_types.description, leído en
-    vivo de la BD en cada request en vez de mantener una copia
-    hardcodeada en Python (la BD es la fuente de verdad para este
-    catálogo -- ver PENDIENTES.md, auditoría de catálogos duplicados,
-    2026-08-16). event_types tiene 4 filas -- el costo de esta consulta
-    extra es despreciable."""
-
-    cursor.execute("SELECT name, description FROM event_types ORDER BY name;")
-    return dict(cursor.fetchall())
-
-
-def _eventos_kpis(cursor):
-    """KPIs reales de las últimas 24h -- ver PENDIENTES.md para lo que
-    NO se incluye acá (no hay 'anomalías por evento': el score de
-    riesgo vive en 'alerts', no en 'events')."""
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM events WHERE detected_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';"
-    )
-    total_24h = cursor.fetchone()[0]
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM honeyfile_activations WHERE detected_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';"
-    )
-    honeyfile_touches_24h = cursor.fetchone()[0]
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM alerts WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';"
-    )
-    alerts_24h = cursor.fetchone()[0]
-
-    # Tasa de entrada: eventos de los últimos 5 minutos / 300s. Una
-    # ventana de 5 min amortigua el ruido de mirar solo el último
-    # segundo; en un entorno de pocos agentes de prueba este número va
-    # a ser chico casi siempre -- es real, no un valor de demo.
-    cursor.execute(
-        "SELECT COUNT(*) FROM events WHERE detected_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes';"
-    )
-    events_last_5min = cursor.fetchone()[0]
-    event_rate = round(events_last_5min / 300.0, 2)
-
-    return {
-        "total_24h": total_24h,
-        "honeyfile_touches_24h": honeyfile_touches_24h,
-        "alerts_24h": alerts_24h,
-        "event_rate": event_rate
-    }
-
-
-@app.get("/eventos")
-def eventos_page(
-    request: Request,
-    agent_id: int | None = Query(None),
-    type_filter: str = Query("", alias="type"),
-    category: str = Query(""),
-    since: str = Query(""),
-    search: str = Query(""),
-    page: int = Query(1, ge=1)
-):
-    """Registro técnico de lo que reportan los agentes -- 'ocurrió
-    esto, acá, a esta hora'. A propósito NO incluye proceso/PID real
-    (el agente todavía no los reporta -- ver file_monitor.py) ni un
-    juicio de severidad por evento (eso es trabajo de Detecciones).
-    El filtro por 'alert_id' (venía de 'Eventos relacionados' en
-    Detecciones) se sacó junto con 'alert_events' -- ver PENDIENTES.md."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    params = {}
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            event_type_labels = _event_type_labels(cursor)
-            type_filter = type_filter if type_filter in event_type_labels else ""
-            category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
-            since = since if since in EVENTOS_SINCE_OPTIONS else ""
-
-            where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
-
-            kpis = _eventos_kpis(cursor)
-
-            cursor.execute(
-                "SELECT agents.id, endpoints.hostname FROM agents "
-                "JOIN endpoints ON endpoints.id = agents.endpoint_id ORDER BY endpoints.hostname;"
-            )
-            endpoint_options = cursor.fetchall()
-
-            count_params = dict(params)
-            cursor.execute(
-                f"""
-                SELECT COUNT(*) FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                {where_sql};
-                """,
-                count_params
-            )
-            filtered_total = cursor.fetchone()[0]
-
-            total_pages = max(1, -(-filtered_total // EVENTOS_PAGE_SIZE))
-            current_page = min(page, total_pages)
-            offset = (current_page - 1) * EVENTOS_PAGE_SIZE
-
-            page_params = dict(params)
-            page_params["limit"] = EVENTOS_PAGE_SIZE
-            page_params["offset"] = offset
-
-            cursor.execute(
-                f"""
-                SELECT events.id, event_types.name, events.file_path,
-                       endpoints.hostname, endpoints.os, events.agent_id, events.detected_at,
-                       events.process_id, events.process_name, {EVENT_IS_HONEYFILE_SQL} AS is_honeyfile
-                FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                {where_sql}
-                ORDER BY events.id DESC
-                LIMIT %(limit)s OFFSET %(offset)s;
-                """,
-                page_params
-            )
-
-            rows = cursor.fetchall()
-
-            filtered_hostname = None
-
-            if agent_id:
-                cursor.execute(
-                    "SELECT endpoints.hostname FROM agents "
-                    "JOIN endpoints ON endpoints.id = agents.endpoint_id WHERE agents.id = %s;",
-                    (agent_id,)
-                )
-                hostname_row = cursor.fetchone()
-                filtered_hostname = hostname_row[0] if hostname_row else None
-
-    finally:
-        connection.close()
-
-    # events ya no tiene 'description' ni 'metadata' JSONB -- el nombre
-    # del tipo y la ruta del archivo son columnas propias ahora
-    # (event_types.name via join, events.file_path directo).
-    events = [
-        {
-            "id": row[0],
-            "event_code": f"EVT-{row[0]:06d}",
-            "event_type": row[1],
-            "type_label": event_type_labels.get(row[1], row[1]),
-            "file_path": row[2],
-            "hostname": row[3],
-            "operating_system": row[4],
-            "agent_id": row[5],
-            "detected_at": row[6],
-            "process_id": row[7],
-            "process_name": row[8],
-            "is_honeyfile": row[9]
-        }
-        for row in rows
-    ]
-
-    last_id = events[0]["id"] if events else 0
-
-    base_filters = {k: v for k, v in {
-        "agent_id": agent_id, "type": type_filter, "category": category,
-        "since": since, "search": search
-    }.items() if v}
-    filter_qs = urlencode(base_filters)
-
-    return templates.TemplateResponse(
-        request,
-        "eventos.html",
-        {
-            "user": user,
-            "active_page": "eventos",
-            "events": events,
-            "last_id": last_id,
-            "kpis": kpis,
-            "endpoint_options": endpoint_options,
-            "event_type_options": event_type_labels,
-            "category_options": EVENTOS_CATEGORY_LABELS_ES,
-            "since_options": EVENTOS_SINCE_OPTIONS,
-            "current_type": type_filter,
-            "current_category": category,
-            "current_since": since,
-            "current_search": search,
-            "filter_qs": filter_qs,
-            "current_page": current_page,
-            "total_pages": total_pages,
-            "filtered_total": filtered_total,
-            "filtered_agent_id": agent_id,
-            "filtered_hostname": filtered_hostname
-        }
-    )
-
-
-@app.get("/eventos/{event_id:int}")
-def evento_detail_page(event_id: int, request: Request):
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT events.id, event_types.name, event_types.description, events.file_path,
-                       agents.id, endpoints.hostname, endpoints.os,
-                       agents.status, agents.last_seen_at, events.detected_at
-                FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                WHERE events.id = %s;
-                """,
-                (event_id,)
-            )
-
-            row = cursor.fetchone()
-
-            if row is None:
-                raise HTTPException(status_code=404, detail="Evento no encontrado")
-
-            (evt_id, event_type, event_type_label, file_path, agent_id, hostname,
-             operating_system, agent_status, last_seen_at, detected_at) = row
-
-            stale_seconds = get_agent_stale_seconds(cursor)
-
-            if agent_status != "ONLINE":
-                agent_status_bucket = "offline"
-            elif last_seen_at and (datetime.now(last_seen_at.tzinfo) - last_seen_at).total_seconds() <= stale_seconds:
-                agent_status_bucket = "ok"
-            else:
-                agent_status_bucket = "attention"
-
-    finally:
-        connection.close()
-
-    # "Detección relacionada" (lookup inverso vía alert_events) se
-    # sacó: esa tabla no existe en la nueva estructura -- ver
-    # PENDIENTES.md. 'extension' tampoco: salía de 'metadata' JSONB,
-    # que ya no existe ('events.file_path' es columna directa ahora).
-    related_alert = None
-
-    event = {
-        "id": evt_id,
-        "event_code": f"EVT-{evt_id:06d}",
-        "event_type": event_type,
-        "type_label": event_type_label,
-        "description": None,
-        "file_path": file_path,
-        # Ya no viene guardada (era parte de 'metadata' JSONB, que no
-        # existe más) -- se recalcula del file_path real con el mismo
-        # criterio que usaba el agente (os.path.splitext), no es un
-        # dato inventado.
-        "extension": (os.path.splitext(file_path)[1].lstrip(".").lower() or None) if file_path else None,
-        "detected_at": detected_at,
-        "agent_id": agent_id,
-        "agent_code": f"AGT-{agent_id:06d}",
-        "hostname": hostname,
-        "operating_system": operating_system,
-        "agent_status_bucket": agent_status_bucket
-    }
-
-    return templates.TemplateResponse(
-        request,
-        "evento_detail.html",
-        {
-            "user": user,
-            "active_page": "eventos",
-            "evt": event,
-            "related_alert": related_alert
-        }
-    )
-
-
-@app.get("/api/eventos/{event_id}/drawer")
-def get_evento_drawer(event_id: int, request: Request):
-    """Detalle rápido para el panel lateral de Eventos. 'Proceso' sale
-    de 'events.process_id'/'process_name' -- columnas reales, pero
-    siempre NULL hoy (ver PENDIENTES.md, "Atribución de proceso").
-    No se fabrica línea de comando, hash de ejecutable, PID padre ni
-    usuario ejecutor: ninguno de esos existe como dato en ningún lado
-    del sistema."""
-
-    user = require_session_user(request)
-    if user is None:
-        return JSONResponse({"error": "No autorizado"}, status_code=401)
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                SELECT events.id, event_types.name, events.file_path, events.detected_at,
-                       events.process_id, events.process_name, endpoints.hostname,
-                       endpoints.os, endpoints.os_version, endpoints.ip_address,
-                       agents.id, agents.status, {EVENT_IS_HONEYFILE_SQL} AS is_honeyfile,
-                       event_types.description AS event_type_label
-                FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                WHERE events.id = %s;
-                """,
-                (event_id,)
-            )
-            r = cursor.fetchone()
-            if not r:
-                return JSONResponse({"error": "Evento no encontrado"}, status_code=404)
-
-            file_path = r[2]
-            is_honeyfile = r[12]
-
-            honeyfile_activations = []
-            if is_honeyfile:
-                cursor.execute(
-                    """
-                    SELECT honeyfile_activations.detected_at, honeyfile_activations.operation,
-                           honeyfile_activations.process_name, honeyfile_activations.process_id
-                    FROM honeyfile_activations
-                    JOIN honeyfiles ON honeyfiles.id = honeyfile_activations.honeyfile_id
-                    WHERE honeyfiles.agent_id = %s AND honeyfiles.file_path = %s
-                    ORDER BY honeyfile_activations.id DESC LIMIT 5;
-                    """,
-                    (r[10], file_path)
-                )
-                honeyfile_activations = [
-                    {
-                        "detected_at": ar[0].strftime("%d/%m %H:%M:%S") if ar[0] else "",
-                        "operation": ar[1],
-                        "process_name": ar[2] or "proceso desconocido",
-                        "process_id": ar[3] or 0
-                    }
-                    for ar in cursor.fetchall()
-                ]
-
-            return {
-                "id": r[0],
-                "event_code": f"EVT-{r[0]:06d}",
-                "type_label": r[13],
-                "file_path": file_path,
-                "extension": (os.path.splitext(file_path)[1].lstrip(".").lower() or None) if file_path else None,
-                "detected_at": r[3].strftime("%d/%m/%Y %H:%M:%S") if r[3] else "",
-                "process_id": r[4],
-                "process_name": r[5],
-                "hostname": r[6],
-                "operating_system": r[7],
-                "os_version": r[8] or "",
-                "ip_address": str(r[9]) if r[9] else "127.0.0.1",
-                "agent_id": r[10],
-                "agent_code": f"AGT-{r[10]:06d}",
-                "agent_status": r[11],
-                "is_honeyfile": is_honeyfile,
-                "honeyfile_activations": honeyfile_activations
-            }
-    finally:
-        connection.close()
-
-
-@app.get("/api/eventos/live")
-def get_eventos_live(
-    request: Request,
-    after_id: int = Query(0),
-    agent_id: int | None = Query(None),
-    type_filter: str = Query("", alias="type"),
-    category: str = Query(""),
-    since: str = Query(""),
-    search: str = Query("")
-):
-    """El 'En Vivo' de Eventos es sondeo (polling) real, no streaming
-    -- el proyecto no tiene WebSockets/SSE. El navegador llama esto
-    cada pocos segundos pidiendo solo lo nuevo desde 'after_id' con
-    los mismos filtros que tiene puestos la lista, y de paso trae los
-    KPIs recalculados."""
-
-    user = require_session_user(request)
-    if user is None:
-        return JSONResponse({"error": "No autorizado"}, status_code=401)
-
-    category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
-    since = since if since in EVENTOS_SINCE_OPTIONS else ""
-
-    params = {"after_id": after_id}
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            event_type_labels = _event_type_labels(cursor)
-            type_filter = type_filter if type_filter in event_type_labels else ""
-
-            where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
-            extra_clause = "events.id > %(after_id)s"
-            where_sql = f"{where_sql} AND {extra_clause}" if where_sql else f"WHERE {extra_clause}"
-
-            kpis = _eventos_kpis(cursor)
-
-            cursor.execute(
-                f"""
-                SELECT events.id, event_types.name, events.file_path,
-                       endpoints.hostname, endpoints.os, events.agent_id, events.detected_at,
-                       events.process_id, events.process_name, {EVENT_IS_HONEYFILE_SQL} AS is_honeyfile
-                FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                {where_sql}
-                ORDER BY events.id DESC
-                LIMIT 100;
-                """,
-                params
-            )
-            rows = cursor.fetchall()
-    finally:
-        connection.close()
-
-    events = [
-        {
-            "id": row[0],
-            "event_code": f"EVT-{row[0]:06d}",
-            "type_label": event_type_labels.get(row[1], row[1]),
-            "file_path": row[2],
-            "hostname": row[3],
-            "operating_system": row[4],
-            "agent_id": row[5],
-            "detected_at": row[6].strftime("%d/%m %H:%M:%S") if row[6] else "",
-            "process_id": row[7],
-            "process_name": row[8],
-            "is_honeyfile": row[9]
-        }
-        for row in rows
-    ]
-
-    return {"events": events, "kpis": kpis}
-
-
-@app.get("/eventos/export.csv")
-def export_eventos_csv(
-    request: Request,
-    agent_id: int | None = Query(None),
-    type_filter: str = Query("", alias="type"),
-    category: str = Query(""),
-    since: str = Query(""),
-    search: str = Query("")
-):
-    """Exporta el feed filtrado (mismos filtros que /eventos) como CSV.
-    Tope de 5000 filas para no colgar el servidor con una exportación
-    sin límite -- si hace falta más, se puede acotar el rango de
-    tiempo desde el filtro."""
-
-    user = require_session_user(request)
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    category = category if category in EVENTOS_CATEGORY_LABELS_ES else ""
-    since = since if since in EVENTOS_SINCE_OPTIONS else ""
-
-    params = {}
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            event_type_labels = _event_type_labels(cursor)
-            type_filter = type_filter if type_filter in event_type_labels else ""
-
-            where_sql = _eventos_where(agent_id, type_filter, category, since, search, params)
-
-            cursor.execute(
-                f"""
-                SELECT events.id, event_types.name, events.detected_at, endpoints.hostname,
-                       endpoints.os, events.file_path, events.process_id, events.process_name,
-                       {EVENT_IS_HONEYFILE_SQL} AS is_honeyfile
-                FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                {where_sql}
-                ORDER BY events.id DESC
-                LIMIT 5000;
-                """,
-                params
-            )
-            rows = cursor.fetchall()
-    finally:
-        connection.close()
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow([
-        "id", "codigo", "tipo", "categoria", "fecha_hora", "endpoint", "sistema_operativo",
-        "ruta_archivo", "process_id", "process_name"
-    ])
-    for row in rows:
-        writer.writerow([
-            row[0],
-            f"EVT-{row[0]:06d}",
-            event_type_labels.get(row[1], row[1]),
-            "Honeyfile" if row[8] else "Archivo regular",
-            row[2].strftime("%Y-%m-%d %H:%M:%S") if row[2] else "",
-            row[3],
-            row[4],
-            row[5] or "",
-            row[6] if row[6] is not None else "",
-            row[7] or ""
-        ])
-
-    return Response(
-        content=buffer.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=eventos_alfa_sentinel.csv"}
-    )
-
-
-class EventToAlert(BaseModel):
-    severity: str
-    title: str | None = None
-    description: str | None = None
-
-
-@app.post("/api/eventos/{event_id}/convert-to-alert")
-def convert_evento_to_alert(event_id: int, body: EventToAlert, request: Request):
-    """Promueve un evento crudo a una alerta real, a criterio del
-    analista -- a diferencia de las alertas que arma el motor
-    heurístico del agente, acá no hay un risk_score calculado (no
-    hubo ventana/threshold evaluado), así que se guarda un puntaje
-    fijo por banda de severidad (mitad del rango de cada banda en
-    'severity_levels'), no un cálculo inventado con falsa precisión."""
-
-    user = require_session_user(request)
-    if user is None:
-        return JSONResponse({"error": "No autorizado"}, status_code=401)
-
-    if body.severity not in ALERT_SEVERITY_LABELS_ES:
-        return JSONResponse({"error": "Severidad inválida"}, status_code=400)
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT events.id, event_types.name, events.file_path, events.detected_at,
-                       events.agent_id, endpoints.hostname, event_types.description
-                FROM events
-                JOIN agents ON agents.id = events.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN event_types ON event_types.id = events.event_type_id
-                WHERE events.id = %s;
-                """,
-                (event_id,)
-            )
-            r = cursor.fetchone()
-            if not r:
-                return JSONResponse({"error": "Evento no encontrado"}, status_code=404)
-
-            event_code = f"EVT-{r[0]:06d}"
-            type_label = r[6]
-            file_path = r[2]
-            agent_id = r[4]
-            hostname = r[5]
-
-            title = body.title or f"Alerta manual desde {event_code}"
-            description = body.description or (
-                f"Creada manualmente por {user.get('username', 'un analista')} "
-                f"a partir del evento {event_code} ({type_label} en {hostname}"
-                f"{': ' + file_path if file_path else ''})."
-            )
-
-            cursor.execute(
-                "SELECT id, min_score, max_score FROM severity_levels WHERE name = %s;",
-                (body.severity,)
-            )
-            severity_row = cursor.fetchone()
-            if severity_row is None:
-                return JSONResponse({"error": "Severidad desconocida en el catálogo"}, status_code=422)
-
-            severity_id, min_score, max_score = severity_row
-            # No hay ventana/threshold evaluado en una alerta manual (no
-            # viene de una detección del motor heurístico), así que se usa
-            # el punto medio de la banda de severidad elegida como puntaje
-            # -- calculado en el momento desde severity_levels (la BD),
-            # no una constante Python que puede desincronizarse si se
-            # editan los rangos (ver PENDIENTES.md).
-            risk_score = round((float(min_score) + float(max_score)) / 2, 2)
-
-            cursor.execute(
-                """
-                INSERT INTO alerts (agent_id, severity_id, title, description, risk_score, status)
-                VALUES (%s, %s, %s, %s, %s, 'NEW')
-                RETURNING id;
-                """,
-                (agent_id, severity_id, title, description, risk_score)
-            )
-            alert_id = cursor.fetchone()[0]
-
-            connection.commit()
-
-            return {"message": "Alerta creada", "alert_id": alert_id}
-    finally:
-        connection.close()
-
-
-@app.get("/honeyfiles")
-def honeyfiles_page(
-    request: Request,
-    agent_id: int | None = Query(None),
-    status: str = Query(""),
-    os_filter: str = Query("", alias="os"),
-    search: str = Query("")
-):
-    """Vista principal de Honeyfiles (archivos señuelo)."""
-    user = require_session_user(request)
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            where_clauses = []
-            params = {}
-
-            if agent_id:
-                where_clauses.append("honeyfiles.agent_id = %(agent_id)s")
-                params["agent_id"] = agent_id
-            if status:
-                where_clauses.append("honeyfiles.status = %(status)s")
-                params["status"] = status
-            if os_filter:
-                where_clauses.append("endpoints.os ILIKE %(os)s")
-                params["os"] = f"%{os_filter}%"
-            if search:
-                where_clauses.append("(honeyfiles.file_name ILIKE %(search)s OR honeyfiles.file_path ILIKE %(search)s OR endpoints.hostname ILIKE %(search)s)")
-                params["search"] = f"%{search}%"
-
-            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-
-            # 'agents' ya no tiene hostname/operating_system/ip_address/
-            # architecture -- esos viven en 'endpoints' desde la
-            # reestructuración a alfa_sentinel. Esta consulta no se había
-            # actualizado todavía (se rompía contra la base nueva).
-            cursor.execute(
-                f"""
-                SELECT honeyfiles.id, honeyfiles.file_name, honeyfiles.file_path,
-                       honeyfiles.file_type, honeyfiles.status, honeyfiles.created_at,
-                       honeyfiles.last_checked_at, agents.id AS agent_id, endpoints.hostname,
-                       endpoints.ip_address, endpoints.os, endpoints.os_version,
-                       agents.agent_version, agents.status AS agent_status,
-                       agents.last_seen_at
-                FROM honeyfiles
-                JOIN agents ON agents.id = honeyfiles.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                {where_sql}
-                ORDER BY honeyfiles.id DESC;
-                """,
-                params
-            )
-            rows = cursor.fetchall()
-
-            # Conteo de activaciones por honeyfile
-            cursor.execute(
-                "SELECT honeyfile_id, COUNT(*) FROM honeyfile_activations GROUP BY honeyfile_id;"
-            )
-            activations_dict = dict(cursor.fetchall())
-
-            # KPIs globales
-            cursor.execute("SELECT COUNT(*) FROM honeyfiles;")
-            total_honeyfiles = cursor.fetchone()[0]
-
-            cursor.execute("SELECT COUNT(*) FROM honeyfiles WHERE status = 'ACTIVE';")
-            active_honeyfiles = cursor.fetchone()[0]
-
-            cursor.execute("SELECT COUNT(*) FROM honeyfiles WHERE status = 'TRIGGERED';")
-            triggered_honeyfiles = cursor.fetchone()[0]
-
-            cursor.execute("SELECT MAX(detected_at) FROM honeyfile_activations;")
-            last_act_row = cursor.fetchone()
-            last_activation_ts = last_act_row[0] if last_act_row else None
-
-            # Asignaciones (honeyfile_templates -> agent_honeyfile_templates)
-            # que todavía no se materializaron como fila real en
-            # 'honeyfiles' -- se crean solo cuando el agente confirma que
-            # escribió el archivo (POST /agent/honeyfile-policy/report).
-            cursor.execute(
-                "SELECT COUNT(*) FROM agent_honeyfile_templates WHERE status = 'PENDING';"
-            )
-            pending_deployments = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM agent_honeyfile_templates WHERE status = 'FAILED';"
-            )
-            failed_deployments = cursor.fetchone()[0]
-
-            # Filtros de SO distintos
-            cursor.execute("SELECT DISTINCT os FROM endpoints ORDER BY os;")
-            distinct_os = [r[0] for r in cursor.fetchall()]
-
-            # Agentes disponibles para el Wizard de Despliegue
-            cursor.execute(
-                """
-                SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
-                       endpoints.ip_address, agents.status, agents.last_seen_at
-                FROM agents
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                ORDER BY agents.status DESC, endpoints.hostname ASC;
-                """
-            )
-            agent_rows = cursor.fetchall()
-            available_agents = [
-                {
-                    "id": r[0],
-                    "hostname": r[1],
-                    "operating_system": r[2],
-                    "os_version": r[3] or "",
-                    "ip_address": str(r[4]) if r[4] else "127.0.0.1",
-                    "status": r[5],
-                    "is_live": (r[5] == "ONLINE" and r[6] is not None and (datetime.now(r[6].tzinfo) - r[6]).total_seconds() < 30) if r[6] else False
-                }
-                for r in agent_rows
-            ]
-
-            filtered_hostname = None
-            if agent_id:
-                cursor.execute(
-                    """
-                    SELECT endpoints.hostname FROM agents
-                    JOIN endpoints ON endpoints.id = agents.endpoint_id
-                    WHERE agents.id = %s;
-                    """,
-                    (agent_id,)
-                )
-                h_row = cursor.fetchone()
-                filtered_hostname = h_row[0] if h_row else None
-
-    finally:
-        connection.close()
-
-    honeyfiles_list = []
-    for r in rows:
-        hf_id = r[0]
-        act_cnt = activations_dict.get(hf_id, 0)
-        status_val = r[4]
-        if act_cnt > 0 and status_val == "ACTIVE":
-            status_val = "TRIGGERED"
-
-        last_seen = r[14]
-        is_agent_live = (r[13] == "ONLINE" and last_seen is not None and (datetime.now(last_seen.tzinfo) - last_seen).total_seconds() < 30) if last_seen else False
-
-        honeyfiles_list.append({
-            "id": hf_id,
-            "file_name": r[1],
-            "file_path": r[2],
-            "file_type": (r[3] or "FILE").upper(),
-            "status": status_val,
-            "created_at": r[5],
-            "last_checked_at": r[6],
-            "agent_id": r[7],
-            "hostname": r[8],
-            "ip_address": str(r[9]) if r[9] else "127.0.0.1",
-            "operating_system": r[10],
-            "os_version": r[11] or "",
-            "agent_version": r[12] or "v1.0.0",
-            "agent_status": r[13],
-            "is_agent_live": is_agent_live,
-            "activations_count": act_cnt
-        })
-
-    return templates.TemplateResponse(
-        request,
-        "honeyfiles.html",
-        {
-            "user": user,
-            "active_page": "honeyfiles",
-            "honeyfiles": honeyfiles_list,
-            "total_honeyfiles": total_honeyfiles,
-            "active_honeyfiles": active_honeyfiles,
-            "triggered_honeyfiles": triggered_honeyfiles,
-            "last_activation_ts": last_activation_ts,
-            "pending_deployments": pending_deployments,
-            "failed_deployments": failed_deployments,
-            "distinct_os": distinct_os,
-            "available_agents": available_agents,
-            "current_status": status,
-            "current_os": os_filter,
-            "current_search": search,
-            "filtered_agent_id": agent_id,
-            "filtered_hostname": filtered_hostname
-        }
-    )
-
-
 @app.get("/api/honeyfiles")
 def api_honeyfiles(
     agent_id: int | None = Query(None),
@@ -3125,18 +1240,17 @@ def api_honeyfiles(
     search: str = Query(""),
     user: dict = Depends(get_current_user)
 ):
-    """Versión JSON de /honeyfiles (Jinja2) para la pantalla Honeyfiles
-    en React -- misma consulta, mismos KPIs, mismo Wizard de Despliegue
-    (available_agents). No pagina, igual que honeyfiles.html (el
-    inventario real hoy es chico).
+    """Datos de la pantalla Honeyfiles en React -- consulta, KPIs y
+    Wizard de Despliegue (available_agents). No pagina (el inventario
+    real hoy es chico).
 
     Nota: 'status' filtra sobre el estado ya calculado (ACTIVE ->
     TRIGGERED cuando hay activaciones), no directo contra la columna
     'honeyfiles.status' -- la columna en sí solo guarda ACTIVE/INACTIVE,
     'TRIGGERED' es un estado derivado en Python. Filtrar antes de
-    calcularlo (como hacía el WHERE SQL de honeyfiles_page) nunca
-    hubiera encontrado nada con status=TRIGGERED; acá se filtra
-    después, sobre el mismo valor que ve el analista."""
+    calcularlo directo en SQL nunca hubiera encontrado nada con
+    status=TRIGGERED; acá se filtra después, sobre el mismo valor que
+    ve el analista."""
 
     connection = get_connection()
     try:
@@ -3280,8 +1394,8 @@ def get_honeyfile_detail_api(honeyfile_id: int, request: Request):
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            # Igual que en honeyfiles_page: join con 'endpoints' para
-            # hostname/ip/os (ya no viven en 'agents'). 'file_hash' se lee
+            # Join con 'endpoints' para hostname/ip/os (ya no viven en
+            # 'agents'). 'file_hash' se lee
             # directo de 'honeyfiles' -- ya no se fabrica un hash de la
             # ruta acá, porque ahora el agente calcula el sha256 real del
             # contenido que escribió y lo manda al reportar el archivo.
@@ -3596,32 +1710,30 @@ def get_honeyfile_policy(x_agent_credential: str = Header(...)):
 
 @app.get("/agent/rule-policy")
 def get_rule_policy(x_agent_credential: str = Header(...)):
-    """Agregado 2026-08-12: mismo patrón que GET /agent/honeyfile-policy
-    -- el agente pide esto en cada ejecución (sigue siendo un script de
-    una sola pasada sin bucle) para enterarse de los valores reales de
-    peso/umbral/ventana de cada regla activa, en vez de tenerlos
-    hardcodeados en FileActivityAnalyzer.__init__()
-    (agent/heuristic_engine.py). Antes de esto, 'threshold' y
-    'window_seconds' en 'heuristic_rules' eran solo referencia visual
-    en /configuracion -- ahora el agente los aplica de verdad. Reglas
-    con is_active=FALSE no se incluyen -- el agente ya no las evalúa
-    en absoluto, en vez de evaluarlas con un umbral inalcanzable."""
+    """Agregado 2026-08-12, extendido 2026-08-16 (configuración por
+    endpoint, ver PENDIENTES.md): el agente pide esto en cada ejecución
+    (sigue siendo un script de una sola pasada sin bucle) para
+    enterarse de los valores EFECTIVOS de peso/umbral/ventana de cada
+    regla activa PARA ESTE AGENTE puntual -- ya no solo los globales de
+    'heuristic_rules', sino el resultado de aplicar el override de
+    'agent_rule' si este endpoint tiene uno (ver
+    _effective_agent_rules_cte()). Reglas cuyo is_active EFECTIVO sea
+    FALSE no se incluyen -- el agente ya no las evalúa en absoluto, en
+    vez de evaluarlas con un umbral inalcanzable."""
 
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
 
-            # Solo valida que la credencial exista y esté activa -- las
-            # reglas son globales, no por agente, así que no hace falta
-            # el agent_id en sí para nada más que la autenticación.
-            resolve_agent_id(cursor, x_agent_credential)
+            agent_id = resolve_agent_id(cursor, x_agent_credential)
 
             cursor.execute(
-                """
-                SELECT name, weight, threshold, window_seconds
-                FROM heuristic_rules
-                WHERE is_active = TRUE;
-                """
+                _effective_agent_rules_cte() + """
+                SELECT name, effective_weight, effective_threshold, effective_window_seconds
+                FROM effective_rules
+                WHERE effective_is_active = TRUE;
+                """,
+                {"agent_id": agent_id}
             )
 
             rules = [
@@ -3730,27 +1842,12 @@ def report_honeyfile_policy(
         connection.close()
 
 
-DETECCIONES_PAGE_SIZE = 50
-
-
-@app.get("/detecciones")
-def detecciones_page(request: Request):
-    """La lista se unificó dentro de 'Incidentes y Alertas' (2026-08-12)
-    -- ver COMBINED_CTE / incidentes_page. Esta ruta se conserva como
-    redirect para no romper enlaces/marcadores viejos.
-    '/detecciones/{alert_id}' (el expediente de una alerta puntual)
-    sigue existiendo tal cual, sin cambios -- ver deteccion_detail_page."""
-
-    return RedirectResponse(url="/incidentes", status_code=302)
-
-
 @app.get("/api/users")
 def api_users(user: dict = Depends(get_current_user)):
-    """Versión JSON de /usuarios (Jinja2) para la subsección Usuarios y
-    Roles de Administración en React -- misma consulta exacta. Igual
-    que la página real, cualquier sesión válida puede leer esta lista
-    (gap ya documentado: solo crear/editar exige rol admin, ver
-    POST /users y PATCH /users/{id})."""
+    """Datos de la subsección Usuarios y Roles de Administración en
+    React. Cualquier sesión válida puede leer esta lista (gap ya
+    documentado: solo crear/editar exige rol admin, ver POST /users y
+    PATCH /users/{id})."""
 
     connection = get_connection()
     try:
@@ -3789,69 +1886,12 @@ def api_users(user: dict = Depends(get_current_user)):
     }
 
 
-@app.get("/usuarios")
-def usuarios_page(request: Request):
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT users.id, users.username, users.full_name, users.email,
-                       STRING_AGG(roles.name, ', ' ORDER BY roles.name) AS roles,
-                       users.is_active, users.last_login_at, users.created_at
-                FROM users
-                LEFT JOIN user_roles ON user_roles.user_id = users.id
-                LEFT JOIN roles ON roles.id = user_roles.role_id
-                GROUP BY users.id
-                ORDER BY users.id;
-                """
-            )
-
-            rows = cursor.fetchall()
-
-    finally:
-        connection.close()
-
-    users = [
-        {
-            "id": r[0],
-            "username": r[1],
-            "full_name": r[2],
-            "email": r[3],
-            "roles": r[4],
-            "is_active": r[5],
-            "last_login_at": r[6],
-            "created_at": r[7]
-        }
-        for r in rows
-    ]
-
-    return templates.TemplateResponse(
-        request,
-        "usuarios.html",
-        {
-            "user": user,
-            "active_page": "usuarios",
-            "users": users,
-            "is_admin": "admin" in user.get("roles", [])
-        }
-    )
-
-
 @app.get("/alerts/open")
 def alerts_open(user: dict = Depends(get_current_user)):
     """JSON liviano para la campanita de notificaciones -- se consulta
     solo, sin pasar por cada ruta de página. Trae las alertas todavía
     sin revisar (status = 'NEW'), sin importar la severidad: hasta las
-    NORMAL/LOW quedan fuera porque esas ni siquiera generan alerta
+    de severidad BAJO quedan fuera porque esas ni siquiera generan alerta
     (el agente solo llama a send_alert cuando is_suspicious() es
     True)."""
 
@@ -3900,168 +1940,28 @@ def alerts_open(user: dict = Depends(get_current_user)):
     }
 
 
-@app.get("/dashboard/live")
-def dashboard_live(user: dict = Depends(get_current_user)):
-    """JSON liviano para el polling del dashboard (cada 15s, ver
-    dashboard.html). No es tiempo real de verdad -- no hay websockets
-    ni push desde el agente -- es el navegador volviendo a preguntar
-    cada tantos segundos. Solo trae lo que tiene sentido que cambie
-    seguido (tarjetas de resumen + feed); el motor heurístico y la
-    lista de endpoints son más de configuración/inventario y se
-    quedan como estaban hasta que se recargue la página entera."""
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute("SELECT COUNT(*) FROM agents WHERE status = 'ONLINE';")
-            connected_endpoints = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM alerts WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours';"
-            )
-            detections_24h = cursor.fetchone()[0]
-
-            cursor.execute("SELECT COUNT(*) FROM incidents WHERE status = 'OPEN';")
-            incidents_active = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT severity_levels.name, COUNT(DISTINCT alerts.agent_id)
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
-                GROUP BY severity_levels.name;
-                """
-            )
-            severity_rows = dict(cursor.fetchall())
-            critical_n = severity_rows.get("CRITICAL", 0)
-            high_n = severity_rows.get("HIGH", 0)
-            suspicious_n = severity_rows.get("SUSPICIOUS", 0)
-
-            if critical_n > 0:
-                overall_risk = "CRÍTICO"
-            elif high_n > 0:
-                overall_risk = "ALTO"
-            elif suspicious_n > 0:
-                overall_risk = "SOSPECHOSO"
-            else:
-                overall_risk = "NORMAL"
-
-            cursor.execute("SELECT COALESCE(MAX(risk_score), 0) FROM alerts WHERE status = 'NEW';")
-            global_risk_score = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT alerts.id, severity_levels.name, alerts.title,
-                       endpoints.hostname, alerts.created_at
-                FROM alerts
-                JOIN agents ON agents.id = alerts.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
-                ORDER BY alerts.created_at DESC
-                LIMIT 6;
-                """
-            )
-            recent_alerts = [
-                {
-                    "id": r[0], "severity": r[1], "title": r[2],
-                    "hostname": r[3], "created_at": r[4].strftime("%d/%m %H:%M"),
-                    "ago": time_ago(r[4])
-                }
-                for r in cursor.fetchall()
-            ]
-
-            cursor.execute(
-                """
-                (
-                    SELECT 'alert' AS kind, severity_levels.name AS sev,
-                           alerts.title AS label, endpoints.hostname AS hostname,
-                           alerts.created_at AS ts,
-                           NULL AS file_path
-                    FROM alerts
-                    JOIN agents ON agents.id = alerts.agent_id
-                    JOIN endpoints ON endpoints.id = agents.endpoint_id
-                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                    ORDER BY alerts.created_at DESC
-                    LIMIT 15
-                )
-                UNION ALL
-                (
-                    SELECT 'event' AS kind, NULL AS sev,
-                           event_types.description AS label, endpoints.hostname AS hostname,
-                           events.detected_at AS ts,
-                           events.file_path AS file_path
-                    FROM events
-                    JOIN agents ON agents.id = events.agent_id
-                    JOIN endpoints ON endpoints.id = agents.endpoint_id
-                    JOIN event_types ON event_types.id = events.event_type_id
-                    ORDER BY events.detected_at DESC
-                    LIMIT 15
-                )
-                ORDER BY ts DESC
-                LIMIT 15;
-                """
-            )
-
-            SEVERITY_TYPE_LABELS = {
-                "CRITICAL": "Detección crítica",
-                "HIGH": "Detección alta",
-                "SUSPICIOUS": "Detección sospechosa",
-            }
-
-            activity_feed = []
-            for row in cursor.fetchall():
-                kind, sev, raw_label, hostname, ts, file_path = row
-                if kind == "alert":
-                    type_label = SEVERITY_TYPE_LABELS.get(sev, "Detección")
-                    description = raw_label
-                else:
-                    # 'label' de eventos ya viene de event_types.description (BD).
-                    type_label = raw_label
-                    description = file_path or type_label
-                activity_feed.append({
-                    "kind": kind, "severity": sev, "type_label": type_label,
-                    "description": description, "hostname": hostname,
-                    "ago": time_ago(ts), "file_path": file_path
-                })
-
-    finally:
-        connection.close()
-
-    return {
-        "connected_endpoints": connected_endpoints,
-        "detections_24h": detections_24h,
-        "incidents_active": incidents_active,
-        "overall_risk": overall_risk,
-        "critical_n": critical_n,
-        "high_n": high_n,
-        "global_risk_score": global_risk_score,
-        "updated_at": datetime.now().strftime("%H:%M"),
-        "recent_alerts": recent_alerts,
-        "activity_feed": activity_feed
-    }
-
-
 # ============================================================
-# API JSON para el nuevo frontend React del Panel de Control
-# (2026-08-14). Devuelve exactamente los mismos datos reales que ya
-# calcula dashboard_page()/dashboard_live() para las plantillas
-# Jinja2 -- mismas consultas, mismo criterio de "abierto"/"en línea"
-# -- solo que como JSON en vez de HTML. No es una fuente de verdad
-# paralela: si mañana cambia una regla de negocio acá (por ejemplo,
-# qué cuenta como "endpoint en riesgo"), hay que replicar el cambio
-# en dashboard_page() y viceversa, porque hoy son dos caminos de
-# código separados que llegan a las mismas cifras.
+# API JSON para el Panel de Control en React (2026-08-14, hoy la
+# única interfaz -- el dashboard Jinja2 que calculaba estas mismas
+# cifras para HTML se eliminó junto con el resto del frontend viejo,
+# ver PENDIENTES.md). Mismas consultas y mismo criterio de
+# "abierto"/"en línea" que se usaban ahí; si mañana cambia una regla
+# de negocio acá (por ejemplo, qué cuenta como "endpoint en riesgo"),
+# es la única fuente de verdad -- ya no hay un segundo camino de
+# código en paralelo que replicar.
 # ============================================================
 
+# Escala de color fija -- esto SÍ es presentación legítima (el nombre
+# y el rango de cada nivel salen de severity_levels, pero qué color
+# hex le corresponde a cada uno es una decisión de diseño que no vive
+# en ninguna tabla). Las claves son los 'name' reales de
+# severity_levels tras la migración a español (ver
+# database/migration_2026-08-16_severity_levels_espanol.sql).
 RISK_COLOR_HEX = {
-    "NORMAL": "#16a34a",
-    "SUSPICIOUS": "#ca8a04",
-    "HIGH": "#ea580c",
-    "CRITICAL": "#dc2626",
+    "BAJO": "#16a34a",
+    "MEDIO": "#ca8a04",
+    "ALTO": "#ea580c",
+    "CRÍTICO": "#dc2626",
 }
 
 
@@ -4087,8 +1987,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             cursor.execute("SELECT COUNT(*) FROM agents WHERE status = 'ONLINE';")
             endpoints_online = cursor.fetchone()[0]
 
-            # 'Aislados': ver el mismo comentario que dashboard_page --
-            # ningún endpoint escribe en host_isolations todavía, así
+            # 'Aislados': ningún endpoint escribe en host_isolations todavía, así
             # que esto es 0 hoy. Es el dato real, no un placeholder:
             # cuando el módulo de aislamiento exista, esta misma
             # consulta ya lo va a reflejar sin tocar nada acá.
@@ -4126,9 +2025,8 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             cursor.execute("SELECT COUNT(*) FROM incidents WHERE status = 'OPEN';")
             incidents_active = cursor.fetchone()[0]
 
-            # --- Honeyfiles activados hoy (vía alerts+alert_rule, el
-            # mismo camino real que usa dashboard_page -- la tabla
-            # honeyfile_activations existe pero nada la escribe
+            # --- Honeyfiles activados hoy (vía alerts+alert_rule -- la
+            # tabla honeyfile_activations existe pero nada la escribe
             # todavía, ver PENDIENTES.md) ---
             cursor.execute(
                 """
@@ -4136,15 +2034,24 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 FROM alerts
                 JOIN alert_rule ON alert_rule.alert_id = alerts.id
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE heuristic_rules.name = 'acceso_honeyfile'
+                WHERE heuristic_rules.name = 'Acceso Honeyfile'
                   AND alerts.created_at >= date_trunc('day', CURRENT_TIMESTAMP);
                 """
             )
             honeyfiles_activated_today = cursor.fetchone()[0]
 
-            # --- Distribución de riesgo por endpoint (mismo criterio
-            # que dashboard_page: peor severidad entre sus alertas
-            # abiertas; 'normal' = sin ninguna alerta abierta) ---
+            # Catálogo real de severity_levels, ordenado por min_score
+            # (Bajo -> Crítico) -- fuente única para todo lo que sigue
+            # en esta función: nombres, orden y color. Nada de esto se
+            # hardcodea en Python.
+            cursor.execute("SELECT id, name, min_score FROM severity_levels ORDER BY min_score;")
+            severity_catalog_rows = cursor.fetchall()
+            severity_names_by_min_score = {row[2]: row[1] for row in severity_catalog_rows}
+            lowest_severity_name = severity_catalog_rows[0][1]
+
+            # --- Distribución de riesgo por endpoint (peor severidad
+            # entre sus alertas abiertas; el nivel más bajo del
+            # catálogo = sin ninguna alerta abierta) ---
             cursor.execute(
                 """
                 SELECT severity_levels.name, COUNT(DISTINCT alerts.agent_id)
@@ -4155,33 +2062,26 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 """
             )
             severity_rows = dict(cursor.fetchall())
-            critical_n = severity_rows.get("CRITICAL", 0)
-            high_n = severity_rows.get("HIGH", 0)
-            suspicious_n = severity_rows.get("SUSPICIOUS", 0)
 
             cursor.execute("SELECT COUNT(DISTINCT agent_id) FROM alerts WHERE status = 'NEW';")
             agents_with_open_alerts = cursor.fetchone()[0]
-            normal_n = max(endpoints_total - agents_with_open_alerts, 0)
+            severity_rows[lowest_severity_name] = severity_rows.get(lowest_severity_name, 0) + max(
+                endpoints_total - agents_with_open_alerts, 0
+            )
 
             risk_distribution = [
-                {"level": "NORMAL", "label": "Bajo", "count": normal_n, "color": RISK_COLOR_HEX["NORMAL"]},
-                {"level": "SUSPICIOUS", "label": "Medio", "count": suspicious_n, "color": RISK_COLOR_HEX["SUSPICIOUS"]},
-                {"level": "HIGH", "label": "Alto", "count": high_n, "color": RISK_COLOR_HEX["HIGH"]},
-                {"level": "CRITICAL", "label": "Crítico", "count": critical_n, "color": RISK_COLOR_HEX["CRITICAL"]},
+                {"level": name, "count": severity_rows.get(name, 0), "color": RISK_COLOR_HEX.get(name, "#6b7280")}
+                for _, name, _ in severity_catalog_rows
             ]
 
-            # --- Endpoints que requieren atención ---
+            # --- Endpoints que requieren atención -- MAX(min_score) en
+            # vez de un CASE con nombres hardcodeados: el "peor" nivel
+            # de cada endpoint se calcula con el orden real del
+            # catálogo (severity_names_by_min_score de arriba). ---
             cursor.execute(
                 """
                 SELECT endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at,
-                       MAX(
-                           CASE severity_levels.name
-                               WHEN 'CRITICAL' THEN 4
-                               WHEN 'HIGH' THEN 3
-                               WHEN 'SUSPICIOUS' THEN 2
-                               ELSE 1
-                           END
-                       ) AS risk_rank,
+                       MAX(severity_levels.min_score) AS risk_min_score,
                        COUNT(*) AS alert_count
                 FROM alerts
                 JOIN agents ON agents.id = alerts.agent_id
@@ -4189,18 +2089,17 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
                 WHERE alerts.status = 'NEW'
                 GROUP BY endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at
-                ORDER BY risk_rank DESC, alert_count DESC
+                ORDER BY risk_min_score DESC, alert_count DESC
                 LIMIT 5;
                 """
             )
-            rank_labels = {4: "CRITICAL", 3: "HIGH", 2: "SUSPICIOUS", 1: "NORMAL"}
             endpoints_at_risk = [
                 {
                     "hostname": r[0],
                     "os": r[1],
                     "status": r[2],
                     "last_seen_ago": time_ago(r[3]),
-                    "severity": rank_labels[r[4]],
+                    "severity": severity_names_by_min_score[r[4]],
                     "alerts_count": r[5],
                 }
                 for r in cursor.fetchall()
@@ -4237,7 +2136,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
 
             # --- Honeyfiles: resumen + últimas activaciones. El
             # nombre de archivo puntual no está disponible todavía: la
-            # alerta de acceso_honeyfile no incluye qué archivo fue
+            # alerta de "Acceso Honeyfile" no incluye qué archivo fue
             # (el agente no lo manda en el payload hoy), así que
             # 'file_name' va null en vez de inventado -- ver
             # PENDIENTES.md.
@@ -4252,7 +2151,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE heuristic_rules.name = 'acceso_honeyfile'
+                WHERE heuristic_rules.name = 'Acceso Honeyfile'
                 ORDER BY alerts.created_at DESC
                 LIMIT 5;
                 """
@@ -4468,7 +2367,7 @@ def api_dashboard_activity_series(
                 FROM alerts
                 JOIN alert_rule ON alert_rule.alert_id = alerts.id
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE heuristic_rules.name = 'acceso_honeyfile'
+                WHERE heuristic_rules.name = 'Acceso Honeyfile'
                   AND alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'
                 GROUP BY bucket;
                 """
@@ -4511,16 +2410,16 @@ def api_dashboard_activity_series(
 def api_endpoints(
     search: str = "",
     status: str = Query("", pattern="^(ONLINE|OFFLINE|ISOLATED|)$"),
-    risk: str = Query("", pattern="^(NORMAL|SUSPICIOUS|HIGH|CRITICAL|)$"),
+    risk: str = Query("", pattern="^(BAJO|MEDIO|ALTO|CRÍTICO|)$"),
     os_family: str = "",
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     user: dict = Depends(get_current_user)
 ):
-    """Lista de endpoints para la pantalla Endpoints en React. Mismas
-    tablas y el mismo _endpoint_cte() que ya usa /endpoints (Jinja2) --
-    no es una fuente de verdad paralela, cualquier cambio de regla de
-    negocio ahí hay que replicarlo acá.
+    """Lista de endpoints para la pantalla Endpoints en React. Usa el
+    mismo _endpoint_cte() que el resto de las vistas de riesgo por
+    endpoint (mismo criterio en todo el sistema, un solo camino de
+    código).
 
     Diferencia real a propósito: acá "Estado" tiene un solo valor de
     cara al usuario (ONLINE/OFFLINE/ISOLATED, con ISOLATED con
@@ -4579,7 +2478,7 @@ def api_endpoints(
                     COUNT(*) FILTER (WHERE conn_status = 'ONLINE') AS online_n,
                     COUNT(*) FILTER (WHERE conn_status = 'OFFLINE') AS offline_n,
                     COUNT(*) FILTER (WHERE conn_status = 'ISOLATED') AS isolated_n,
-                    COUNT(*) FILTER (WHERE risk_bucket = 'CRITICAL') AS critical_n
+                    COUNT(*) FILTER (WHERE risk_bucket = 'CRÍTICO') AS critical_n
                 FROM endpoint_view;
                 """
             )
@@ -4642,7 +2541,6 @@ def api_endpoints(
             "ip_address": str(r[4]) if r[4] else "127.0.0.1",
             "conn_status": r[5],
             "risk": r[6],
-            "risk_label": RISK_LABELS_ES[r[6]],
             "agent_health": agent_health_map[r[7]],
             "last_seen_ago": time_ago(r[8]),
             "alerts_count": r[9],
@@ -4666,93 +2564,6 @@ def api_endpoints(
         "filtered_total": filtered_total,
         "endpoints": endpoints,
     }
-
-
-@app.get("/detecciones/{alert_id}")
-def deteccion_detail_page(alert_id: int, request: Request):
-    """Vista de una alerta puntual (lo que en el mockup del usuario
-    aparece como 'DET-00042'). Muestra solo lo que realmente
-    guardamos: no inventamos proceso/PID porque el agente todavía no
-    correla eventos con el proceso responsable (tarea pendiente)."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT alerts.id, severity_levels.name, alerts.title, alerts.description,
-                       alerts.risk_score, alerts.status, alerts.created_at,
-                       agents.id, endpoints.hostname, endpoints.os,
-                       heuristic_rules.name, alerts.incident_id
-                FROM alerts
-                JOIN agents ON agents.id = alerts.agent_id
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE alerts.id = %s;
-                """,
-                (alert_id,)
-            )
-
-            row = cursor.fetchone()
-
-            if row is None:
-                raise HTTPException(status_code=404, detail="Detección no encontrada")
-
-    finally:
-        connection.close()
-
-    # "Eventos relacionados" (alert_events), "Notas del analista"
-    # (alert_notes) y "Honeyfile relacionado" (cruce vía
-    # alerts.details->>'last_file') se sacaron: ninguna de esas tres
-    # tablas/columnas existe en la nueva estructura -- decisión
-    # explícita de adoptarla tal cual. Ver PENDIENTES.md.
-    notes = []
-    related_events = []
-    related_events_total = 0
-    related_honeyfile = None
-
-    detection = {
-        "id": row[0],
-        "severity": row[1],
-        "severity_label": ALERT_SEVERITY_LABELS_ES.get(row[1], row[1]),
-        "title": row[2],
-        "description": row[3],
-        "risk_score": row[4],
-        "status": row[5],
-        "status_label": ALERT_STATUS_LABELS_ES.get(row[5], row[5]),
-        "created_at": row[6],
-        "agent_id": row[7],
-        "hostname": row[8],
-        "operating_system": row[9],
-        "rule_name": row[10],
-        "rule_label": row[10] or "—",
-        "is_honeyfile": row[10] == "acceso_honeyfile"
-    }
-
-    return templates.TemplateResponse(
-        request,
-        "deteccion_detail.html",
-        {
-            "user": user,
-            "active_page": "detecciones",
-            "d": detection,
-            "existing_incident_id": row[11],
-            "related_events": related_events,
-            "related_events_total": related_events_total,
-            "related_honeyfile": related_honeyfile,
-            "notes": notes,
-            "status_options": ALERT_STATUS_LABELS_ES
-        }
-    )
 
 
 @app.post("/incidents")
@@ -4821,49 +2632,6 @@ def create_incident(
         return {
             "message": "Incidente creado",
             "incident_id": incident_id
-        }
-
-    finally:
-        connection.close()
-
-
-@app.post("/incidents/{incident_id}/alerts")
-def link_incident_alert(
-    incident_id: int,
-    payload: IncidentAlertLink,
-    user: dict = Depends(get_current_user)
-):
-    """Vincula una detección adicional a un incidente ya existente --
-    esto es lo que permite que un incidente agrupe varias detecciones
-    relacionadas. Con 'alerts.incident_id' como FK directa, esto es
-    simplemente reasignar esa columna (una alerta solo puede estar en
-    un incidente a la vez)."""
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute("SELECT id FROM incidents WHERE id = %s;", (incident_id,))
-            if cursor.fetchone() is None:
-                raise HTTPException(status_code=404, detail="Incidente no encontrado")
-
-            cursor.execute(
-                "UPDATE alerts SET incident_id = %s WHERE id = %s RETURNING id;",
-                (incident_id, payload.alert_id)
-            )
-
-            linked = cursor.fetchone()
-
-            if linked is None:
-                raise HTTPException(status_code=404, detail="Detección no encontrada")
-
-            connection.commit()
-
-        return {
-            "message": "Detección vinculada",
-            "incident_id": incident_id,
-            "alert_id": payload.alert_id
         }
 
     finally:
@@ -5088,7 +2856,7 @@ def api_rules(user: dict = Depends(get_current_user)):
             # dos sets -- una sola fuente de verdad, la misma que ya
             # usa PATCH /rules/{id} para bloquear ediciones inválidas.
             "is_deferred": r[1] in DEFERRED_RULE_NAMES,
-            "is_honeyfile": r[1] == "acceso_honeyfile",
+            "is_honeyfile": r[1] == "Acceso Honeyfile",
             "has_fixed_scoring": r[1] in FIXED_SCORING_RULE_NAMES,
         }
         for r in rows
@@ -5170,7 +2938,7 @@ def update_rule(
             if old_name in FIXED_SCORING_RULE_NAMES and (
                 payload.weight is not None or payload.threshold is not None or payload.window_seconds is not None
             ):
-                if old_name == "acceso_honeyfile":
+                if old_name == "Acceso Honeyfile":
                     reason = (
                         "El peso de esta regla es fijo (100): cualquier interacción con un "
                         "honeyfile debe llevar el riesgo a CRÍTICO sin depender de otras reglas. "
@@ -5253,6 +3021,296 @@ def update_rule(
             "updated_at": updated[6].strftime("%d/%m/%Y %H:%M:%S") if updated[6] else None,
         }
 
+    finally:
+        connection.close()
+
+
+@app.get("/api/agents/{agent_id}/rules")
+def api_agent_rules(agent_id: int, user: dict = Depends(get_current_user)):
+    """Configuración de reglas heurísticas para UN endpoint puntual
+    (2026-08-16, ver PENDIENTES.md). Pantalla: Endpoints -> detalle de
+    un endpoint -> "Configuración de reglas". Para cada una de las 12
+    reglas devuelve el valor GLOBAL ('heuristic_rules'), el override
+    puntual si existe ('agent_rule' para este agent_id) y el valor
+    EFECTIVO resultante (el mismo que usan GET /agent/rule-policy y
+    POST /agent/alerts) -- para que la interfaz pueda mostrar
+    claramente "Valor global" vs "Valor personalizado" en vez de
+    obligar al analista a calcular la herencia a mano."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute("SELECT agents.id, endpoints.hostname FROM agents JOIN endpoints ON endpoints.id = agents.endpoint_id WHERE agents.id = %s;", (agent_id,))
+            agent_row = cursor.fetchone()
+            if agent_row is None:
+                raise HTTPException(status_code=404, detail="Agente no encontrado")
+
+            cursor.execute(
+                _effective_agent_rules_cte() + """
+                SELECT
+                    effective_rules.id,
+                    effective_rules.name,
+                    effective_rules.description,
+                    event_types.name,
+                    event_types.description,
+                    metric_types.name,
+                    effective_rules.global_weight,
+                    effective_rules.global_threshold,
+                    effective_rules.global_window_seconds,
+                    effective_rules.global_is_active,
+                    effective_rules.override_id,
+                    effective_rules.override_weight,
+                    effective_rules.override_threshold,
+                    effective_rules.override_window_seconds,
+                    effective_rules.override_is_active,
+                    effective_rules.effective_weight,
+                    effective_rules.effective_threshold,
+                    effective_rules.effective_window_seconds,
+                    effective_rules.effective_is_active
+                FROM effective_rules
+                LEFT JOIN event_types ON event_types.id = effective_rules.event_type_id
+                LEFT JOIN metric_types ON metric_types.id = effective_rules.metric_type_id
+                ORDER BY effective_rules.global_weight DESC, effective_rules.name ASC;
+                """,
+                {"agent_id": agent_id}
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    rules = [
+        {
+            "id": r[0],
+            "name": r[1],
+            "description": r[2],
+            "event_type_name": r[3],
+            "event_type_label": r[4] if r[3] else "Cualquiera en la ventana",
+            "metric_type_name": r[5],
+            "global": {
+                "weight": float(r[6]),
+                "threshold": float(r[7]),
+                "window_seconds": r[8],
+                "is_active": r[9],
+            },
+            "override": (
+                {
+                    "id": r[10],
+                    "weight": float(r[11]) if r[11] is not None else None,
+                    "threshold": float(r[12]) if r[12] is not None else None,
+                    "window_seconds": r[13],
+                    "is_active": r[14],
+                }
+                if r[10] is not None else None
+            ),
+            "effective": {
+                "weight": float(r[15]),
+                "threshold": float(r[16]),
+                "window_seconds": r[17],
+                "is_active": r[18],
+            },
+            "has_override": r[10] is not None,
+            "is_deferred": r[1] in DEFERRED_RULE_NAMES,
+            "is_honeyfile": r[1] == "Acceso Honeyfile",
+            "has_fixed_scoring": r[1] in FIXED_SCORING_RULE_NAMES,
+        }
+        for r in rows
+    ]
+
+    return {
+        "agent_id": agent_row[0],
+        "hostname": agent_row[1],
+        "rules": rules,
+    }
+
+
+@app.patch("/api/agents/{agent_id}/rules/{rule_id}")
+def update_agent_rule(
+    agent_id: int,
+    rule_id: int,
+    payload: AgentRuleUpdate,
+    user: dict = Depends(get_current_user)
+):
+    """Crea o actualiza el override de UNA regla para UN endpoint
+    (tabla 'agent_rule', sección 24/25 de la especificación -- no se
+    crea ninguna tabla nueva). Semántica de PATCH parcial con NULL
+    significativo (ver AgentRuleUpdate): un campo AUSENTE del body no
+    se toca; un campo presente con valor 'null' se guarda como NULL en
+    'agent_rule' (= "volver a heredar el valor global para ese campo
+    puntual"); un campo presente con un valor concreto lo reemplaza.
+    'is_active' es la excepción -- la columna no admite NULL (ver
+    schema), así que mandarlo en null es un error de validación, no
+    una instrucción de herencia."""
+
+    fields_set = payload.model_fields_set
+
+    if not fields_set:
+        raise HTTPException(status_code=422, detail="Nada para actualizar")
+
+    if "is_active" in fields_set and payload.is_active is None:
+        raise HTTPException(
+            status_code=422,
+            detail="'is_active' no puede ser null -- mandá true o false explícito, o simplemente no lo incluyas en el body."
+        )
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute("SELECT id FROM agents WHERE id = %s;", (agent_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Agente no encontrado")
+
+            cursor.execute(
+                "SELECT name, weight, threshold, window_seconds, is_active FROM heuristic_rules WHERE id = %s;",
+                (rule_id,)
+            )
+            rule_row = cursor.fetchone()
+            if rule_row is None:
+                raise HTTPException(status_code=404, detail="Regla no encontrada")
+
+            rule_name = rule_row[0]
+
+            # Mismas dos restricciones que PATCH /rules/{id} (sección 19
+            # de la especificación): HR-03/HR-12 no admiten
+            # personalizar weight/threshold/window ni a nivel global ni
+            # por endpoint -- solo pueden encenderse/apagarse. Y una
+            # regla diferida (capacidad que el agente todavía no tiene)
+            # no se puede activar desde ningún lado, para no sugerir
+            # una funcionalidad que no existe.
+            if rule_name in FIXED_SCORING_RULE_NAMES and fields_set & {"weight", "threshold", "window_seconds"}:
+                if rule_name == "Acceso Honeyfile":
+                    reason = (
+                        "El peso de esta regla es fijo (100): cualquier interacción con un "
+                        "honeyfile debe llevar el riesgo a CRÍTICO sin depender de otras reglas. "
+                        "Para este endpoint solo se puede activar o desactivar, no ajustar su "
+                        "peso/umbral/ventana."
+                    )
+                else:
+                    reason = (
+                        "Esta regla no puntúa por umbral/ventana: es una bonificación de "
+                        "correlación calculada por el servidor. Para este endpoint solo se puede "
+                        "activar o desactivar, no ajustar su peso/umbral/ventana."
+                    )
+                raise HTTPException(status_code=422, detail=reason)
+
+            if "is_active" in fields_set and payload.is_active is True and rule_name in DEFERRED_RULE_NAMES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Esta regla está diferida: requiere datos que el agente no recopila hoy. "
+                        "Activarla para este endpoint no haría que el agente empiece a evaluarla."
+                    )
+                )
+
+            if "weight" in fields_set and payload.weight is not None and payload.weight < 0:
+                raise HTTPException(status_code=422, detail="El peso tiene que ser mayor o igual a 0")
+
+            if "threshold" in fields_set and payload.threshold is not None and payload.threshold < 0:
+                raise HTTPException(status_code=422, detail="El umbral tiene que ser mayor o igual a 0")
+
+            if "window_seconds" in fields_set and payload.window_seconds is not None and payload.window_seconds <= 0:
+                raise HTTPException(status_code=422, detail="La ventana tiene que ser mayor a 0 segundos")
+
+            cursor.execute(
+                "SELECT id, threshold, window_seconds, weight, is_active FROM agent_rule WHERE agent_id = %s AND rule_id = %s;",
+                (agent_id, rule_id)
+            )
+            existing = cursor.fetchone()
+
+            if existing is None:
+                final_threshold = payload.threshold if "threshold" in fields_set else None
+                final_window = payload.window_seconds if "window_seconds" in fields_set else None
+                final_weight = payload.weight if "weight" in fields_set else None
+                final_is_active = payload.is_active if "is_active" in fields_set else True
+
+                cursor.execute(
+                    """
+                    INSERT INTO agent_rule (agent_id, rule_id, threshold, window_seconds, weight, is_active)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id, threshold, window_seconds, weight, is_active;
+                    """,
+                    (agent_id, rule_id, final_threshold, final_window, final_weight, final_is_active)
+                )
+                action = "CREATE_AGENT_RULE_OVERRIDE"
+            else:
+                override_id, old_threshold, old_window, old_weight, old_is_active = existing
+                final_threshold = payload.threshold if "threshold" in fields_set else old_threshold
+                final_window = payload.window_seconds if "window_seconds" in fields_set else old_window
+                final_weight = payload.weight if "weight" in fields_set else old_weight
+                final_is_active = payload.is_active if "is_active" in fields_set else old_is_active
+
+                cursor.execute(
+                    """
+                    UPDATE agent_rule
+                    SET threshold = %s, window_seconds = %s, weight = %s, is_active = %s
+                    WHERE id = %s
+                    RETURNING id, threshold, window_seconds, weight, is_active;
+                    """,
+                    (final_threshold, final_window, final_weight, final_is_active, override_id)
+                )
+                action = "UPDATE_AGENT_RULE_OVERRIDE"
+
+            updated = cursor.fetchone()
+
+            log_audit(
+                cursor, user["id"], action, "agent_rule", updated[0],
+                f"{rule_name} (agent_id={agent_id}): threshold={updated[1]}, window_seconds={updated[2]}, "
+                f"weight={updated[3]}, is_active={updated[4]}"
+            )
+
+            connection.commit()
+
+        return {
+            "message": "Configuración del endpoint actualizada",
+            "override": {
+                "id": updated[0],
+                "threshold": float(updated[1]) if updated[1] is not None else None,
+                "window_seconds": updated[2],
+                "weight": float(updated[3]) if updated[3] is not None else None,
+                "is_active": updated[4],
+            },
+        }
+
+    finally:
+        connection.close()
+
+
+@app.delete("/api/agents/{agent_id}/rules/{rule_id}")
+def delete_agent_rule(agent_id: int, rule_id: int, user: dict = Depends(get_current_user)):
+    """Quita el override por completo -- el endpoint vuelve a heredar
+    el valor global de la regla en los cuatro campos (no solo se
+    resetean uno por uno, se elimina la fila entera de 'agent_rule')."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                "SELECT heuristic_rules.name FROM heuristic_rules WHERE heuristic_rules.id = %s;",
+                (rule_id,)
+            )
+            rule_row = cursor.fetchone()
+            rule_name = rule_row[0] if rule_row else f"id={rule_id}"
+
+            cursor.execute(
+                "DELETE FROM agent_rule WHERE agent_id = %s AND rule_id = %s RETURNING id;",
+                (agent_id, rule_id)
+            )
+            deleted = cursor.fetchone()
+
+            if deleted is None:
+                raise HTTPException(status_code=404, detail="Este endpoint no tiene una configuración personalizada para esa regla")
+
+            log_audit(
+                cursor, user["id"], "DELETE_AGENT_RULE_OVERRIDE", "agent_rule", deleted[0],
+                f"{rule_name} (agent_id={agent_id}): override eliminado, vuelve a heredar el valor global"
+            )
+
+            connection.commit()
+
+        return {"message": "Configuración personalizada eliminada -- este endpoint vuelve a usar el valor global"}
     finally:
         connection.close()
 
@@ -5373,107 +3431,6 @@ def update_incident_classification(
         connection.close()
 
 
-@app.patch("/incidents/{incident_id}/description")
-def update_incident_description(
-    incident_id: int,
-    payload: IncidentDescriptionUpdate,
-    user: dict = Depends(get_current_user)
-):
-    """El resumen inicial lo arma el sistema a partir de la alerta que
-    disparó el incidente, pero el analista tiene que poder corregirlo
-    o ampliarlo con lo que va encontrando."""
-
-    description = payload.description.strip()
-
-    if not description:
-        raise HTTPException(status_code=422, detail="La descripción no puede estar vacía")
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                UPDATE incidents
-                SET description = %s
-                WHERE id = %s
-                RETURNING id;
-                """,
-                (description, incident_id)
-            )
-
-            updated = cursor.fetchone()
-
-            if updated is None:
-                raise HTTPException(status_code=404, detail="Incidente no encontrado")
-
-            connection.commit()
-
-        return {"message": "Descripción actualizada", "incident_id": incident_id, "description": description}
-
-    finally:
-        connection.close()
-
-
-@app.patch("/alerts/{alert_id}/status")
-def update_alert_status(
-    alert_id: int,
-    payload: AlertStatusUpdate,
-    user: dict = Depends(get_current_user)
-):
-    """Cambia el estado de una detección. Antes de este endpoint,
-    'alerts.status' se ponía en INSERT y no lo tocaba nada más -- toda
-    alerta se quedaba en NEW para siempre. Esto es lo que hace real el
-    ciclo de vida Nueva -> En investigación -> Confirmada/Falso
-    positivo -> Cerrada. 'alerts.resolved_at' (columna nueva de
-    alfa_sentinel) se completa al cerrar/marcar falso positivo y se
-    limpia si se reabre, mismo criterio que 'incidents.closed_at'."""
-
-    if payload.status not in ALERT_STATUS_LABELS_ES:
-        raise HTTPException(status_code=422, detail="Estado inválido")
-
-    resolved_statuses = ("CLOSED", "FALSE_POSITIVE")
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                UPDATE alerts
-                SET status = %s,
-                    resolved_at = CASE WHEN %s THEN CURRENT_TIMESTAMP ELSE NULL END
-                WHERE id = %s
-                RETURNING id;
-                """,
-                (payload.status, payload.status in resolved_statuses, alert_id)
-            )
-
-            updated = cursor.fetchone()
-
-            if updated is None:
-                raise HTTPException(status_code=404, detail="Detección no encontrada")
-
-            log_audit(
-                cursor, user["id"], "UPDATE_ALERT_STATUS", "alerts", alert_id,
-                f"Estado -> {payload.status}"
-            )
-
-            connection.commit()
-
-        return {
-            "message": "Estado actualizado",
-            "alert_id": alert_id,
-            "status": payload.status,
-            "status_label": ALERT_STATUS_LABELS_ES[payload.status]
-        }
-
-    finally:
-        connection.close()
-
-
 # Notas de analista sobre detecciones/incidentes (alert_notes,
 # incident_notes) y "Responsable" de incidente (assigned_to/
 # assigned_at) se sacaron: esas tablas/columnas no existen en la
@@ -5502,10 +3459,7 @@ INCIDENT_CTE = """
                    SELECT severity_levels.name FROM alerts
                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
                    WHERE alerts.incident_id = incidents.id
-                   ORDER BY CASE severity_levels.name
-                       WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3
-                       WHEN 'SUSPICIOUS' THEN 2 ELSE 1
-                   END DESC
+                   ORDER BY severity_levels.min_score DESC
                    LIMIT 1
                ) AS severity,
                (
@@ -5550,10 +3504,7 @@ COMBINED_CTE = """
                 SELECT severity_levels.name FROM alerts
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
                 WHERE alerts.incident_id = incidents.id
-                ORDER BY CASE severity_levels.name
-                    WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3
-                    WHEN 'SUSPICIOUS' THEN 2 ELSE 1
-                END DESC LIMIT 1
+                ORDER BY severity_levels.min_score DESC LIMIT 1
             ) AS severity,
             (
                 SELECT COALESCE(MAX(alerts.risk_score), 0) FROM alerts
@@ -5609,231 +3560,6 @@ STATUS_BUCKET_LABELS_ES = {
 }
 
 
-@app.get("/incidentes")
-def incidentes_page(
-    request: Request,
-    agent_id: int | None = Query(None),
-    status_bucket: str = Query("", alias="status"),
-    severity: str = Query(""),
-    rule: str = Query(""),
-    since: str = Query(""),
-    search: str = Query(""),
-    page: int = Query(1, ge=1)
-):
-    """Centro de investigación y respuesta: una sola matriz con
-    incidentes ya agrupados (varias detecciones relacionadas) y
-    alertas todavía sueltas (sin escalar a incidente). Antes eran dos
-    pantallas separadas -- Detecciones (alertas) e Incidentes -- ver
-    PENDIENTES.md, 'Unificación de Incidentes y Alertas'."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    status_bucket = status_bucket if status_bucket in STATUS_BUCKET_LABELS_ES else ""
-    severity = severity if severity in ALERT_SEVERITY_LABELS_ES else ""
-    since = since if since in INCIDENTES_SINCE_OPTIONS else ""
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            # Nombres reales de heuristic_rules -- no un diccionario
-            # hardcodeado paralelo (ver PENDIENTES.md, auditoría de
-            # catálogos duplicados, 2026-08-16). Se usan tanto para
-            # validar el filtro 'rule' como para armar el selector.
-            cursor.execute("SELECT name FROM heuristic_rules ORDER BY name;")
-            rule_options = {row[0]: row[0] for row in cursor.fetchall()}
-            rule = rule if rule in rule_options else ""
-
-            where_clauses = []
-            params = {}
-
-            if agent_id:
-                where_clauses.append("agent_id = %(agent_id)s")
-                params["agent_id"] = agent_id
-
-            if status_bucket:
-                where_clauses.append("status_bucket = %(status_bucket)s")
-                params["status_bucket"] = status_bucket
-
-            if severity:
-                where_clauses.append("severity = %(severity)s")
-                params["severity"] = severity
-
-            if rule:
-                where_clauses.append("rule_names ILIKE %(rule)s")
-                params["rule"] = f"%{rule}%"
-
-            if since:
-                where_clauses.append("ts >= CURRENT_TIMESTAMP - INTERVAL %(since_interval)s")
-                params["since_interval"] = INCIDENTES_SINCE_OPTIONS[since][1]
-
-            if search:
-                where_clauses.append(
-                    "(hostname ILIKE %(search)s OR CAST(ip_address AS TEXT) ILIKE %(search)s "
-                    "OR rule_names ILIKE %(search)s OR CAST(id AS TEXT) ILIKE %(search)s)"
-                )
-                params["search"] = f"%{search}%"
-
-            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-
-            # KPIs -- siempre globales, sin filtrar (mismo criterio
-            # que el resto de las listas).
-            cursor.execute(
-                COMBINED_CTE + "SELECT COUNT(*) FROM combined WHERE kind = 'incident' AND severity = 'CRITICAL' AND raw_status != 'CLOSED';"
-            )
-            critical_incidents = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM alerts WHERE status IN ('NEW', 'ACKNOWLEDGED');"
-            )
-            active_alerts = cursor.fetchone()[0]
-
-            # 'host_isolations' no lo escribe nada todavía (el agente
-            # no tiene forma de aislar una red -- ver PENDIENTES.md).
-            # Se cuenta igual, de verdad: hoy siempre da 0, y el día
-            # que exista aislamiento real este número deja de ser 0
-            # solo, sin tocar la consulta.
-            cursor.execute(
-                "SELECT COUNT(*) FROM host_isolations WHERE released_at IS NULL;"
-            )
-            isolated_hosts = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
-                FROM alerts WHERE resolved_at IS NOT NULL;
-                """
-            )
-            mttr_row = cursor.fetchone()
-            mttr_seconds = mttr_row[0] if mttr_row else None
-            mttr_minutes = round(mttr_seconds / 60, 1) if mttr_seconds is not None else None
-
-            cursor.execute(
-                "SELECT agents.id, endpoints.hostname FROM agents "
-                "JOIN endpoints ON endpoints.id = agents.endpoint_id ORDER BY endpoints.hostname;"
-            )
-            endpoint_options = cursor.fetchall()
-
-            cursor.execute("SELECT id, full_name FROM users ORDER BY full_name;")
-            assignable_users = [{"id": r[0], "full_name": r[1]} for r in cursor.fetchall()]
-
-            count_params = dict(params)
-            cursor.execute(
-                COMBINED_CTE + f"SELECT COUNT(*) FROM combined {where_sql};",
-                count_params
-            )
-            filtered_total = cursor.fetchone()[0]
-
-            total_pages = max(1, -(-filtered_total // INCIDENTES_PAGE_SIZE))
-            current_page = min(page, total_pages)
-            offset = (current_page - 1) * INCIDENTES_PAGE_SIZE
-
-            page_params = dict(params)
-            page_params["limit"] = INCIDENTES_PAGE_SIZE
-            page_params["offset"] = offset
-
-            cursor.execute(
-                COMBINED_CTE + f"""
-                SELECT kind, id, ts, raw_status, status_bucket, hostname, ip_address,
-                       agent_id, severity, risk_score, rule_names, detection_count,
-                       assigned_to, assigned_to_name
-                FROM combined
-                {where_sql}
-                ORDER BY ts DESC
-                LIMIT %(limit)s OFFSET %(offset)s;
-                """,
-                page_params
-            )
-
-            rows = cursor.fetchall()
-
-            filtered_hostname = None
-
-            if agent_id:
-                cursor.execute(
-                    "SELECT endpoints.hostname FROM agents "
-                    "JOIN endpoints ON endpoints.id = agents.endpoint_id WHERE agents.id = %s;",
-                    (agent_id,)
-                )
-                hostname_row = cursor.fetchone()
-                filtered_hostname = hostname_row[0] if hostname_row else None
-
-    finally:
-        connection.close()
-
-    items = []
-    for row in rows:
-        (kind, item_id, ts, raw_status, bucket, hostname, ip_address, item_agent_id,
-         severity_val, risk_score, rule_names, detection_count, assigned_to, assigned_to_name) = row
-
-        items.append({
-            "kind": kind,
-            "id": item_id,
-            "code": f"INC-{item_id:05d}" if kind == "incident" else f"ALT-{item_id:05d}",
-            "detail_url": f"/incidentes/{item_id}" if kind == "incident" else f"/detecciones/{item_id}",
-            "ts": ts,
-            "raw_status": raw_status,
-            "status_bucket": bucket,
-            "status_label": (INCIDENT_STATUS_LABELS_ES.get(raw_status, raw_status) if kind == "incident"
-                              else ALERT_STATUS_LABELS_ES.get(raw_status, raw_status)),
-            "hostname": hostname,
-            "ip_address": str(ip_address) if ip_address else "127.0.0.1",
-            "agent_id": item_agent_id,
-            "severity": severity_val,
-            "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity_val, severity_val or "—"),
-            "risk_score": risk_score,
-            "rule_label": " + ".join(
-                n for n in (rule_names or "").split(" + ") if n
-            ) or "—",
-            "detection_count": detection_count,
-            "assigned_to": assigned_to,
-            "assigned_to_name": assigned_to_name
-        })
-
-    base_filters = {k: v for k, v in {
-        "agent_id": agent_id, "status": status_bucket, "severity": severity,
-        "rule": rule, "since": since, "search": search
-    }.items() if v}
-    filter_qs = urlencode(base_filters)
-
-    return templates.TemplateResponse(
-        request,
-        "incidentes.html",
-        {
-            "user": user,
-            "active_page": "incidentes",
-            "items": items,
-            "critical_incidents": critical_incidents,
-            "active_alerts": active_alerts,
-            "isolated_hosts": isolated_hosts,
-            "mttr_minutes": mttr_minutes,
-            "endpoint_options": endpoint_options,
-            "assignable_users": assignable_users,
-            "status_options": STATUS_BUCKET_LABELS_ES,
-            "incident_status_options": INCIDENT_STATUS_LABELS_ES,
-            "alert_status_options": ALERT_STATUS_LABELS_ES,
-            "severity_options": ALERT_SEVERITY_LABELS_ES,
-            "rule_options": rule_options,
-            "since_options": INCIDENTES_SINCE_OPTIONS,
-            "current_status": status_bucket,
-            "current_severity": severity,
-            "current_rule": rule,
-            "current_since": since,
-            "current_search": search,
-            "filter_qs": filter_qs,
-            "current_page": current_page,
-            "total_pages": total_pages,
-            "filtered_total": filtered_total,
-            "filtered_agent_id": agent_id,
-            "filtered_hostname": filtered_hostname
-        }
-    )
-
-
 @app.get("/api/incidentes")
 def api_incidentes(
     agent_id: int | None = Query(None),
@@ -5845,16 +3571,14 @@ def api_incidentes(
     page: int = Query(1, ge=1),
     user: dict = Depends(get_current_user)
 ):
-    """Versión JSON de /incidentes (Jinja2) para la pantalla Incidentes
-    en React -- misma consulta (COMBINED_CTE), mismos filtros, mismos
-    KPIs. No es una fuente de verdad paralela: se reusa la función de
-    armado de filtros/paginación tal cual la usa incidentes_page.
+    """API para la pantalla Incidentes en React -- misma consulta
+    (COMBINED_CTE), mismos filtros, mismos KPIs que ya usa la matriz
+    combinada de incidentes/alertas (ver COMBINED_CTE más arriba).
 
-    A diferencia de la vista Jinja2 (que unifica incidentes agrupados
-    y alertas sueltas en una sola matriz), esta pantalla en React
-    muestra solo incidentes agrupados -- pedido explícito (2026-08-15)
-    para que la lista sea más rápida de leer. Las alertas sueltas ya
-    tienen su propia pantalla dedicada (Alertas)."""
+    A propósito solo devuelve incidentes agrupados, no alertas sueltas
+    -- pedido explícito (2026-08-15) para que la lista sea más rápida
+    de leer. Las alertas sueltas ya tienen su propia pantalla dedicada
+    (Alertas)."""
 
     # Solo los 4 buckets que de verdad puede tener un incidente
     # (OPEN/IN_PROGRESS/CONTAINED/CLOSED) -- 'confirmado' y
@@ -5864,18 +3588,25 @@ def api_incidentes(
     INCIDENT_STATUS_BUCKETS = {"nuevo", "investigando", "contenido", "cerrado"}
 
     status_bucket = status_bucket if status_bucket in INCIDENT_STATUS_BUCKETS else ""
-    severity = severity if severity in ALERT_SEVERITY_LABELS_ES else ""
     since = since if since in INCIDENTES_SINCE_OPTIONS else ""
 
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
 
-            # Nombres reales de heuristic_rules -- ver incidentes_page
-            # (misma razón: no mantener un diccionario paralelo).
+            # Nombres reales de heuristic_rules -- no se mantiene un
+            # diccionario paralelo (mismo criterio que en el resto del
+            # archivo, ver auditoría de catálogos duplicados).
             cursor.execute("SELECT name FROM heuristic_rules ORDER BY name;")
             rule_names_catalog = [row[0] for row in cursor.fetchall()]
             rule = rule if rule in rule_names_catalog else ""
+
+            # Igual que arriba, pero con severity_levels -- ya no hay
+            # ALERT_SEVERITY_LABELS_ES paralelo, se valida contra la
+            # tabla real, ordenada por severidad real (min_score).
+            cursor.execute("SELECT name FROM severity_levels ORDER BY min_score;")
+            severity_catalog = [row[0] for row in cursor.fetchall()]
+            severity = severity if severity in severity_catalog else ""
 
             where_clauses = ["kind = 'incident'"]
             params = {}
@@ -5905,15 +3636,15 @@ def api_incidentes(
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
             cursor.execute(
-                COMBINED_CTE + "SELECT COUNT(*) FROM combined WHERE kind = 'incident' AND severity = 'CRITICAL' AND raw_status != 'CLOSED';"
+                COMBINED_CTE + "SELECT COUNT(*) FROM combined WHERE kind = 'incident' AND severity = 'CRÍTICO' AND raw_status != 'CLOSED';"
             )
             critical_incidents = cursor.fetchone()[0]
 
             cursor.execute("SELECT COUNT(*) FROM alerts WHERE status IN ('NEW', 'ACKNOWLEDGED');")
             active_alerts = cursor.fetchone()[0]
 
-            # Ver incidentes_page: 'host_isolations' no lo escribe nada
-            # todavía, así que esto siempre da 0 hoy, de verdad.
+            # 'host_isolations' no lo escribe nada todavía, así que
+            # esto siempre da 0 hoy, de verdad.
             cursor.execute("SELECT COUNT(*) FROM host_isolations WHERE released_at IS NULL;")
             isolated_hosts = cursor.fetchone()[0]
 
@@ -5973,7 +3704,6 @@ def api_incidentes(
             "ip_address": str(ip_address) if ip_address else "127.0.0.1",
             "agent_id": item_agent_id,
             "severity": severity_val,
-            "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity_val, severity_val or "—"),
             "risk_score": float(risk_score) if risk_score is not None else None,
             "rule_label": " + ".join(
                 n for n in (rule_names or "").split(" + ") if n
@@ -5995,7 +3725,7 @@ def api_incidentes(
                 {"value": k, "label": v} for k, v in STATUS_BUCKET_LABELS_ES.items()
                 if k in INCIDENT_STATUS_BUCKETS
             ],
-            "severity_options": [{"value": k, "label": v} for k, v in ALERT_SEVERITY_LABELS_ES.items()],
+            "severity_options": [{"value": name, "label": name} for name in severity_catalog],
             "rule_options": [{"value": n, "label": n} for n in rule_names_catalog],
             "since_options": [{"value": k, "label": v[0]} for k, v in INCIDENTES_SINCE_OPTIONS.items()],
             "assignable_users": assignable_users,
@@ -6055,7 +3785,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 )
                 linked = cursor.fetchall()
                 anchor_ts = linked[0][1] if linked else opened_at
-                is_honeyfile = any(r[2] == "acceso_honeyfile" for r in linked)
+                is_honeyfile = any(r[2] == "Acceso Honeyfile" for r in linked)
                 code = f"INC-{inc_id:05d}"
                 status_label = INCIDENT_STATUS_LABELS_ES.get(status, status)
 
@@ -6079,7 +3809,6 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                         "id": origin_row[0],
                         "code": f"ALT-{origin_row[0]:05d}",
                         "severity": origin_row[3],
-                        "severity_label": ALERT_SEVERITY_LABELS_ES.get(origin_row[3], origin_row[3]),
                         "risk_score": float(origin_row[4]) if origin_row[4] is not None else None,
                     }
 
@@ -6107,7 +3836,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 
                 code = f"ALT-{alert_id:05d}"
                 status_label = ALERT_STATUS_LABELS_ES.get(status, status)
-                is_honeyfile = rule_name == "acceso_honeyfile"
+                is_honeyfile = rule_name == "Acceso Honeyfile"
                 classification = None
                 assigned_to = None
                 assigned_to_name = None
@@ -6222,7 +3951,6 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
         "status": status,
         "status_label": status_label,
         "severity": severity,
-        "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity, severity or "—"),
         "risk_score": risk_score,
         "classification": classification,
         "classification_label": INCIDENT_CLASSIFICATION_LABELS_ES.get(classification, "Sin clasificar") if kind == "incident" else None,
@@ -6255,7 +3983,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 @app.get("/api/alerts")
 def api_alerts(
     search: str = "",
-    severity: str = Query("", pattern="^(SUSPICIOUS|HIGH|CRITICAL|)$"),
+    severity: str = Query("", pattern="^(MEDIO|ALTO|CRÍTICO|)$"),
     status: str = Query("", pattern="^(NEW|ACKNOWLEDGED|ESCALATED|CLOSED|FALSE_POSITIVE|)$"),
     since: str = Query("", pattern="^(24h|7d|30d|)$"),
     rule: str = "",
@@ -6264,13 +3992,12 @@ def api_alerts(
     user: dict = Depends(get_current_user)
 ):
     """Lista dedicada de alertas para la pantalla Alertas en React --
-    a diferencia de /incidentes (Jinja2), que unifica incidentes
-    agrupados y alertas sueltas en un solo listado (COMBINED_CTE), acá
-    se listan únicamente filas de 'alerts' tal cual, sin agrupar. No
-    es una fuente de verdad paralela: mismas tablas, mismos nombres de
-    estado/severidad que el resto del sistema (ALERT_STATUS_LABELS_ES,
-    ALERT_SEVERITY_LABELS_ES).
-    """
+    a diferencia de /api/incidentes, que unifica incidentes agrupados
+    y alertas sueltas en un solo listado (COMBINED_CTE), acá se listan
+    únicamente filas de 'alerts' tal cual, sin agrupar. Mismas tablas,
+    mismos nombres de estado/severidad que el resto del sistema
+    (ALERT_STATUS_LABELS_ES; la severidad ya no tiene diccionario
+    paralelo, ver severity_levels)."""
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
@@ -6310,7 +4037,7 @@ def api_alerts(
                 SELECT
                     COUNT(DISTINCT alerts.id) AS total_n,
                     COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS active_n,
-                    COUNT(DISTINCT alerts.id) FILTER (WHERE severity_levels.name = 'CRITICAL' AND alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS critical_n,
+                    COUNT(DISTINCT alerts.id) FILTER (WHERE severity_levels.name = 'CRÍTICO' AND alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS critical_n,
                     COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS investigating_n,
                     COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status IN ('CLOSED', 'FALSE_POSITIVE')) AS resolved_n
                 {base_from};
@@ -6360,7 +4087,6 @@ def api_alerts(
         {
             "id": r[0],
             "severity": r[1],
-            "severity_label": ALERT_SEVERITY_LABELS_ES.get(r[1], r[1]),
             "title": r[2],
             "hostname": r[3],
             "risk_score": float(r[4]),
@@ -6389,236 +4115,6 @@ def api_alerts(
         "filtered_total": filtered_total,
         "alerts": alerts,
     }
-
-
-@app.get("/incidentes/{incident_id}/reporte.pdf")
-def incidente_reporte_pdf(incident_id: int, request: Request):
-    """PDF del incidente (2026-08-12), pedido junto con la unificación
-    de Incidentes y Alertas. Solo existe para incidentes agrupados, no
-    para alertas sueltas -- una alerta sin escalar no tiene 'ficha' de
-    caso todavía (el link del drawer ya queda deshabilitado para
-    kind == 'alert' en el frontend).
-
-    Todo el contenido sale de tablas reales: 'incidents', 'alerts',
-    'alert_rule'/'heuristic_rules', 'endpoints'/'agents', 'events' y
-    'honeyfile_activations'/'honeyfiles' (para el hash SHA-256, que
-    'honeyfiles.file_hash' sí guarda). Lo que el agente no reporta hoy
-    -- proceso padre, línea de comando, usuario ejecutor, hash de un
-    archivo cualquiera que no sea honeyfile, e historial de cambios de
-    estado del incidente -- se imprime como 'No disponible' en vez de
-    inventarse, siguiendo la misma regla que el resto de la consola."""
-
-    user = require_session_user(request)
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(INCIDENT_CTE + "SELECT * FROM incident_data WHERE id = %s;", (incident_id,))
-            row = cursor.fetchone()
-
-            if row is None:
-                raise HTTPException(status_code=404, detail="Incidente no encontrado")
-
-            (inc_id, title_val, description_val, status, classification, opened_at, closed_at,
-             agent_id, hostname, detection_count, severity, risk_score,
-             assigned_to, assigned_to_name) = row
-
-            cursor.execute(
-                """
-                SELECT endpoints.hostname, endpoints.ip_address, endpoints.os
-                FROM agents
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE agents.id = %s;
-                """,
-                (agent_id,)
-            )
-            ep_hostname, ep_ip, ep_os = cursor.fetchone()
-
-            cursor.execute(
-                """
-                SELECT alerts.id, alerts.title, alerts.created_at, alerts.resolved_at,
-                       alerts.status, alerts.risk_score, severity_levels.name,
-                       heuristic_rules.name, alert_rule.weight_applied
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE alerts.incident_id = %s
-                ORDER BY alerts.created_at ASC;
-                """,
-                (incident_id,)
-            )
-            linked_alerts = cursor.fetchall()
-
-            if linked_alerts:
-                window_start = min(r[2] for r in linked_alerts) - timedelta(minutes=5)
-                last_ts = max((r[3] or r[2]) for r in linked_alerts)
-                window_end = (closed_at or last_ts) + timedelta(minutes=1)
-            else:
-                window_start = opened_at - timedelta(minutes=5)
-                window_end = (closed_at or opened_at) + timedelta(minutes=1)
-
-            cursor.execute(
-                """
-                SELECT events.detected_at, event_types.name, events.process_name,
-                       events.process_id, events.file_path
-                FROM events
-                JOIN event_types ON event_types.id = events.event_type_id
-                WHERE events.agent_id = %s
-                  AND events.detected_at BETWEEN %s AND %s
-                ORDER BY events.detected_at ASC;
-                """,
-                (agent_id, window_start, window_end)
-            )
-            event_rows = cursor.fetchall()
-
-            cursor.execute(
-                """
-                SELECT honeyfile_activations.detected_at, honeyfile_activations.operation,
-                       honeyfiles.file_name, honeyfiles.file_hash,
-                       honeyfile_activations.process_name, honeyfile_activations.process_id
-                FROM honeyfile_activations
-                JOIN honeyfiles ON honeyfiles.id = honeyfile_activations.honeyfile_id
-                WHERE honeyfile_activations.agent_id = %s
-                  AND honeyfile_activations.detected_at BETWEEN %s AND %s
-                ORDER BY honeyfile_activations.detected_at ASC;
-                """,
-                (agent_id, window_start, window_end)
-            )
-            honeyfile_rows = cursor.fetchall()
-
-    finally:
-        connection.close()
-
-    # --- Armado del PDF ---
-
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, pagesize=letter,
-        topMargin=1.8 * cm, bottomMargin=1.8 * cm,
-        leftMargin=1.8 * cm, rightMargin=1.8 * cm
-    )
-
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="AlfaTitle", parent=styles["Title"], fontSize=18, spaceAfter=4))
-    styles.add(ParagraphStyle(name="AlfaSubtitle", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#6b7280"), spaceAfter=14))
-    styles.add(ParagraphStyle(name="AlfaSection", parent=styles["Heading2"], fontSize=13, spaceBefore=14, spaceAfter=6, textColor=colors.HexColor("#111827")))
-    styles.add(ParagraphStyle(name="AlfaNote", parent=styles["Normal"], fontSize=8.5, textColor=colors.HexColor("#6b7280"), spaceAfter=6))
-
-    code = f"INC-{inc_id:05d}"
-    story = []
-
-    story.append(Paragraph(f"ALFA-Sentinel &mdash; Reporte de Incidente {code}", styles["AlfaTitle"]))
-    story.append(Paragraph(
-        f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')} por {user.get('full_name', user.get('email', 'usuario'))}",
-        styles["AlfaSubtitle"]
-    ))
-
-    # 1. Ficha del incidente
-    story.append(Paragraph("1. Ficha del Incidente", styles["AlfaSection"]))
-    ficha_data = [
-        ["ID", code],
-        ["Título", title_val],
-        ["Estado", INCIDENT_STATUS_LABELS_ES.get(status, status)],
-        ["Clasificación", INCIDENT_CLASSIFICATION_LABELS_ES.get(classification, "Sin clasificar")],
-        ["Endpoint", f"{ep_hostname} ({ep_ip}) &mdash; {ep_os or 'SO no disponible'}"],
-        ["Responsable", assigned_to_name or "Sin asignar"],
-        ["Abierto", opened_at.strftime("%d/%m/%Y %H:%M:%S")],
-        ["Cerrado", closed_at.strftime("%d/%m/%Y %H:%M:%S") if closed_at else "Sigue abierto"],
-    ]
-    if description_val:
-        ficha_data.append(["Descripción", description_val])
-    story.append(_alfa_kv_table([[Paragraph(str(k), styles["Normal"]), Paragraph(str(v), styles["Normal"])] for k, v in ficha_data]))
-
-    # 2. Impacto
-    story.append(Paragraph("2. Impacto", styles["AlfaSection"]))
-    honeyfiles_involved = sorted({(r[2], r[3]) for r in honeyfile_rows})
-    impacto_data = [
-        ["Severidad máxima", ALERT_SEVERITY_LABELS_ES.get(severity, severity or "—")],
-        ["Puntaje de riesgo máximo", f"{float(risk_score):.0f} / 100" if risk_score is not None else "—"],
-        ["Alertas vinculadas", str(detection_count)],
-        ["Honeyfiles comprometidos", str(len(honeyfiles_involved)) if honeyfiles_involved else "0"],
-    ]
-    story.append(_alfa_kv_table([[Paragraph(str(k), styles["Normal"]), Paragraph(str(v), styles["Normal"])] for k, v in impacto_data]))
-
-    # 3. Reglas heurísticas disparadas
-    story.append(Paragraph("3. Reglas Heurísticas Disparadas", styles["AlfaSection"]))
-    if linked_alerts:
-        rule_table_data = [["Alerta", "Regla", "Peso aplicado", "Fecha"]]
-        for a_id, a_title, a_created, a_resolved, a_status, a_risk, a_sev, a_rule, a_weight in linked_alerts:
-            rule_table_data.append([
-                f"ALT-{a_id:05d}",
-                a_rule if a_rule else "Sin regla vinculada",
-                f"{float(a_weight):.0f}" if a_weight is not None else "—",
-                a_created.strftime("%d/%m %H:%M:%S")
-            ])
-        story.append(_alfa_table(rule_table_data))
-    else:
-        story.append(Paragraph("No hay alertas vinculadas a este incidente todavía.", styles["Normal"]))
-
-    # 4. Traza técnica (cadena de evidencia)
-    story.append(Paragraph("4. Traza Técnica (Cadena de Evidencia)", styles["AlfaSection"]))
-    story.append(Paragraph(
-        "Eventos y activaciones de honeyfile del mismo endpoint, en la ventana entre 5 minutos "
-        "antes de la primera alerta y 1 minuto después del cierre (o de la última alerta, si "
-        "sigue abierto). El agente actual no reporta proceso padre, línea de comando ni usuario "
-        "ejecutor -- esos campos se marcan 'No disponible' en vez de inventarse.",
-        styles["AlfaNote"]
-    ))
-
-    trace_rows = [["Fecha / hora", "Tipo", "Detalle", "Proceso"]]
-    for detected_at, ev_type, proc_name, proc_id, file_path in event_rows:
-        detail = file_path or "—"
-        proc = f"{proc_name} (PID {proc_id})" if proc_name else "No disponible"
-        trace_rows.append([
-            detected_at.strftime("%d/%m %H:%M:%S"),
-            ev_type,
-            Paragraph(detail, styles["Normal"]),
-            proc
-        ])
-    for detected_at, operation, file_name, file_hash, proc_name, proc_id in honeyfile_rows:
-        detail = f"Honeyfile: {file_name} &mdash; {operation}<br/>SHA-256: {file_hash or 'No disponible'}"
-        proc = f"{proc_name} (PID {proc_id})" if proc_name else "No disponible"
-        trace_rows.append([
-            detected_at.strftime("%d/%m %H:%M:%S"),
-            "Honeyfile activado",
-            Paragraph(detail, styles["Normal"]),
-            proc
-        ])
-    trace_rows[1:] = sorted(trace_rows[1:], key=lambda r: r[0])
-
-    if len(trace_rows) > 1:
-        story.append(_alfa_table(trace_rows, col_widths=[2.6 * cm, 3 * cm, 7.2 * cm, 3.5 * cm]))
-    else:
-        story.append(Paragraph("No se registraron eventos ni activaciones de honeyfile en la ventana evaluada.", styles["Normal"]))
-
-    # 5. Resolución y bitácora
-    story.append(Paragraph("5. Resolución y Bitácora", styles["AlfaSection"]))
-    resolucion_data = [
-        ["Estado final", INCIDENT_STATUS_LABELS_ES.get(status, status)],
-        ["Clasificación final", INCIDENT_CLASSIFICATION_LABELS_ES.get(classification, "Sin clasificar")],
-        ["Cerrado el", closed_at.strftime("%d/%m/%Y %H:%M:%S") if closed_at else "Sigue abierto"],
-    ]
-    story.append(_alfa_kv_table([[Paragraph(str(k), styles["Normal"]), Paragraph(str(v), styles["Normal"])] for k, v in resolucion_data]))
-    story.append(Paragraph(
-        "No hay historial de cambios de estado registrado para este incidente -- la base de "
-        "datos guarda solo el estado actual, no cada transición con fecha y autor (pendiente, "
-        "ver PENDIENTES.md, 'Historial de cambios de estado de un incidente'). Tampoco existen "
-        "notas de analista guardadas en la base (ver PENDIENTES.md sobre 'incident_notes').",
-        styles["AlfaNote"]
-    ))
-
-    doc.build(story)
-    buffer.seek(0)
-
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="incidente_{code}.pdf"'}
-    )
 
 
 def _alfa_kv_table(data):
@@ -6657,224 +4153,10 @@ def _alfa_table(data, col_widths=None):
     return table
 
 
-@app.get("/incidentes/{incident_id}")
-def incidente_detail_page(incident_id: int, request: Request):
-    """Detalle de un incidente puntual. A propósito no repite el
-    análisis heurístico de cada detección (eso ya está en /detecciones/{id})
-    -- acá se muestra el caso: qué endpoint, qué detecciones lo
-    integran, quién lo tiene asignado, y una línea de tiempo armada
-    solo con marcas de tiempo reales (no se inventan pasos intermedios
-    que la base no registra, como cambios de estado sin historial)."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                INCIDENT_CTE + "SELECT * FROM incident_data WHERE id = %s;",
-                (incident_id,)
-            )
-
-            row = cursor.fetchone()
-
-            if row is None:
-                raise HTTPException(status_code=404, detail="Incidente no encontrado")
-
-            (inc_id, title, description, status, classification, opened_at, closed_at,
-             agent_id, hostname, detection_count, severity, risk_score,
-             assigned_to, assigned_to_name) = row
-
-            cursor.execute(
-                """
-                SELECT endpoints.os, endpoints.ip_address, agents.status, agents.last_seen_at
-                FROM agents
-                JOIN endpoints ON endpoints.id = agents.endpoint_id
-                WHERE agents.id = %s;
-                """,
-                (agent_id,)
-            )
-            agent_row = cursor.fetchone()
-            operating_system, ip_address, agent_status, last_seen_at = agent_row
-
-            stale_seconds = get_agent_stale_seconds(cursor)
-
-            if agent_status != "ONLINE":
-                agent_status_bucket = "offline"
-            elif last_seen_at and (datetime.now(last_seen_at.tzinfo) - last_seen_at).total_seconds() <= stale_seconds:
-                agent_status_bucket = "ok"
-            else:
-                agent_status_bucket = "attention"
-
-            # Detecciones vinculadas -- ahora vía alerts.incident_id
-            # directo (antes: tabla puente incident_alerts). El nombre
-            # de la regla sale de alert_rule/heuristic_rules.
-            cursor.execute(
-                """
-                SELECT alerts.id, severity_levels.name, alerts.title, alerts.status,
-                       alerts.created_at, heuristic_rules.name
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                WHERE alerts.incident_id = %s
-                ORDER BY alerts.created_at ASC;
-                """,
-                (incident_id,)
-            )
-
-            linked_alert_rows = cursor.fetchall()
-
-            # Detecciones del mismo endpoint que todavía se podrían
-            # vincular a este incidente: cualquier alerta que no esté
-            # YA en este incidente (puede estar libre o en otro caso).
-            cursor.execute(
-                """
-                SELECT alerts.id, alerts.title, severity_levels.name, alerts.created_at
-                FROM alerts
-                JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.agent_id = %s
-                  AND alerts.incident_id IS DISTINCT FROM %s
-                ORDER BY alerts.created_at DESC
-                LIMIT 20;
-                """,
-                (agent_id, incident_id)
-            )
-
-            linkable_alert_rows = cursor.fetchall()
-
-    finally:
-        connection.close()
-
-    # "Notas del incidente" (incident_notes) sigue sin existir -- ver
-    # PENDIENTES.md. "Responsable" (assigned_to/assigned_at) se
-    # reintrodujo 2026-08-12.
-    notes = []
-
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id, full_name FROM users ORDER BY full_name;")
-            assignable_users = [{"id": r[0], "full_name": r[1]} for r in cursor.fetchall()]
-    finally:
-        connection.close()
-
-    linked_detections = [
-        {
-            "id": r[0],
-            "severity": r[1],
-            "severity_label": ALERT_SEVERITY_LABELS_ES.get(r[1], r[1]),
-            "title": r[2],
-            "status_label": ALERT_STATUS_LABELS_ES.get(r[3], r[3]),
-            "created_at": r[4],
-            "rule_label": r[5] or "—",
-            "is_honeyfile": r[5] == "acceso_honeyfile"
-        }
-        for r in linked_alert_rows
-    ]
-
-    linkable_detections = [
-        {
-            "id": r[0], "title": r[1],
-            "severity_label": ALERT_SEVERITY_LABELS_ES.get(r[2], r[2]),
-            "created_at": r[3]
-        }
-        for r in linkable_alert_rows
-    ]
-
-    # Indicadores principales: combinaciones únicas de regla/severidad
-    # entre las detecciones vinculadas -- no un análisis nuevo, solo un
-    # resumen de lo que ya se ve en detalle en cada DET-XXXX.
-    seen = set()
-    indicators = []
-    for det in linked_detections:
-        key = (det["rule_label"], det["is_honeyfile"])
-        if key not in seen:
-            seen.add(key)
-            indicators.append(det)
-
-    # Línea temporal: solo hechos con marca de tiempo real en la base.
-    # No se muestran pasos intermedios (p. ej. "pasó a Contenido") porque
-    # no hay tabla de historial de estados todavía (ver PENDIENTES.md).
-    timeline = []
-    for det in linked_detections:
-        timeline.append({
-            "at": det["created_at"],
-            "label": f"Detección generada: {det['rule_label']} (DET-{det['id']:05d})"
-        })
-    timeline.append({"at": opened_at, "label": f"Incidente INC-{inc_id:05d} creado"})
-    if closed_at:
-        classification_label = INCIDENT_CLASSIFICATION_LABELS_ES.get(classification, "sin clasificar")
-        timeline.append({"at": closed_at, "label": f"Incidente cerrado ({classification_label})"})
-    timeline.sort(key=lambda item: item["at"])
-
-    # 'incidents' sigue sin 'updated_at'/'alert_id'/'closed_by' -- no
-    # existen en la nueva estructura, ver PENDIENTES.md.
-    # 'assigned_to'/'assigned_at' sí, reintroducidos 2026-08-12.
-    incident = {
-        "id": inc_id,
-        "title": title,
-        "description": description,
-        "status": status,
-        "status_label": INCIDENT_STATUS_LABELS_ES.get(status, status),
-        "classification": classification,
-        "classification_label": INCIDENT_CLASSIFICATION_LABELS_ES.get(classification, "Sin clasificar"),
-        "opened_at": opened_at,
-        "closed_at": closed_at,
-        "agent_id": agent_id,
-        "hostname": hostname,
-        "operating_system": operating_system,
-        "ip_address": ip_address,
-        "agent_status_bucket": agent_status_bucket,
-        "detection_count": detection_count,
-        "severity": severity,
-        "severity_label": ALERT_SEVERITY_LABELS_ES.get(severity, severity or "—"),
-        "risk_score": risk_score,
-        "assigned_to": assigned_to,
-        "assigned_to_name": assigned_to_name
-    }
-
-    return templates.TemplateResponse(
-        request,
-        "incidente_detail.html",
-        {
-            "user": user,
-            "active_page": "incidentes",
-            "inc": incident,
-            "linked_detections": linked_detections,
-            "linkable_detections": linkable_detections,
-            "indicators": indicators,
-            "timeline": timeline,
-            "notes": notes,
-            "assignable_users": assignable_users,
-            "status_options": INCIDENT_STATUS_LABELS_ES,
-            "classification_options": INCIDENT_CLASSIFICATION_LABELS_ES
-        }
-    )
-
-
-@app.get("/procesos")
-def procesos_page(request: Request):
-    return render_placeholder(
-        request,
-        "procesos",
-        "Procesos",
-        "El agente ya lista los procesos en ejecución localmente (agent/process_monitor.py), "
-        "pero todavía no envía esa información al servidor ni queda asociada a los eventos de "
-        "archivos. Falta correlacionar cada evento con el proceso responsable (vía Visor de "
-        "Eventos de Windows o auditd en Linux) antes de que esta vista pueda mostrar algo real."
-    )
-
-
 @app.get("/api/respuesta")
 def api_respuesta(user: dict = Depends(get_current_user)):
-    """Versión JSON de /respuesta (Jinja2, hoy un placeholder honesto)
-    para la pantalla Acciones de Respuesta en React. No hay respuesta
+    """Datos de la pantalla Acciones de Respuesta en React (hoy un
+    placeholder honesto). No hay respuesta
     automática implementada -- el agente no tiene canal de comandos
     remotos (agent/main.py es de una sola pasada, sin bucle ni forma de
     recibir órdenes) -- así que esta pantalla no simula un botón de
@@ -6922,7 +4204,7 @@ def api_respuesta(user: dict = Depends(get_current_user)):
                            SELECT severity_levels.name FROM alerts
                            JOIN severity_levels ON severity_levels.id = alerts.severity_id
                            WHERE alerts.incident_id = incidents.id
-                           ORDER BY CASE severity_levels.name WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'SUSPICIOUS' THEN 2 ELSE 1 END DESC
+                           ORDER BY severity_levels.min_score DESC
                            LIMIT 1
                        ) AS severity
                 FROM incidents
@@ -6949,10 +4231,9 @@ def api_respuesta(user: dict = Depends(get_current_user)):
             "assigned_to": r[5],
             "assigned_to_name": r[6],
             "severity": r[7],
-            "severity_label": ALERT_SEVERITY_LABELS_ES.get(r[7], r[7] or "—"),
         }
         for r in incident_rows
-        if r[7] in ("HIGH", "CRITICAL")
+        if r[7] in ("ALTO", "CRÍTICO")
     ]
 
     isolations = [
@@ -6983,18 +4264,6 @@ def api_respuesta(user: dict = Depends(get_current_user)):
         "critical_incidents": critical_incidents,
         "isolations": isolations,
     }
-
-
-@app.get("/respuesta")
-def respuesta_page(request: Request):
-    return render_placeholder(
-        request,
-        "respuesta",
-        "Respuesta",
-        "El aislamiento de endpoints (tabla 'host_isolations') es parte del diseño del sistema, "
-        "pero la respuesta automática todavía no está implementada. Por ahora la contención ante "
-        "una detección crítica es manual, fuera de la consola."
-    )
 
 
 def _alfa_styles():
@@ -7294,8 +4563,8 @@ def _build_security_pdf(data, meta):
 
     story.append(Paragraph("1. Resumen de Alertas por Severidad", styles["AlfaSection"]))
     sev_rows = [["Severidad", "Cantidad"]]
-    for key in ("CRITICAL", "HIGH", "SUSPICIOUS"):
-        sev_rows.append([ALERT_SEVERITY_LABELS_ES.get(key, key), str(data["severity_counts"].get(key, 0))])
+    for key in ("CRÍTICO", "ALTO", "MEDIO"):
+        sev_rows.append([key, str(data["severity_counts"].get(key, 0))])
     sev_rows.append(["Total", str(data["total_alerts"])])
     story.append(_alfa_table(sev_rows))
 
@@ -7424,7 +4693,7 @@ def _build_security_xlsx(data, meta):
     ws.append([meta["subtitle"]])
     ws.append([])
 
-    sev_rows = [[ALERT_SEVERITY_LABELS_ES.get(k, k), data["severity_counts"].get(k, 0)] for k in ("CRITICAL", "HIGH", "SUSPICIOUS")]
+    sev_rows = [[k, data["severity_counts"].get(k, 0)] for k in ("CRÍTICO", "ALTO", "MEDIO")]
     sev_rows.append(["Total", data["total_alerts"]])
     _xlsx_section(ws, "Alertas por severidad", ["Severidad", "Cantidad"], sev_rows)
 
@@ -7638,11 +4907,10 @@ def generar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_us
 
 @app.get("/api/reportes")
 def api_reportes(page: int = Query(1, ge=1), user: dict = Depends(get_current_user)):
-    """Versión JSON de /reportes (Jinja2) para la pantalla Reports en
-    React -- misma consulta exacta sobre 'reports'. La generación
-    (POST /reportes/generar) y la descarga (GET /reportes/{id}/archivo)
-    no se duplican acá -- se llaman tal cual desde React, mismos
-    endpoints reales que ya usa reportes.html."""
+    """Datos de la pantalla Reports en React -- consulta sobre
+    'reports'. La generación (POST /reportes/generar) y la descarga
+    (GET /reportes/{id}/archivo) son endpoints propios, no se duplican
+    acá."""
 
     connection = get_connection()
     try:
@@ -7717,97 +4985,6 @@ def api_reportes(page: int = Query(1, ge=1), user: dict = Depends(get_current_us
     }
 
 
-@app.get("/reportes")
-def reportes_page(request: Request, page: int = Query(1, ge=1)):
-    """Reemplaza el placeholder anterior (2026-08-12): página real de
-    generación y auditoría de informes, respaldada por la tabla
-    'reports'."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute("SELECT COUNT(*) FROM reports;")
-            total_reports = cursor.fetchone()[0]
-
-            cursor.execute(
-                """
-                SELECT reports.created_at, users.full_name
-                FROM reports
-                LEFT JOIN users ON users.id = reports.generated_by
-                ORDER BY reports.created_at DESC
-                LIMIT 1;
-                """
-            )
-            last_row = cursor.fetchone()
-            last_generated_at, last_generated_by = last_row if last_row else (None, None)
-
-            cursor.execute("SELECT id, hostname FROM endpoints ORDER BY hostname;")
-            endpoint_options = cursor.fetchall()
-
-            page_size = 20
-            total_pages = max(1, -(-total_reports // page_size))
-            current_page = min(page, total_pages)
-            offset = (current_page - 1) * page_size
-
-            cursor.execute(
-                """
-                SELECT reports.id, reports.title, reports.report_type, reports.format,
-                       reports.period_label, reports.created_at, endpoints.hostname,
-                       users.full_name
-                FROM reports
-                LEFT JOIN endpoints ON endpoints.id = reports.endpoint_id
-                LEFT JOIN users ON users.id = reports.generated_by
-                ORDER BY reports.created_at DESC
-                LIMIT %s OFFSET %s;
-                """,
-                (page_size, offset)
-            )
-            rows = cursor.fetchall()
-
-    finally:
-        connection.close()
-
-    history = [
-        {
-            "id": r[0],
-            "code": f"REP-{r[5].year}-{r[0]:04d}",
-            "title": r[1],
-            "report_type_label": REPORT_TYPE_LABELS_ES.get(r[2], r[2]),
-            "format": r[3],
-            "period_label": r[4],
-            "created_at": r[5],
-            "endpoint": r[6] or "Todos los endpoints",
-            "generated_by": r[7] or "Usuario eliminado"
-        }
-        for r in rows
-    ]
-
-    return templates.TemplateResponse(
-        request,
-        "reportes.html",
-        {
-            "user": user,
-            "active_page": "reportes",
-            "total_reports": total_reports,
-            "last_generated_at": last_generated_at,
-            "last_generated_by": last_generated_by,
-            "endpoint_options": endpoint_options,
-            "report_type_options": list(REPORT_TYPE_LABELS_ES.items()),
-            "period_options": REPORT_PERIOD_OPTIONS,
-            "history": history,
-            "current_page": current_page,
-            "total_pages": total_pages
-        }
-    )
-
-
 @app.get("/reportes/{report_id}/archivo")
 def descargar_reporte(report_id: int, request: Request, disposition: str = Query("attachment")):
     """Sirve el archivo ya generado y guardado en disco -- no regenera
@@ -7878,8 +5055,8 @@ CONFIGURACION_AUDIT_PAGE_SIZE = 30
 
 @app.get("/api/config/agentes")
 def api_config_agentes(user: dict = Depends(get_current_user)):
-    """Versión JSON de Configuración > Agentes (Jinja2) para la
-    subsección Configuración de Administración en React. Solo
+    """Datos de la subsección Configuración > Agentes de
+    Administración en React. Solo
     'agent_stale_seconds' es un parámetro real editable (ver
     PATCH /settings/{key}, whitelist KNOWN_SETTINGS) -- heartbeat e
     intervalo de sincronización de reglas no son parámetros
@@ -7898,9 +5075,9 @@ def api_config_agentes(user: dict = Depends(get_current_user)):
 
 @app.get("/api/audit-logs")
 def api_audit_logs(page: int = Query(1, ge=1), user: dict = Depends(get_current_user)):
-    """Versión JSON de Configuración > Auditoría (Jinja2) para la
-    subsección Registro de actividad de Administración en React --
-    misma consulta exacta sobre 'audit_logs', poblada desde 2026-08-12
+    """Datos de la subsección Configuración > Registro de actividad de
+    Administración en React -- consulta sobre 'audit_logs', poblada
+    desde 2026-08-12
     por log_audit() en los puntos reales donde se llama (ver
     AUDIT_ACTION_LABELS_ES para la lista completa de acciones que de
     verdad quedan registradas)."""
@@ -7950,181 +5127,6 @@ def api_audit_logs(page: int = Query(1, ge=1), user: dict = Depends(get_current_
         "page_size": CONFIGURACION_AUDIT_PAGE_SIZE,
         "total_pages": total_pages,
     }
-
-
-@app.get("/configuracion")
-def configuracion_page(
-    request: Request,
-    tab: str = Query("deteccion"),
-    sub: str = Query("reglas"),
-    page: int = Query(1, ge=1)
-):
-    """Reescrita 2026-08-12 con 4 pestañas (Detección, Agentes,
-    Auditoría, más el link a /usuarios para Usuarios y Roles) sobre el
-    mismo route -- 'tab'/'sub' deciden qué bloque de datos se arma,
-    todo dentro de una sola página para no fragmentar la navegación
-    de Configuración en rutas sueltas.
-
-    Reglas Heurísticas: solo 'weight' e 'is_active' se muestran
-    editables porque son los únicos campos que el sistema realmente
-    consume después (ver comentario en PATCH /rules/{rule_id}).
-    Severidades: de solo lectura -- el agente tiene su propia copia
-    hardcodeada de estos rangos y no consulta la base, así que
-    editarlos acá no cambiaría la clasificación real (ver
-    PENDIENTES.md). Agentes: 'agent_stale_seconds' es el único
-    parámetro real; heartbeat/sincronización de reglas se muestran
-    como no aplicables, no como campos editables, porque no existe
-    ningún mecanismo que los consuma. Auditoría: 'audit_logs' real,
-    poblada desde 2026-08-12 por log_audit()."""
-
-    user = require_session_user(request)
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=302)
-
-    tab = tab if tab in ("deteccion", "agentes", "auditoria") else "deteccion"
-    sub = sub if sub in ("reglas", "severidades") else "reglas"
-
-    context = {
-        "user": user,
-        "active_page": "configuracion",
-        "tab": tab,
-        "sub": sub,
-        "rules": [],
-        "severities": [],
-        "agent_stale_seconds": None,
-        "audit_entries": [],
-        "audit_total": 0,
-        "current_page": 1,
-        "total_pages": 1
-    }
-
-    connection = get_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            if tab == "deteccion" and sub == "reglas":
-
-                cursor.execute(
-                    """
-                    SELECT
-                        heuristic_rules.id,
-                        heuristic_rules.name,
-                        heuristic_rules.description,
-                        heuristic_rules.weight,
-                        heuristic_rules.threshold,
-                        heuristic_rules.window_seconds,
-                        heuristic_rules.is_active,
-                        heuristic_rules.updated_at,
-                        event_types.name,
-                        (
-                            SELECT COUNT(*)
-                            FROM alert_rule
-                            JOIN alerts ON alerts.id = alert_rule.alert_id
-                            WHERE alert_rule.rule_id = heuristic_rules.id
-                              AND alerts.created_at >= NOW() - INTERVAL '30 days'
-                        ) AS alerts_30d,
-                        (
-                            SELECT MAX(alerts.created_at)
-                            FROM alert_rule
-                            JOIN alerts ON alerts.id = alert_rule.alert_id
-                            WHERE alert_rule.rule_id = heuristic_rules.id
-                        ) AS last_triggered_at
-                    FROM heuristic_rules
-                    LEFT JOIN event_types ON event_types.id = heuristic_rules.event_type_id
-                    ORDER BY heuristic_rules.weight DESC, heuristic_rules.name ASC;
-                    """
-                )
-
-                rows = cursor.fetchall()
-
-                context["rules"] = [
-                    {
-                        "id": r[0],
-                        "name": r[1],
-                        "label": r[1],
-                        "description": r[2],
-                        "weight": float(r[3]),
-                        "threshold": float(r[4]),
-                        "window_seconds": r[5],
-                        "is_active": r[6],
-                        "updated_at": r[7],
-                        "event_type_label": r[8] if r[8] else "Cualquiera en la ventana",
-                        "alerts_30d": r[9],
-                        "last_triggered_at": r[10]
-                    }
-                    for r in rows
-                ]
-
-            elif tab == "deteccion" and sub == "severidades":
-
-                cursor.execute(
-                    "SELECT name, min_score, max_score FROM severity_levels ORDER BY min_score;"
-                )
-
-                context["severities"] = [
-                    {
-                        "name": r[0],
-                        "label": RISK_LABELS_ES.get(r[0], r[0]),
-                        "min_score": float(r[1]),
-                        "max_score": float(r[2])
-                    }
-                    for r in cursor.fetchall()
-                ]
-
-            elif tab == "agentes":
-
-                context["agent_stale_seconds"] = get_agent_stale_seconds(cursor)
-
-            elif tab == "auditoria":
-
-                cursor.execute("SELECT COUNT(*) FROM audit_logs;")
-                audit_total = cursor.fetchone()[0]
-
-                total_pages = max(1, -(-audit_total // CONFIGURACION_AUDIT_PAGE_SIZE))
-                current_page = min(page, total_pages)
-                offset = (current_page - 1) * CONFIGURACION_AUDIT_PAGE_SIZE
-
-                cursor.execute(
-                    """
-                    SELECT audit_logs.created_at, users.full_name, audit_logs.action,
-                           audit_logs.entity_type, audit_logs.entity_id, audit_logs.description
-                    FROM audit_logs
-                    LEFT JOIN users ON users.id = audit_logs.user_id
-                    ORDER BY audit_logs.created_at DESC
-                    LIMIT %s OFFSET %s;
-                    """,
-                    (CONFIGURACION_AUDIT_PAGE_SIZE, offset)
-                )
-
-                context["audit_entries"] = [
-                    {
-                        "created_at": r[0],
-                        "user_name": r[1] or "Usuario eliminado",
-                        "action": r[2],
-                        "action_label": AUDIT_ACTION_LABELS_ES.get(r[2], r[2]),
-                        "entity_type": r[3],
-                        "entity_id": r[4],
-                        "description": r[5]
-                    }
-                    for r in cursor.fetchall()
-                ]
-                context["audit_total"] = audit_total
-                context["current_page"] = current_page
-                context["total_pages"] = total_pages
-
-        db_error = None
-
-    except Exception:
-        db_error = "No se pudo leer la configuración -- probá de nuevo en un momento."
-
-    finally:
-        connection.close()
-
-    context["db_error"] = db_error
-
-    return templates.TemplateResponse(request, "configuracion.html", context)
 
 
 @app.post("/agents")
@@ -8480,42 +5482,46 @@ EPISODE_WINDOW_SECONDS = 120
 # diferidas HR-05/11). Se usan para decidir "evidencia fuerte" en la
 # condición de incidente (sección 28) y de aislamiento (sección 30).
 STRONG_RULE_NAMES = {
-    "modificacion_masiva_archivos",
-    "renombrado_extension_anomala",
-    "acceso_honeyfile",
-    "escritura_intensiva_archivos",
-    "acceso_recursos_compartidos",
-    "eliminacion_anomala_archivos",
+    "Modificacion Masiva Archivos",
+    "Renombrado Extension Anomala",
+    "Acceso Honeyfile",
+    "Escritura Intensiva Archivos",
+    "Acceso Recursos Compartidos",
+    "Eliminacion Anomala Archivos",
 }
 
-# Igual que STRONG_RULE_NAMES pero sin 'acceso_honeyfile' -- para la
+# Igual que STRONG_RULE_NAMES pero sin 'Acceso Honeyfile' -- para la
 # Condición A de aislamiento (sección 30: "honeyfile + al menos un
 # indicador FUERTE DE ACTIVIDAD DE ARCHIVOS", el honeyfile no cuenta
 # como su propio segundo indicador).
-STRONG_FILE_ACTIVITY_RULES = STRONG_RULE_NAMES - {"acceso_honeyfile"}
+STRONG_FILE_ACTIVITY_RULES = STRONG_RULE_NAMES - {"Acceso Honeyfile"}
 
-# HR-05/06/11 -- sembradas is_active=FALSE porque requieren datos que
-# el agente no recopila hoy (ver database/schema.sql). 'agent/
-# heuristic_engine.py::RULE_NAMES' tampoco las conoce, así que aunque
-# alguien las active desde /configuracion el agente seguiría
-# ignorándolas en silencio -- update_rule() bloquea esa activación
-# acá para no dejar que la UI sugiera una capacidad que no existe.
-DEFERRED_RULE_NAMES = {"proceso_sospechoso", "consumo_cpu_elevado", "actividad_repetitiva_automatizada"}
+# HR-05/06/11 -- hasta el 2026-08-16 estaban acá porque requerían
+# datos que el agente no recopilaba (atribución de proceso a evento
+# de archivo, muestreo de CPU por proceso). Esa capacidad ya existe
+# (agent/adapters/, agent/process_monitor.py -- ver PENDIENTES.md,
+# "Implementación final del motor heurístico y configuración por
+# endpoint"), así que el set queda vacío -- se conserva la variable
+# (en vez de borrarla y sacar las 2 validaciones que la usan) porque
+# el mecanismo de "esta regla no se puede activar todavía" sigue
+# siendo válido para el día que se agregue una regla 13 que dependa
+# de una capacidad que el agente aún no tenga.
+DEFERRED_RULE_NAMES = set()
 
 # Reglas cuyo weight/threshold/window_seconds NO deben editarse desde
 # PATCH /rules/{id} porque no funcionan como una regla convencional de
 # puntuación (ver sección 13 de la especificación de la pantalla de
 # Reglas Heurísticas, 2026-08-16):
-# - 'acceso_honeyfile': su weight=100 es lo que hace que CUALQUIER
+# - 'Acceso Honeyfile': su weight=100 es lo que hace que CUALQUIER
 #   interacción con un honeyfile llegue a risk_score=100 "gratis" (ver
 #   report_alert, MIN(100, suma_pesos + correlación)) -- cambiarlo
 #   rompería esa garantía sin que se note hasta la próxima alerta real.
-# - 'correlacion_multiples_indicadores': su weight/threshold en la base son
+# - 'Correlacion Multiples Indicadores': su weight/threshold en la base son
 #   solo documentales -- report_alert calcula la bonificación real por
 #   tramos fijos (2/3/4+ reglas -> +5/+10/+15), no lee estas columnas.
 #   Editarlas no cambiaría ningún cálculo, así que se bloquea para no
 #   sugerir un control que no hace nada.
-FIXED_SCORING_RULE_NAMES = {"acceso_honeyfile", "correlacion_multiples_indicadores"}
+FIXED_SCORING_RULE_NAMES = {"Acceso Honeyfile", "Correlacion Multiples Indicadores"}
 
 
 @app.post("/agent/alerts")
@@ -8549,16 +5555,21 @@ def report_alert(
 
             agent_id = resolve_agent_id(cursor, x_agent_credential)
 
-            # Solo reglas activas y conocidas por la base -- si el
-            # agente reportara el nombre de una regla diferida
-            # (is_active=FALSE) o desconocida, se ignora en vez de
-            # inventarle un peso.
+            # Solo reglas cuyo is_active EFECTIVO (heuristic_rules +
+            # override de agent_rule para ESTE agente, ver
+            # _effective_agent_rules_cte()) sea TRUE -- si el agente
+            # reportara el nombre de una regla diferida o desconocida,
+            # se ignora en vez de inventarle un peso. El peso aplicado
+            # ('effective_weight') también respeta el override por
+            # endpoint si existe -- el agente nunca manda su propio
+            # weight, y aunque lo mandara, se ignoraría (sección 16 de
+            # la especificación de configuración por endpoint).
             cursor.execute(
-                """
-                SELECT id, name, weight FROM heuristic_rules
-                WHERE name = ANY(%s) AND is_active = TRUE;
+                _effective_agent_rules_cte() + """
+                SELECT id, name, effective_weight FROM effective_rules
+                WHERE name = ANY(%(names)s) AND effective_is_active = TRUE;
                 """,
-                (alert.matched_rules,)
+                {"agent_id": agent_id, "names": alert.matched_rules}
             )
             matched = cursor.fetchall()
 
@@ -8568,7 +5579,7 @@ def report_alert(
                     detail="Ninguna de las reglas reportadas es una regla activa conocida"
                 )
 
-            is_honeyfile = any(name == "acceso_honeyfile" for _, name, _ in matched)
+            is_honeyfile = any(name == "Acceso Honeyfile" for _, name, _ in matched)
 
             # ¿Actualiza una alerta existente del mismo episodio, o
             # crea una nueva?
@@ -8590,7 +5601,7 @@ def report_alert(
                 cursor.execute(
                     """
                     INSERT INTO alerts (agent_id, severity_id, title, description, risk_score)
-                    VALUES (%s, (SELECT id FROM severity_levels WHERE name = 'NORMAL'), %s, %s, 0)
+                    VALUES (%s, (SELECT id FROM severity_levels ORDER BY min_score ASC LIMIT 1), %s, %s, 0)
                     RETURNING id;
                     """,
                     (agent_id, alert.title, alert.description)
@@ -8606,7 +5617,7 @@ def report_alert(
                 SELECT alert_rule.rule_id FROM alert_rule
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                 WHERE alert_rule.alert_id = %s
-                  AND heuristic_rules.name != 'correlacion_multiples_indicadores';
+                  AND heuristic_rules.name != 'Correlacion Multiples Indicadores';
                 """,
                 (alert_id,)
             )
@@ -8631,7 +5642,7 @@ def report_alert(
                 FROM alert_rule
                 JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                 WHERE alert_rule.alert_id = %s
-                  AND heuristic_rules.name != 'correlacion_multiples_indicadores';
+                  AND heuristic_rules.name != 'Correlacion Multiples Indicadores';
                 """,
                 (alert_id,)
             )
@@ -8652,11 +5663,19 @@ def report_alert(
             else:
                 correlation_bonus = 0.0
 
-            # Respeta el mismo interruptor is_active que cualquier otra
-            # regla (editable desde /configuracion) -- si un analista
-            # desactiva la correlación, deja de sumar bonificación.
+            # Respeta el mismo interruptor is_active EFECTIVO que
+            # cualquier otra regla (editable desde /configuracion a
+            # nivel global, o por endpoint vía agent_rule -- sección 19
+            # de la especificación: HR-12 solo admite override de
+            # is_active, nunca de weight/threshold/window) -- si un
+            # analista desactiva la correlación (global o para este
+            # endpoint puntual), deja de sumar bonificación.
             cursor.execute(
-                "SELECT id FROM heuristic_rules WHERE name = 'correlacion_multiples_indicadores' AND is_active = TRUE;"
+                _effective_agent_rules_cte() + """
+                SELECT id FROM effective_rules
+                WHERE name = 'Correlacion Multiples Indicadores' AND effective_is_active = TRUE;
+                """,
+                {"agent_id": agent_id}
             )
             correlation_row = cursor.fetchone()
             correlation_rule_id = correlation_row[0] if correlation_row else None
@@ -8696,7 +5715,7 @@ def report_alert(
                 (final_score,)
             )
             severity_row = cursor.fetchone()
-            severity_id, severity_name = severity_row if severity_row else (None, "NORMAL")
+            severity_id, severity_name = severity_row if severity_row else (None, "BAJO")
 
             cursor.execute(
                 """

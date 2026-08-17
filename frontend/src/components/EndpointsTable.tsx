@@ -1,5 +1,5 @@
 import type { EndpointListItem } from "../types/endpoints";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import {
   AGENT_HEALTH_LABEL,
   AGENT_HEALTH_VAR,
@@ -19,9 +19,9 @@ interface Props {
 }
 
 function rowAccent(ep: EndpointListItem): string | null {
-  if (ep.risk === "CRITICAL" || ep.conn_status === "ISOLATED") return "var(--crit)";
-  if (ep.risk === "HIGH") return "var(--high)";
-  if (ep.risk === "SUSPICIOUS") return "var(--warn)";
+  if (ep.risk === "CRÍTICO" || ep.conn_status === "ISOLATED") return "var(--crit)";
+  if (ep.risk === "ALTO") return "var(--high)";
+  if (ep.risk === "MEDIO") return "var(--warn)";
   return null;
 }
 
@@ -115,7 +115,7 @@ export default function EndpointsTable({ endpoints, loading, hasFilters, onSelec
                       className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
                       style={severityPillStyle(ep.risk)}
                     >
-                      {SEVERITY_LABEL[ep.risk].toUpperCase()}
+                      {ep.risk.toUpperCase()}
                     </span>
                   </td>
                   <td className="py-3 pr-3">

@@ -1,5 +1,5 @@
 import type { CriticalIncidentItem } from "../types/respuesta";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 
 interface Props {
   items: CriticalIncidentItem[];
@@ -54,7 +54,7 @@ export default function CriticalIncidentsTable({ items, loading }: Props) {
                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surf2)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "")}
               >
-                <td className="py-3 pr-3 font-semibold" style={item.severity === "CRITICAL" ? { boxShadow: "inset 3px 0 0 var(--crit)", paddingLeft: "8px" } : undefined}>
+                <td className="py-3 pr-3 font-semibold" style={item.severity === "CRÍTICO" ? { boxShadow: "inset 3px 0 0 var(--crit)", paddingLeft: "8px" } : undefined}>
                   <span className="font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.code}</span>
                   <div className="text-[11px] mt-0.5 font-medium truncate max-w-[180px]" style={{ color: "var(--tx-mute)" }}>{item.title}</div>
                 </td>
@@ -62,7 +62,7 @@ export default function CriticalIncidentsTable({ items, loading }: Props) {
                 <td className="py-3 pr-3">
                   {item.severity && (
                     <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full" style={severityPillStyle(item.severity)}>
-                      {SEVERITY_LABEL[item.severity].toUpperCase()}
+                      {item.severity.toUpperCase()}
                     </span>
                   )}
                 </td>

@@ -1,7 +1,6 @@
 import type { ConnStatus } from "../types/endpoints";
 import type { Severity } from "../types/dashboard";
 import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
-import { SEVERITY_LABEL } from "../lib/severity";
 
 interface Props {
   search: string;
@@ -16,7 +15,7 @@ interface Props {
 }
 
 const STATUS_OPTIONS: (ConnStatus | "")[] = ["", "ONLINE", "OFFLINE", "ISOLATED"];
-const RISK_OPTIONS: (Severity | "")[] = ["", "NORMAL", "SUSPICIOUS", "HIGH", "CRITICAL"];
+const RISK_OPTIONS: (Severity | "")[] = ["", "BAJO", "MEDIO", "ALTO", "CRÍTICO"];
 
 function segStyle(active: boolean): React.CSSProperties {
   return active
@@ -86,7 +85,7 @@ export default function EndpointsFilters({
                 className="px-2.5 py-1 rounded-md text-[11.5px] font-medium border-0 cursor-pointer"
                 style={segStyle(risk === opt)}
               >
-                {opt ? SEVERITY_LABEL[opt] : "Todos"}
+                {opt || "Todos"}
               </button>
             ))}
           </div>

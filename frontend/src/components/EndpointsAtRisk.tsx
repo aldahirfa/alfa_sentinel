@@ -1,5 +1,5 @@
 import type { EndpointAtRisk } from "../types/dashboard";
-import { SEVERITY_LABEL, SEVERITY_VAR, severityPillStyle } from "../lib/severity";
+import { SEVERITY_VAR, severityPillStyle } from "../lib/severity";
 
 interface Props {
   endpoints: EndpointAtRisk[];
@@ -32,7 +32,7 @@ export default function EndpointsAtRisk({ endpoints }: Props) {
       ) : (
         <div className="flex flex-col gap-2 mt-3.5">
           {endpoints.map((ep) => {
-            const isCrit = ep.severity === "CRITICAL";
+            const isCrit = ep.severity === "CRÍTICO";
             return (
               <div
                 key={ep.hostname}
@@ -63,7 +63,7 @@ export default function EndpointsAtRisk({ endpoints }: Props) {
                     className="text-[10px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
                     style={severityPillStyle(ep.severity)}
                   >
-                    {SEVERITY_LABEL[ep.severity].toUpperCase()}
+                    {ep.severity.toUpperCase()}
                   </span>
                   <span
                     className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full flex items-center gap-1.5"

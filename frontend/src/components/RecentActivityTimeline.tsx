@@ -12,8 +12,8 @@ function dotColor(item: RecentActivityItem): string {
 }
 
 function titleColor(item: RecentActivityItem): string {
-  if (item.severity === "CRITICAL") return "var(--crit)";
-  if (item.severity === "HIGH") return "var(--high)";
+  if (item.severity === "CRÍTICO") return "var(--crit)";
+  if (item.severity === "ALTO") return "var(--high)";
   return "var(--tx)";
 }
 
@@ -30,10 +30,7 @@ export default function RecentActivityTimeline({ items }: Props) {
           Sin actividad todavía.
         </p>
       ) : (
-        <div className="flex flex-col gap-0 relative mt-4 before:absolute before:inset-y-2 before:left-[59px] before:w-px before:bg-[var(--line)]">
-        <div className="flex flex-col h-full relative mt-auto pl-2">
-          {/* Línea vertical de tiempo */}
-          <div className="absolute left-[13px] top-2 bottom-2 w-px" style={{ background: "var(--line)" }} />
+        <div className="flex flex-col h-full gap-0 relative mt-auto before:absolute before:inset-y-2 before:left-[59px] before:w-px before:bg-[var(--line)]">
           {items.map((item, i) => (
             <div key={i} className="flex gap-4 relative py-2.5">
               <div className="w-[45px] shrink-0 text-right text-[11.5px] font-bold mt-0.5" style={{ color: "var(--tx-mute)" }}>

@@ -27,7 +27,6 @@ export interface CriticalIncidentItem {
   assigned_to: number | null;
   assigned_to_name: string | null;
   severity: Severity | null;
-  severity_label: string;
 }
 
 // 'isolation_type'/'status' siguen siendo VARCHAR libre (sin CHECK

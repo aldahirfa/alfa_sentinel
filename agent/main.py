@@ -17,6 +17,8 @@ from client import (
 
 from honeyfile_deployer import apply_honeyfile_policy
 
+from cpu_monitor import CpuMonitor
+
 from credential import (
     save_credential,
     load_credential
@@ -173,9 +175,13 @@ if __name__ == "__main__":
 
         if rule_policy_response is not None and rule_policy_response.status_code == 200:
             rule_policy = rule_policy_response.json().get("rules", [])
-            print(f"{len(rule_policy)} regla(s) activa(s) recibida(s) del servidor.")
+            print(f"{len(rule_policy)} regla(s) activa(s) recibida(s) del servidor (política efectiva de este endpoint).")
         else:
-            rule_policy = []
+            # None, NO lista vacía -- distingue "no se pudo pedir" (folback
+            # completo a los valores por defecto) de "el servidor
+            # contestó que acá no hay ninguna regla activa" (ver
+            # FileActivityAnalyzer.from_policy).
+            rule_policy = None
             print("No se pudo obtener la política de reglas. Se usan los valores por defecto.")
 
         # Monitor de archivos
@@ -183,15 +189,44 @@ if __name__ == "__main__":
         print()
         print("Iniciando monitor de archivos...")
 
-        observer = start_file_monitor(".", existing_credential, watched_honeyfile_paths, rule_policy)
+        observer, analyzer = start_file_monitor(".", existing_credential, watched_honeyfile_paths, rule_policy)
 
         print("Monitor activo.")
         print("Modifica archivos dentro de test_files o honeyfiles para probarlo.")
+
+        # Monitor de CPU por proceso (HR-06, 2026-08-16 -- ver
+        # PENDIENTES.md). Corre en su propio hilo, independiente del
+        # observer de archivos -- se arranca solo si la política
+        # EFECTIVA de este agente incluye la regla activa (si el
+        # servidor no la mandó -- desactivada global o por override de
+        # agent_rule para este endpoint puntual -- no tiene sentido
+        # gastar ciclos muestreando CPU para una regla que el servidor
+        # va a ignorar de todas formas).
+        cpu_rule_cfg = analyzer.rules.get("Consumo CPU Elevado")
+        cpu_monitor = None
+
+        if cpu_rule_cfg:
+            print()
+            print(
+                f"Iniciando monitor de CPU (umbral {cpu_rule_cfg['threshold']}%, "
+                f"ventana {cpu_rule_cfg['window_seconds']}s)..."
+            )
+            cpu_monitor = CpuMonitor(
+                existing_credential,
+                cpu_rule_cfg["threshold"],
+                cpu_rule_cfg["window_seconds"]
+            ).start()
+        else:
+            print()
+            print("Consumo CPU Elevado (HR-06) no está activa para este endpoint -- monitor de CPU no iniciado.")
 
         input("Presiona ENTER para detener el monitor...")
 
         observer.stop()
         observer.join()
+
+        if cpu_monitor is not None:
+            cpu_monitor.stop()
 
     else:
 

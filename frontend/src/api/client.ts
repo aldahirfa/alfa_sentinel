@@ -15,6 +15,11 @@ import type {
   HoneyfilesResponse,
 } from "../types/honeyfiles";
 import type { RuleUpdatePayload, RuleUpdateResult, RulesResponse } from "../types/rules";
+import type {
+  AgentRulesResponse,
+  AgentRuleUpdatePayload,
+  AgentRuleUpdateResult,
+} from "../types/agentRules";
 import type { RespuestaResponse } from "../types/respuesta";
 import type { GenerateReportPayload, GenerateReportResult, ReportsResponse } from "../types/reports";
 import type {
@@ -276,6 +281,51 @@ export async function updateRule(id: number, payload: RuleUpdatePayload): Promis
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new ApiError(res.status, data.detail || "No se pudo actualizar la regla");
+  }
+  return res.json();
+}
+
+// GET /api/agents/{agent_id}/rules -- configuración de reglas
+// heurísticas de UN endpoint puntual (global + override de agent_rule
+// + valor efectivo ya resuelto). Ver types/agentRules.ts.
+export function fetchAgentRules(agentId: number): Promise<AgentRulesResponse> {
+  return request<AgentRulesResponse>(`/api/agents/${agentId}/rules`);
+}
+
+// PATCH /api/agents/{agent_id}/rules/{rule_id} -- crea o actualiza el
+// override de una regla para este endpoint. 'payload' puede traer
+// 'null' explícito en weight/threshold/window_seconds (= "volver a
+// heredar el valor global para ese campo"), a diferencia de
+// updateRule() de arriba, que solo manda lo que cambió y nunca null.
+export async function updateAgentRule(
+  agentId: number,
+  ruleId: number,
+  payload: AgentRuleUpdatePayload
+): Promise<AgentRuleUpdateResult> {
+  const res = await fetch(`/api/agents/${agentId}/rules/${ruleId}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || "No se pudo actualizar la configuración de la regla");
+  }
+  return res.json();
+}
+
+// DELETE /api/agents/{agent_id}/rules/{rule_id} -- quita el override
+// completo, el endpoint vuelve a heredar el valor global en los
+// cuatro campos.
+export async function deleteAgentRuleOverride(agentId: number, ruleId: number): Promise<{ message: string }> {
+  const res = await fetch(`/api/agents/${agentId}/rules/${ruleId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || "No se pudo quitar la configuración personalizada");
   }
   return res.json();
 }

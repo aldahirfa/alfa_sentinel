@@ -2,7 +2,10 @@
 // y api_dashboard_activity_series. Si el contrato del backend cambia,
 // este archivo es el primer lugar a actualizar.
 
-export type Severity = "NORMAL" | "SUSPICIOUS" | "HIGH" | "CRITICAL";
+// Valores reales de severity_levels.name (BD es la fuente de verdad,
+// ver PENDIENTES.md, migración 2026-08-16). Ya no hay traducción: lo
+// que devuelve la API es literalmente lo que se muestra en pantalla.
+export type Severity = "BAJO" | "MEDIO" | "ALTO" | "CRÍTICO";
 
 export interface DashboardSummary {
   endpoints_total: number;
@@ -17,7 +20,6 @@ export interface DashboardSummary {
 
 export interface RiskDistributionItem {
   level: Severity;
-  label: string;
   count: number;
   color: string;
 }

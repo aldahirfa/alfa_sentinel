@@ -1,6 +1,5 @@
 import type { Severity } from "../types/dashboard";
 import type { FilterOption, StatusBucket } from "../types/incidentes";
-import { SEVERITY_LABEL } from "../lib/severity";
 
 interface Props {
   search: string;
@@ -17,7 +16,7 @@ interface Props {
   ruleOptions: FilterOption[];
 }
 
-const SEVERITY_OPTIONS: (Severity | "")[] = ["", "SUSPICIOUS", "HIGH", "CRITICAL"];
+const SEVERITY_OPTIONS: (Severity | "")[] = ["", "MEDIO", "ALTO", "CRÍTICO"];
 const SINCE_OPTIONS: { value: "24h" | "7d" | "30d" | ""; label: string }[] = [
   { value: "", label: "Todo" },
   { value: "24h", label: "24 h" },
@@ -95,7 +94,7 @@ export default function IncidentesFilters({
                 className="px-2.5 py-1 rounded-md text-[11.5px] font-medium border-0 cursor-pointer"
                 style={segStyle(severity === opt)}
               >
-                {opt ? SEVERITY_LABEL[opt] : "Todas"}
+                {opt || "Todas"}
               </button>
             ))}
           </div>

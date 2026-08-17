@@ -65,12 +65,12 @@ export default function RiskDonut({ data, total }: RiskDonutProps) {
           {data.map((item) => (
             <div key={item.level} className="flex items-center gap-2 text-[12.5px]">
               <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: item.color }} />
-              <span style={{ color: item.level === "CRITICAL" ? item.color : "var(--tx-dim)", fontWeight: item.level === "CRITICAL" ? 600 : 400 }}>
-                {item.label}
+              <span style={{ color: item.level === "CRÍTICO" ? item.color : "var(--tx-dim)", fontWeight: item.level === "CRÍTICO" ? 600 : 400 }}>
+                {item.level}
               </span>
               <span
                 className="ml-auto font-semibold"
-                style={{ color: item.level === "CRITICAL" ? item.color : "var(--tx)", fontWeight: item.level === "CRITICAL" ? 700 : 600 }}
+                style={{ color: item.level === "CRÍTICO" ? item.color : "var(--tx)", fontWeight: item.level === "CRÍTICO" ? 700 : 600 }}
               >
                 {item.count}
               </span>

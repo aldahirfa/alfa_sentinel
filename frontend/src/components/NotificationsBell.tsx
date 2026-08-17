@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { fetchOpenAlerts } from "../api/client";
 import type { OpenAlert } from "../api/client";
-import { SEVERITY_LABEL, severityPillStyle } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import { useClickOutside } from "../hooks/useClickOutside";
 
 interface Props {
@@ -90,7 +90,7 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
                       className="text-[9.5px] font-bold tracking-wide px-1.5 py-0.5 rounded"
                       style={severityPillStyle(a.severity)}
                     >
-                      {SEVERITY_LABEL[a.severity].toUpperCase()}
+                      {a.severity.toUpperCase()}
                     </span>
                     <span className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>{a.hostname}</span>
                     <span className="ml-auto text-[10.5px]" style={{ color: "var(--tx-mute)" }}>{a.created_at}</span>
