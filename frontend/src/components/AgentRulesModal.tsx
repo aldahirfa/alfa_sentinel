@@ -200,19 +200,19 @@ function AgentRuleRow({
           {!rule.has_fixed_scoring && (
             <div className="flex gap-4 mt-2">
               <SummaryPair
-                label="Weight"
+                label="Peso"
                 globalValue={rule.global.weight}
                 effectiveValue={rule.effective.weight}
                 customized={rule.override?.weight != null}
               />
               <SummaryPair
-                label="Threshold"
+                label="Umbral"
                 globalValue={rule.global.threshold}
                 effectiveValue={rule.effective.threshold}
                 customized={rule.override?.threshold != null}
               />
               <SummaryPair
-                label="Window"
+                label="Ventana"
                 globalValue={rule.global.window_seconds ?? "—"}
                 effectiveValue={rule.effective.window_seconds ?? "—"}
                 customized={rule.override?.window_seconds != null}

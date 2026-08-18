@@ -31,6 +31,6 @@ ISOLATION_STATUS_REPORT_URL = f"{SERVER_URL}/agent/isolation-status/report"
 # PENDIENTE: reemplaza esto con el token que te devuelva
 # POST /enrollment-tokens (ver instrucciones). Es de un solo uso y
 # expira a los 15 minutos.
-ENROLLMENT_TOKEN = "LYOkNCgi2BpwZAGTGrkrMZJcZT98dL48pFqn7owtKVc"
+ENROLLMENT_TOKEN = "F-zVtQWzRwExPhT9kNpxlg8aSQsu2nbmShJ_Q1JWSi0"
 
 CREDENTIAL_FILE = "agent_credential.json"

@@ -97,7 +97,7 @@ export default function RuleCard({ rule, onChanged }: Props) {
         />
 
         <StatBlock
-          label="Threshold"
+          label="Umbral"
           value={rule.has_fixed_scoring ? "No aplica" : `${rule.threshold}${rule.metric_unit ? ` ${rule.metric_unit}` : ""}`}
         />
         <StatBlock

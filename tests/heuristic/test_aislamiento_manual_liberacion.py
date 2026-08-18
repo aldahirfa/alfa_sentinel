@@ -160,19 +160,23 @@ try:
         return row
 
     # ================= Preparar un incidente SIN aislamiento automático =================
-    # Condición de incidente (score>=75 y >=3 reglas distintas) sin
-    # cumplir Condición B de aislamiento automático (necesita >=2
-    # reglas FUERTES de actividad de archivos -- acá solo hay 1:
-    # 'Modificacion Masiva Archivos'). Técnica de override de peso ya
-    # establecida (ver test_episodios_incidentes_aislamiento.py) para
-    # construir el caso límite exacto sin tocar los pesos reales del
-    # resto del sistema.
-    override_weight(agent_m1, "Proceso Sospechoso", 60)
+    # Actualizado 2026-08-18 (ver PENDIENTES.md): ahora TODA alerta
+    # CRÍTICA aísla automáticamente (ya no depende de reglas fuertes
+    # adicionales), y un incidente puede abrirse también en severidad
+    # ALTO (score>=50) si hay evidencia (>=3 reglas distintas
+    # coincidiendo). Para seguir probando el aislamiento MANUAL sin que
+    # el automático se adelante, este setup usa los pesos REALES (sin
+    # override) de 3 reglas distintas: 25 (Modificacion Masiva
+    # Archivos) + 10 (Proceso Sospechoso) + 5 (Consumo CPU Elevado) +
+    # 10 de bonus de correlación (3 reglas distintas) = score 50 ->
+    # severidad ALTO, incidente creado por evidencia (3 reglas), pero
+    # NO CRÍTICO -> no dispara aislamiento automático.
     r_setup = report(token_m1, ["Modificacion Masiva Archivos", "Proceso Sospechoso", "Consumo CPU Elevado"])
     check("Setup: report_alert 200", r_setup.status_code == 200, r_setup.text[:300])
     body_setup = r_setup.json()
     check("Setup: se creó un incidente", body_setup["incident_id"] is not None, str(body_setup))
-    check("Setup: NO se disparó aislamiento automático (solo 1 regla fuerte)", body_setup["isolation_requested"] is False, str(body_setup))
+    check("Setup: severidad ALTO (score 50, no CRÍTICO)", body_setup["severity"] == "ALTO", str(body_setup))
+    check("Setup: NO se disparó aislamiento automático (severidad ALTO, no CRÍTICO)", body_setup["isolation_requested"] is False, str(body_setup))
     incident_m1 = body_setup["incident_id"]
 
     # ================= MI-01: incidente inexistente =================
@@ -269,7 +273,9 @@ try:
     check("MI-05: incidente CLOSED -> 409, no se aísla", r_closed.status_code == 409, f"status={r_closed.status_code}")
 
     # ================= MI-06: validación cruzada del reporte del agente =================
-    override_weight(agent_m3, "Proceso Sospechoso", 60)
+    # Mismo criterio que el setup de MI-01: pesos reales (sin
+    # override) de 3 reglas distintas -> score 50 -> ALTO, incidente
+    # por evidencia (3 reglas), sin aislamiento automático (no CRÍTICO).
     r_setup3 = report(token_m3, ["Modificacion Masiva Archivos", "Proceso Sospechoso", "Consumo CPU Elevado"])
     incident_m3 = r_setup3.json()["incident_id"]
     check("MI-06 setup: incidente creado sin aislamiento automático", incident_m3 is not None and r_setup3.json()["isolation_requested"] is False, r_setup3.text[:300])

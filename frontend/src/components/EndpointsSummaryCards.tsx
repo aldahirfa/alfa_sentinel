@@ -40,8 +40,8 @@ export default function EndpointsSummaryCards({ summary }: Props) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       <Card icon="ph ph-desktop-tower" label="Total de endpoints" value={summary.total} />
-      <Card icon="ph-fill ph-circle" label="Online" value={summary.online} color="var(--ok)" />
-      <Card icon="ph-fill ph-circle" label="Offline" value={summary.offline} color="var(--off)" />
+      <Card icon="ph-fill ph-circle" label="En línea" value={summary.online} color="var(--ok)" />
+      <Card icon="ph-fill ph-circle" label="Fuera de línea" value={summary.offline} color="var(--off)" />
       <Card icon="ph-fill ph-plugs" label="Aislados" value={summary.isolated} color="var(--crit)" />
       <Card icon="ph-fill ph-warning" label="Críticos" value={summary.critical} color="var(--high)" />
     </div>

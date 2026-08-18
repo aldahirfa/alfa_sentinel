@@ -115,7 +115,7 @@ export default function EscalateAlertModal({ alert, onClose, onEscalated }: Prop
                   )
                 }
               />
-              <Field label="Risk score" value={alert.risk_score !== null ? alert.risk_score.toFixed(1) : "—"} />
+              <Field label="Puntos de riesgo" value={alert.risk_score !== null ? alert.risk_score.toFixed(1) : "—"} />
               <Field label="Fecha" value={alert.created_at ?? "—"} />
               {alert.rules[0] && <Field label="Regla" value={alert.rules[0].rule_name} />}
             </div>

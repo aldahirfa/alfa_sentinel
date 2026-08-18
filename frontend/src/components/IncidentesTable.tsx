@@ -8,6 +8,7 @@ import {
   ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
   ISOLATE_LABEL_COMPACT, ISOLATED_LABEL_COMPACT, PENDING_LABEL_COMPACT, SENDING_LABEL,
   ISOLATE_TOOLTIP, confirmIsolate,
+  ISOLATE_BUTTON_CLASS_COMPACT, ISOLATE_BUTTON_STYLE_COMPACT,
 } from "../lib/isolationUi";
 
 interface Props {
@@ -79,7 +80,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
             <th className="pb-2 pr-3 font-semibold">Endpoint</th>
             <th className="pb-2 pr-3 font-semibold">Regla</th>
             <th className="pb-2 pr-3 font-semibold">Severidad</th>
-            <th className="pb-2 pr-3 font-semibold">Risk score</th>
+            <th className="pb-2 pr-3 font-semibold">Puntos de riesgo</th>
             <th className="pb-2 pr-3 font-semibold">Estado</th>
             <th className="pb-2 pr-3 font-semibold">Responsable</th>
             <th className="pb-2 pr-3 font-semibold">Fecha</th>
@@ -168,8 +169,8 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                             disabled={isolatingId === item.id}
                             onClick={(e) => handleIsolate(e, item.id, item.hostname)}
                             title={ISOLATE_TOOLTIP}
-                            className="flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap transition-premium btn-hover"
-                            style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
+                            className={ISOLATE_BUTTON_CLASS_COMPACT}
+                            style={ISOLATE_BUTTON_STYLE_COMPACT}
                           >
                             <i className={isolatingId === item.id ? `${SPINNER_ICON_CLASS} text-[13px]` : `${ISOLATE_ICON_CLASS} text-[13px]`} />
                             {isolatingId === item.id ? SENDING_LABEL : ISOLATE_LABEL_COMPACT}

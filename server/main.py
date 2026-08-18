@@ -22,9 +22,11 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 )
+from reportlab.pdfgen import canvas as pdfcanvas
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
@@ -5005,39 +5007,165 @@ def api_alerts(
     }
 
 
-def _alfa_kv_table(data):
-    """Tabla de dos columnas (campo/valor) con el mismo look en todas
-    las secciones de la ficha del reporte PDF."""
+# --- Identidad visual institucional de /reportes (rediseño 2026-08-18)
+# --- Paleta sobria azul/gris/blanco -- rojo/naranja/amarillo/verde
+# quedan reservados EXCLUSIVAMENTE para criticidad (severidad/estado),
+# nunca decorativos. Ver PENDIENTES.md, "Rediseño visual de reportes".
+ALFA_BLUE = "#1f3864"
+ALFA_BLUE_LIGHT = "#e8edf5"
+ALFA_GREY_DARK = "#374151"
+ALFA_GREY_MED = "#6b7280"
+ALFA_GREY_LIGHT = "#e5e7eb"
+ALFA_GREY_BG = "#f9fafb"
+ALFA_CRIT = "#b91c1c"
+ALFA_ALTO = "#c2410c"
+ALFA_MEDIO = "#a16207"
+ALFA_OK = "#15803d"
 
-    table = Table(data, colWidths=[4 * cm, 12.5 * cm])
+_SEVERITY_COLOR_MAP = {
+    "CRÍTICO": ALFA_CRIT,
+    "ALTO": ALFA_ALTO,
+    "MEDIO": ALFA_MEDIO,
+    "BAJO": ALFA_OK,
+}
+
+
+def _severity_color(name):
+    """Color institucional asociado a una severidad -- única fuente de
+    ese mapeo para todo /reportes (PDF y XLSX), así el mismo nivel usa
+    siempre el mismo color en ambos formatos. Gris para cualquier valor
+    que no sea uno de los 4 nombres reales de 'severity_levels'."""
+    return _SEVERITY_COLOR_MAP.get(name, ALFA_GREY_MED)
+
+
+_STATUS_COLOR_MAP = {
+    # Incidentes/alertas -- abiertos en azul institucional, resueltos en
+    # verde, intermedios en ámbar. No cubre cada valor posible a
+    # propósito (spec): lo que no matchea cae al gris por defecto.
+    "OPEN": ALFA_BLUE,
+    "NEW": ALFA_BLUE,
+    "IN_PROGRESS": ALFA_MEDIO,
+    "ACKNOWLEDGED": ALFA_MEDIO,
+    "ESCALATED": ALFA_ALTO,
+    "CONTAINED": ALFA_MEDIO,
+    "CLOSED": ALFA_OK,
+    "RESOLVED": ALFA_OK,
+    "FALSE_POSITIVE": ALFA_GREY_MED,
+    # Aislamiento de host (host_isolations.status)
+    "REQUESTED": ALFA_MEDIO,
+    "EXECUTED": ALFA_OK,
+    "ISOLATION_FAILED": ALFA_CRIT,
+    "RELEASE_REQUESTED": ALFA_MEDIO,
+    "RELEASED": ALFA_GREY_MED,
+}
+
+
+def _status_color(status):
+    """Color institucional asociado a un estado (incidente, alerta o
+    aislamiento) -- misma idea que _severity_color, gris por defecto."""
+    return _STATUS_COLOR_MAP.get(status, ALFA_GREY_MED)
+
+
+def _hex_no_hash(hex_color):
+    """'#b91c1c' -> 'B91C1C', el formato que espera openpyxl en
+    PatternFill/Font(color=...)."""
+    return hex_color.lstrip("#").upper()
+
+
+def _alfa_kv_table(data, col_widths=None):
+    """Tabla de dos columnas (campo/valor) con el mismo look en todas
+    las secciones de ficha del reporte PDF."""
+
+    table = Table(data, colWidths=col_widths or [4 * cm, 12.5 * cm])
     table.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#6b7280")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor(ALFA_GREY_MED)),
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor(ALFA_GREY_LIGHT)),
     ]))
     return table
 
 
 def _alfa_table(data, col_widths=None):
     """Tabla con encabezado (primera fila) para listas dentro del
-    reporte PDF -- reglas disparadas, cadena de evidencia."""
+    reporte PDF -- reglas disparadas, cadena de evidencia. Encabezado
+    azul institucional (antes gris casi negro, decorativo sin motivo);
+    'repeatRows=1' repite el encabezado si la tabla cruza de página."""
 
     table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(ALFA_BLUE)),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor(ALFA_GREY_LIGHT)),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(ALFA_GREY_BG)]),
     ]))
+    return table
+
+
+def _hcell(text, styles):
+    """Encabezado de columna envuelto en Paragraph -- ver
+    AlfaTableHeaderCell en _alfa_styles(): un string plano en una
+    celda de Table nunca envuelve, así que un encabezado largo
+    ('Endpoints monitoreados') se superponía visualmente con la
+    columna vecina (bug detectado en validación visual 2026-08-18)."""
+    return Paragraph(str(text), styles["AlfaTableHeaderCell"])
+
+
+def _bcell(text, styles):
+    """Celda de cuerpo envuelta en Paragraph -- mismo motivo que
+    _hcell(), para columnas con texto de largo variable (hostnames,
+    nombres de regla, etc.)."""
+    return Paragraph(str(text) if text is not None else "—", styles["AlfaTableCell"])
+
+
+def _severity_bar_table(severity_counts):
+    """Visualización compacta de la distribución de severidad -- una
+    barra horizontal por nivel (CRÍTICO/ALTO/MEDIO/BAJO, en ese orden
+    fijo), largo proporcional a su participación sobre el total. Sin
+    librería de gráficos: la barra es un bloque de caracteres
+    (Courier, ancho fijo) coloreado con el mismo color institucional
+    que el resto del reporte -- reproducible entre visores de PDF sin
+    depender de Drawing/shapes."""
+
+    order = ["CRÍTICO", "ALTO", "MEDIO", "BAJO"]
+    total = sum(severity_counts.get(k, 0) for k in order) or 0
+    max_count = max((severity_counts.get(k, 0) for k in order), default=0) or 1
+
+    rows = [["Severidad", "", "Cantidad"]]
+    styles_cmds = [
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(ALFA_BLUE)),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor(ALFA_GREY_LIGHT)),
+    ]
+
+    bar_width = 24
+    for row_idx, key in enumerate(order, start=1):
+        count = severity_counts.get(key, 0)
+        filled = round((count / max_count) * bar_width) if count else 0
+        bar_text = ("█" * filled) + ("·" * (bar_width - filled))
+        rows.append([key, bar_text, str(count)])
+        color_hex = _severity_color(key)
+        styles_cmds.append(("TEXTCOLOR", (0, row_idx), (0, row_idx), colors.HexColor(color_hex)))
+        styles_cmds.append(("FONTNAME", (0, row_idx), (0, row_idx), "Helvetica-Bold"))
+        styles_cmds.append(("TEXTCOLOR", (1, row_idx), (1, row_idx), colors.HexColor(color_hex)))
+        styles_cmds.append(("FONTNAME", (1, row_idx), (1, row_idx), "Courier"))
+        styles_cmds.append(("FONTSIZE", (1, row_idx), (1, row_idx), 8))
+
+    table = Table(rows, colWidths=[2.6 * cm, 9.5 * cm, 2 * cm])
+    table.setStyle(TableStyle(styles_cmds))
     return table
 
 
@@ -5185,15 +5313,112 @@ def api_respuesta(user: dict = Depends(get_current_user)):
 
 def _alfa_styles():
     """Hoja de estilos compartida por los generadores de PDF de
-    /reportes (mismo look que el reporte de un incidente puntual,
-    /incidentes/{id}/reporte.pdf)."""
+    /reportes -- paleta institucional azul/gris/blanco (rediseño
+    2026-08-18, ver PENDIENTES.md, "Rediseño visual de reportes")."""
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="AlfaTitle", parent=styles["Title"], fontSize=18, spaceAfter=4))
-    styles.add(ParagraphStyle(name="AlfaSubtitle", parent=styles["Normal"], fontSize=9.5, textColor=colors.HexColor("#6b7280"), spaceAfter=16))
-    styles.add(ParagraphStyle(name="AlfaSection", parent=styles["Heading2"], fontSize=13, spaceBefore=14, spaceAfter=6, textColor=colors.HexColor("#111827")))
-    styles.add(ParagraphStyle(name="AlfaNote", parent=styles["Normal"], fontSize=8.5, textColor=colors.HexColor("#6b7280"), spaceAfter=10))
+    styles.add(ParagraphStyle(name="AlfaTitle", parent=styles["Title"], fontSize=18, spaceAfter=4, textColor=colors.HexColor(ALFA_BLUE)))
+    styles.add(ParagraphStyle(name="AlfaSubtitle", parent=styles["Normal"], fontSize=9.5, textColor=colors.HexColor(ALFA_GREY_MED), spaceAfter=16))
+    styles.add(ParagraphStyle(name="AlfaSection", parent=styles["Heading2"], fontSize=13, spaceBefore=16, spaceAfter=8, textColor=colors.HexColor(ALFA_BLUE), fontName="Helvetica-Bold"))
+    styles.add(ParagraphStyle(name="AlfaNote", parent=styles["Normal"], fontSize=8.5, textColor=colors.HexColor(ALFA_GREY_MED), spaceAfter=10))
+    styles.add(ParagraphStyle(name="AlfaBody", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor(ALFA_GREY_DARK), leading=14, spaceAfter=8))
+    styles.add(ParagraphStyle(name="AlfaExecSummary", parent=styles["Normal"], fontSize=10.5, textColor=colors.HexColor(ALFA_GREY_DARK), leading=15, spaceAfter=10))
+    styles.add(ParagraphStyle(name="AlfaEmptyState", parent=styles["Normal"], fontSize=9.5, textColor=colors.HexColor(ALFA_GREY_MED), fontName="Helvetica-Oblique", spaceAfter=8))
+    styles.add(ParagraphStyle(name="AlfaCoverBrand", parent=styles["Title"], fontSize=27, leading=32, alignment=TA_CENTER, textColor=colors.HexColor(ALFA_BLUE), fontName="Helvetica-Bold"))
+    styles.add(ParagraphStyle(name="AlfaCoverTagline", parent=styles["Normal"], fontSize=12, alignment=TA_CENTER, textColor=colors.HexColor(ALFA_GREY_MED), spaceAfter=4))
+    styles.add(ParagraphStyle(name="AlfaCoverReportType", parent=styles["Normal"], fontSize=16, alignment=TA_CENTER, textColor=colors.HexColor(ALFA_GREY_DARK), fontName="Helvetica-Bold", spaceBefore=28, spaceAfter=28))
+    styles.add(ParagraphStyle(name="AlfaCoverMeta", parent=styles["Normal"], fontSize=10, alignment=TA_CENTER, textColor=colors.HexColor(ALFA_GREY_DARK), leading=16))
+    styles.add(ParagraphStyle(name="AlfaCoverMetaLabel", parent=styles["Normal"], fontSize=10, alignment=TA_CENTER, textColor=colors.HexColor(ALFA_GREY_MED), leading=16))
+    # Celdas de tabla que necesitan ENVOLVER texto largo (hostnames,
+    # encabezados largos) en vez de desbordar sobre la celda vecina --
+    # un string plano en una celda de Table NO envuelve nunca, solo un
+    # Paragraph lo hace (bug detectado en validación visual 2026-08-18:
+    # "Endpoints monitoreados" y hostnames largos se superponían con la
+    # columna siguiente).
+    styles.add(ParagraphStyle(name="AlfaTableHeaderCell", parent=styles["Normal"], fontSize=8.5, textColor=colors.white, fontName="Helvetica-Bold", leading=10))
+    styles.add(ParagraphStyle(name="AlfaTableCell", parent=styles["Normal"], fontSize=8.5, textColor=colors.HexColor(ALFA_GREY_DARK), leading=10))
     return styles
+
+
+def _make_numbered_canvas(header_right_text, footer_left_text, footer_date_text):
+    """Canvas de reportlab con numeración 'Página X de Y' calculada en
+    una sola pasada (patrón estándar de reportlab: se guarda el estado
+    de cada página en 'save()' y recién ahí, sabiendo cuántas hay en
+    total, se dibuja encabezado/pie). La portada (página 1) nunca lleva
+    encabezado/pie -- se salta a propósito para que quede limpia."""
+
+    class _AlfaNumberedCanvas(pdfcanvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            pdfcanvas.Canvas.__init__(self, *args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total_content_pages = max(len(self._saved_page_states) - 1, 1)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                if self._pageNumber > 1:
+                    self._draw_alfa_furniture(self._pageNumber - 1, total_content_pages)
+                pdfcanvas.Canvas.showPage(self)
+            pdfcanvas.Canvas.save(self)
+
+        def _draw_alfa_furniture(self, page_num, total_pages):
+            width, height = letter
+            self.saveState()
+            self.setFont("Helvetica-Bold", 9)
+            self.setFillColor(colors.HexColor(ALFA_BLUE))
+            self.drawString(1.8 * cm, height - 1.3 * cm, "ALFA-Sentinel")
+            self.setFont("Helvetica", 8)
+            self.setFillColor(colors.HexColor(ALFA_GREY_MED))
+            self.drawRightString(width - 1.8 * cm, height - 1.3 * cm, header_right_text)
+            self.setStrokeColor(colors.HexColor(ALFA_GREY_LIGHT))
+            self.setLineWidth(0.7)
+            self.line(1.8 * cm, height - 1.5 * cm, width - 1.8 * cm, height - 1.5 * cm)
+            self.line(1.8 * cm, 1.5 * cm, width - 1.8 * cm, 1.5 * cm)
+            self.setFont("Helvetica", 7.5)
+            self.setFillColor(colors.HexColor(ALFA_GREY_MED))
+            self.drawString(1.8 * cm, 1.1 * cm, footer_left_text)
+            self.drawCentredString(width / 2, 1.1 * cm, f"Página {page_num} de {total_pages}")
+            self.drawRightString(width - 1.8 * cm, 1.1 * cm, footer_date_text)
+            self.restoreState()
+
+    return _AlfaNumberedCanvas
+
+
+def _build_cover_page(styles, report_type_label, period_label, start, end, generated_by, endpoint_hostname=None):
+    """Portada institucional -- ALFA-Sentinel / tagline / tipo de
+    informe / bloque de metadatos, sobria (sin KPIs, sin color de
+    fondo llamativo). Devuelve una lista de flowables que termina en
+    PageBreak(), lista para anteponer al 'story' de cada builder."""
+
+    flow = []
+    flow.append(Spacer(1, 6 * cm))
+    flow.append(Paragraph("ALFA-Sentinel", styles["AlfaCoverBrand"]))
+    flow.append(Paragraph("Sistema de Detección Temprana de Ransomware", styles["AlfaCoverTagline"]))
+    # 'report_type_label' ya viene como "Informe de Seguridad General"
+    # (REPORT_TYPE_LABELS_ES) -- no anteponer "INFORME DE" de nuevo acá
+    # (bug detectado en validación: salía "INFORME DE INFORME DE...").
+    flow.append(Paragraph(report_type_label.upper(), styles["AlfaCoverReportType"]))
+
+    scope_line = f"Endpoint: {endpoint_hostname}" if endpoint_hostname else "Alcance: Todos los endpoints monitoreados"
+
+    meta_lines = [
+        "Área: Gestión de Incidentes Informáticos",
+        "Institución: Agencia de Gobierno Electrónico y Tecnologías de Información y Comunicación (AGETIC)",
+        f"Período: {start.strftime('%d/%m/%Y')} &mdash; {end.strftime('%d/%m/%Y')}",
+        scope_line,
+        f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y')}",
+        f"Generado por: {generated_by}",
+    ]
+    for line in meta_lines:
+        flow.append(Paragraph(line, styles["AlfaCoverMeta"]))
+        flow.append(Spacer(1, 4))
+
+    flow.append(PageBreak())
+    return flow
 
 
 def _xlsx_section(ws, title, headers, rows):
@@ -5210,12 +5435,40 @@ def _xlsx_section(ws, title, headers, rows):
         for col_idx in range(1, len(headers) + 1):
             cell = ws.cell(row=header_row, column=col_idx)
             cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill(start_color="111827", end_color="111827", fill_type="solid")
+            cell.fill = PatternFill(start_color=_hex_no_hash(ALFA_BLUE), end_color=_hex_no_hash(ALFA_BLUE), fill_type="solid")
+        ws.freeze_panes = ws.cell(row=header_row + 1, column=1).coordinate
 
     for r in rows:
         ws.append(r)
 
     ws.append([])
+
+
+def _xlsx_autosize_columns(ws):
+    """Ancho por columna basado en el largo del encabezado (fila 1 de
+    cada sección tiene el título de sección, no un encabezado real de
+    tabla, así que esto es una heurística simple -- no perfecta, pero
+    reemplaza el ancho fijo 32/22/20 anterior que no tenía relación
+    con el contenido real de cada columna)."""
+
+    widths = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            col_letter = cell.column_letter
+            length = len(str(cell.value))
+            widths[col_letter] = max(widths.get(col_letter, 0), length)
+
+    for col_letter, length in widths.items():
+        ws.column_dimensions[col_letter].width = min(max(length + 4, 12), 45)
+
+
+def _xlsx_color_cell(cell, hex_color, bold=False):
+    """Aplica el mismo lenguaje de color de severidad/estado del PDF a
+    una celda de severidad/estado en el XLSX -- texto coloreado, sin
+    rellenar toda la celda (para no perder la legibilidad del grid)."""
+    cell.font = Font(color=_hex_no_hash(hex_color), bold=bold)
 
 
 # --- Recolección de datos (una función por tipo de informe) ---
@@ -5322,17 +5575,211 @@ def _gather_security_report_data(cursor, start, end, endpoint_id):
     )
     avg_resolution_seconds = cursor.fetchone()[0]
 
+    # Severidad POR INCIDENTE (no por alerta) -- la severidad más alta
+    # entre las alertas vinculadas a cada incidente, agregada con
+    # COUNT/GROUP BY sobre todos los incidentes del período. Mismo
+    # patrón de subconsulta que ya usa _gather_incidents_report_data
+    # para un incidente puntual (severity_levels.min_score DESC LIMIT
+    # 1), aplicado acá a todo el período de una sola vez. Necesario
+    # para el resumen ejecutivo: "cuántos incidentes (no alertas)
+    # llegaron a ser críticos".
+    cursor.execute(
+        f"""
+        SELECT incident_severity.severity, COUNT(*)
+        FROM (
+            SELECT incidents.id,
+                (
+                    SELECT severity_levels.name FROM alerts
+                    JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                    WHERE alerts.incident_id = incidents.id
+                    ORDER BY severity_levels.min_score DESC LIMIT 1
+                ) AS severity
+            FROM incidents
+            JOIN agents ON agents.id = incidents.agent_id
+            JOIN endpoints ON endpoints.id = agents.endpoint_id
+            WHERE incidents.opened_at BETWEEN %(start)s AND %(end)s
+            {ep_filter}
+        ) incident_severity
+        WHERE incident_severity.severity IS NOT NULL
+        GROUP BY incident_severity.severity;
+        """,
+        params
+    )
+    incident_severity_counts = dict(cursor.fetchall())
+
+    # Detalle compacto de incidentes del período -- versión liviana
+    # (sin el enriquecimiento por incidente que hace
+    # _gather_incidents_report_data, sería caro repetirlo acá solo
+    # para una tabla resumen) para la sección "Incidentes Registrados"
+    # de este mismo informe.
+    cursor.execute(
+        f"""
+        SELECT incidents.id, incidents.status, incidents.opened_at, endpoints.hostname,
+               (
+                   SELECT severity_levels.name FROM alerts
+                   JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                   WHERE alerts.incident_id = incidents.id
+                   ORDER BY severity_levels.min_score DESC LIMIT 1
+               ) AS severity
+        FROM incidents
+        JOIN agents ON agents.id = incidents.agent_id
+        JOIN endpoints ON endpoints.id = agents.endpoint_id
+        WHERE incidents.opened_at BETWEEN %(start)s AND %(end)s
+        {ep_filter}
+        ORDER BY incidents.opened_at DESC
+        LIMIT 200;
+        """,
+        params
+    )
+    incidents_detail = [
+        {
+            "code": f"INC-{r[0]:05d}",
+            "title": alert_general_title(r[4]),
+            "status_label": INCIDENT_STATUS_LABELS_ES.get(r[1], r[1]),
+            "opened_at": r[2], "hostname": r[3], "severity": r[4] or "—",
+        }
+        for r in cursor.fetchall()
+    ]
+
+    # Detalle de alertas del período -- prioridad por riesgo, no solo
+    # cronología (misma idea que /api/alerts, pero acotado al período
+    # del informe). LIMIT 200 para no volver el PDF impracticable en
+    # una base muy activa; se avisa en el propio informe si se truncó.
+    cursor.execute(
+        f"""
+        SELECT alerts.id, severity_levels.name, endpoints.hostname, alerts.risk_score,
+               alerts.status, alerts.created_at
+        FROM alerts
+        JOIN severity_levels ON severity_levels.id = alerts.severity_id
+        JOIN agents ON agents.id = alerts.agent_id
+        JOIN endpoints ON endpoints.id = agents.endpoint_id
+        WHERE alerts.created_at BETWEEN %(start)s AND %(end)s
+        {ep_filter}
+        ORDER BY alerts.risk_score DESC, alerts.created_at DESC
+        LIMIT 200;
+        """,
+        params
+    )
+    alert_rows = cursor.fetchall()
+    alerts_detail = [
+        {
+            "id": r[0], "code": f"ALT-{r[0]:05d}",
+            "title": alert_general_title(r[1]),
+            "severity": r[1], "hostname": r[2],
+            "risk_score": float(r[3]) if r[3] is not None else 0.0,
+            "status": r[4], "status_label": ALERT_STATUS_LABELS_ES.get(r[4], r[4]),
+            "created_at": r[5],
+        }
+        for r in alert_rows
+    ]
+
+    # Activaciones de honeyfile del período -- evidencia de intrusión de
+    # mayor confianza del sistema (sección 7 de "Corrección definitiva
+    # en la lógica y presentación de ALERTAS"). Reutiliza el mismo join
+    # honeyfile_activations -> honeyfiles -> agents -> endpoints que el
+    # resto del archivo.
+    cursor.execute(
+        f"""
+        SELECT honeyfile_activations.id, endpoints.hostname, honeyfiles.file_name,
+               honeyfile_activations.operation, honeyfile_activations.detected_at
+        FROM honeyfile_activations
+        JOIN honeyfiles ON honeyfiles.id = honeyfile_activations.honeyfile_id
+        JOIN agents ON agents.id = honeyfile_activations.agent_id
+        JOIN endpoints ON endpoints.id = agents.endpoint_id
+        WHERE honeyfile_activations.detected_at BETWEEN %(start)s AND %(end)s
+        {ep_filter}
+        ORDER BY honeyfile_activations.detected_at DESC
+        LIMIT 50;
+        """,
+        params
+    )
+    honeyfile_events = [
+        {"id": r[0], "hostname": r[1], "file_name": r[2], "operation": r[3], "detected_at": r[4]}
+        for r in cursor.fetchall()
+    ]
+
+    # Acciones de aislamiento del período -- "Origen" (automático vs.
+    # manual) se deduce de 'requested_by IS NULL', el mismo criterio ya
+    # usado en el resto del sistema para distinguir el motor heurístico
+    # (report_alert(), sin usuario) de un analista disparando
+    # POST /incidents/{id}/isolate.
+    cursor.execute(
+        f"""
+        SELECT endpoints.hostname, host_isolations.isolation_type, host_isolations.requested_by,
+               host_isolations.status, host_isolations.requested_at, host_isolations.result
+        FROM host_isolations
+        JOIN agents ON agents.id = host_isolations.agent_id
+        JOIN endpoints ON endpoints.id = agents.endpoint_id
+        WHERE host_isolations.requested_at BETWEEN %(start)s AND %(end)s
+        {ep_filter}
+        ORDER BY host_isolations.requested_at DESC;
+        """,
+        params
+    )
+    isolation_actions = [
+        {
+            "hostname": r[0],
+            "isolation_type_label": ISOLATION_TYPE_LABELS_ES.get(r[1], r[1]),
+            "origin": "Automático" if r[2] is None else "Manual",
+            "status": r[3], "status_label": ISOLATION_STATUS_LABELS_ES.get(r[3], r[3]),
+            "requested_at": r[4], "result": r[5] or "—",
+        }
+        for r in cursor.fetchall()
+    ]
+
+    # KPIs del resumen ejecutivo -- endpoints monitoreados (todos, no
+    # solo los que tuvieron actividad en el período: es "cobertura",
+    # no "actividad") y alertas efectivamente resueltas en el período
+    # (alerts.resolved_at IS NOT NULL, mismo criterio que ya usa el
+    # tiempo de resolución promedio de arriba).
+    ep_only_filter = "WHERE id = %(endpoint_id)s" if endpoint_id else ""
+    cursor.execute(f"SELECT COUNT(*) FROM endpoints {ep_only_filter};", params)
+    endpoints_monitored = cursor.fetchone()[0]
+
+    # Endpoints involucrados -- reutiliza el mismo gatherer del informe
+    # de Endpoints (misma consulta, mismas columnas agent_version/
+    # last_seen/alertas/incidentes) en vez de duplicar la lógica; acá
+    # solo se listan los que tuvieron actividad real en el período
+    # (o todos, si el informe ya está acotado a un único endpoint).
+    endpoints_report_data = _gather_endpoints_report_data(cursor, start, end, endpoint_id)
+    if endpoint_id:
+        endpoints_involved = endpoints_report_data["endpoints"]
+    else:
+        endpoints_involved = [e for e in endpoints_report_data["endpoints"] if e["event_count"] > 0]
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*) FROM alerts
+        JOIN agents ON agents.id = alerts.agent_id
+        JOIN endpoints ON endpoints.id = agents.endpoint_id
+        WHERE alerts.resolved_at IS NOT NULL
+          AND alerts.created_at BETWEEN %(start)s AND %(end)s
+        {ep_filter};
+        """,
+        params
+    )
+    resolved_alerts_count = cursor.fetchone()[0]
+
     return {
         "severity_counts": severity_counts,
         "total_alerts": sum(severity_counts.values()),
         "incident_status_counts": incident_status_counts,
         "total_incidents": sum(incident_status_counts.values()),
+        "incident_severity_counts": incident_severity_counts,
         "classification_counts": classification_counts,
         "rule_counts": rule_counts,
         "honeyfiles_active": hf_active or 0,
         "honeyfiles_triggered": hf_triggered or 0,
         "honeyfiles_total": hf_total or 0,
         "avg_resolution_seconds": float(avg_resolution_seconds) if avg_resolution_seconds is not None else None,
+        "alerts_detail": alerts_detail,
+        "alerts_detail_truncated": len(alert_rows) >= 200,
+        "honeyfile_events": honeyfile_events,
+        "isolation_actions": isolation_actions,
+        "endpoints_monitored": endpoints_monitored,
+        "resolved_alerts_count": resolved_alerts_count,
+        "endpoints_involved": endpoints_involved,
+        "incidents_detail": incidents_detail,
     }
 
 
@@ -5355,7 +5802,7 @@ def _gather_endpoints_report_data(cursor, start, end, endpoint_id):
     cursor.execute(
         f"""
         SELECT endpoints.hostname, endpoints.ip_address, endpoints.os,
-               agents.status,
+               agents.status, agents.agent_version, agents.last_seen_at,
                (
                    agents.status = 'ONLINE'
                    AND agents.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '{stale_seconds} seconds'
@@ -5373,7 +5820,17 @@ def _gather_endpoints_report_data(cursor, start, end, endpoint_id):
                    SELECT COUNT(*) FROM agent_honeyfile_templates
                    WHERE agent_honeyfile_templates.agent_id = agents.id
                      AND agent_honeyfile_templates.status = 'PENDING'
-               ) AS honeyfiles_pending
+               ) AS honeyfiles_pending,
+               (
+                   SELECT COUNT(*) FROM alerts
+                   WHERE alerts.agent_id = agents.id
+                     AND alerts.created_at BETWEEN %(start)s AND %(end)s
+               ) AS alert_count,
+               (
+                   SELECT COUNT(*) FROM incidents
+                   WHERE incidents.agent_id = agents.id
+                     AND incidents.opened_at BETWEEN %(start)s AND %(end)s
+               ) AS incident_count
         FROM agents
         JOIN endpoints ON endpoints.id = agents.endpoint_id
         WHERE 1=1 {ep_filter}
@@ -5384,7 +5841,8 @@ def _gather_endpoints_report_data(cursor, start, end, endpoint_id):
     rows = cursor.fetchall()
 
     endpoints_data = []
-    for hostname, ip, os_name, status, is_online, event_count, hf_deployed, hf_pending in rows:
+    for (hostname, ip, os_name, status, agent_version, last_seen_at, is_online, event_count,
+         hf_deployed, hf_pending, alert_count, incident_count) in rows:
         status_label = "En línea" if is_online else ("Sin señal reciente" if status == "ONLINE" else "Desconectado")
         endpoints_data.append({
             "hostname": hostname,
@@ -5392,9 +5850,14 @@ def _gather_endpoints_report_data(cursor, start, end, endpoint_id):
             "os": os_name,
             "is_online": is_online,
             "status_label": status_label,
+            "agent_version": agent_version or "—",
+            "last_seen_at": last_seen_at,
+            "last_seen_label": last_seen_at.strftime("%d/%m/%Y %H:%M") if last_seen_at else "Nunca",
             "event_count": event_count,
             "honeyfiles_deployed": hf_deployed,
-            "honeyfiles_pending": hf_pending
+            "honeyfiles_pending": hf_pending,
+            "alert_count": alert_count,
+            "incident_count": incident_count,
         })
 
     return {
@@ -5436,7 +5899,8 @@ def _gather_incidents_report_data(cursor, start, end, endpoint_id):
                    WHERE alerts.incident_id = incidents.id
                    ORDER BY severity_levels.min_score DESC
                    LIMIT 1
-               ) AS severity
+               ) AS severity,
+               incidents.agent_id, incidents.description
         FROM incidents
         JOIN agents ON agents.id = incidents.agent_id
         JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -5461,10 +5925,136 @@ def _gather_incidents_report_data(cursor, start, end, endpoint_id):
             "opened_at": r[4], "closed_at": r[5], "hostname": r[6],
             "assigned_to_name": r[7] or "Sin asignar", "risk_score": float(r[8]),
             "rule_label": r[9] if r[9] else "Sin regla vinculada",
-            "alert_count": r[10]
+            "alert_count": r[10], "severity": r[11],
+            "agent_id": r[12], "description": r[13],
         }
         for r in rows
     ]
+
+    # Ficha ("expediente") por incidente -- enriquece cada fila de
+    # arriba con lo mismo que ya arma get_incidente_drawer() para el
+    # panel lateral del incidente en vivo (mismas tablas, mismas
+    # ventanas de correlación, misma prioridad honeyfile > evento de
+    # archivo para atribuir proceso) para no contradecir la definición
+    # de "evidencia"/"proceso involucrado" que ya usa el resto del
+    # sistema. No se llama a get_incidente_drawer() directamente
+    # (endpoint HTTP atado a Depends(get_current_user) y a un solo id
+    # por llamada) -- se repiten las mismas consultas, una vez por
+    # incidente del período.
+    for inc in incidents_data:
+        cursor.execute(
+            """
+            SELECT heuristic_rules.name, alert_rule.weight_applied, alert_rule.matched_at
+            FROM alert_rule
+            JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+            JOIN alerts ON alerts.id = alert_rule.alert_id
+            WHERE alerts.incident_id = %s;
+            """,
+            (inc["id"],)
+        )
+        contributing_rows = cursor.fetchall()
+        is_honeyfile = any(r[0] == "Acceso Honeyfile" for r in contributing_rows)
+        inc["contributing_rules"] = [
+            {
+                "rule_name": r[0],
+                "weight_applied": float(r[1]),
+                "matched_at": r[2].strftime("%d/%m/%Y %H:%M:%S") if r[2] else "—",
+            }
+            for r in sort_contributing_rules(contributing_rows)
+        ]
+        inc["is_honeyfile"] = is_honeyfile
+
+        # Aislamiento -- host_isolations.incident_id es NOT NULL y
+        # referencia directamente al incidente que lo originó, así que
+        # (a diferencia del drawer, que necesita resolverlo por agente
+        # para cubrir aislamientos disparados desde OTRO incidente del
+        # mismo endpoint) acá alcanza con filtrar por este incidente.
+        cursor.execute(
+            """
+            SELECT isolation_type, status, requested_at, executed_at, released_at, result, requested_by
+            FROM host_isolations
+            WHERE incident_id = %s
+            ORDER BY requested_at DESC LIMIT 1;
+            """,
+            (inc["id"],)
+        )
+        iso_row = cursor.fetchone()
+        if iso_row:
+            inc["isolation"] = {
+                "isolation_type_label": ISOLATION_TYPE_LABELS_ES.get(iso_row[0], iso_row[0]),
+                "status": iso_row[1], "status_label": ISOLATION_STATUS_LABELS_ES.get(iso_row[1], iso_row[1]),
+                "requested_at": iso_row[2].strftime("%d/%m/%Y %H:%M:%S") if iso_row[2] else "—",
+                "executed_at": iso_row[3].strftime("%d/%m/%Y %H:%M:%S") if iso_row[3] else None,
+                "released_at": iso_row[4].strftime("%d/%m/%Y %H:%M:%S") if iso_row[4] else None,
+                "result": iso_row[5] or "—",
+                "origin": "Automático" if iso_row[6] is None else "Manual",
+            }
+        else:
+            inc["isolation"] = None
+
+        # Ventana del incidente completo (apertura -> cierre, o "ahora"
+        # si sigue abierto) -- más amplia que la ventana de 5min/1min
+        # del drawer (esa es para el ANCLA de una sola alerta; acá se
+        # cubre el expediente completo del incidente).
+        window_start = inc["opened_at"]
+        window_end = inc["closed_at"] or datetime.now()
+
+        cursor.execute(
+            """
+            SELECT honeyfile_activations.detected_at, honeyfile_activations.operation,
+                   honeyfiles.file_name, honeyfile_activations.process_name, honeyfile_activations.process_id
+            FROM honeyfile_activations
+            JOIN honeyfiles ON honeyfiles.id = honeyfile_activations.honeyfile_id
+            WHERE honeyfile_activations.agent_id = %s
+              AND honeyfile_activations.detected_at BETWEEN %s AND %s
+            ORDER BY honeyfile_activations.detected_at DESC LIMIT 20;
+            """,
+            (inc["agent_id"], window_start, window_end)
+        )
+        inc["honeyfile_events"] = [
+            {
+                "detected_at": r[0].strftime("%d/%m/%Y %H:%M:%S"),
+                "operation": r[1], "file_name": r[2],
+                "process_name": r[3] or "No disponible",
+                "process_id": r[4] if r[4] is not None else "No disponible",
+            }
+            for r in cursor.fetchall()
+        ]
+
+        # Proceso asociado -- misma prioridad que get_incidente_drawer():
+        # honeyfile_activations primero si hubo 'Acceso Honeyfile' entre
+        # las reglas (atribución más confiable), si no, el evento de
+        # archivo más reciente de la ventana que sí tenga proceso.
+        # Nunca se inventa -- "No disponible" si el agente no lo mandó.
+        process_name = process_id = None
+        if is_honeyfile:
+            cursor.execute(
+                """
+                SELECT process_name, process_id FROM honeyfile_activations
+                WHERE agent_id = %s AND detected_at BETWEEN %s AND %s
+                  AND (process_name IS NOT NULL OR process_id IS NOT NULL)
+                ORDER BY detected_at DESC LIMIT 1;
+                """,
+                (inc["agent_id"], window_start, window_end)
+            )
+            proc_row = cursor.fetchone()
+            if proc_row:
+                process_name, process_id = proc_row
+        if process_name is None and process_id is None:
+            cursor.execute(
+                """
+                SELECT process_name, process_id FROM events
+                WHERE agent_id = %s AND detected_at BETWEEN %s AND %s
+                  AND (process_name IS NOT NULL OR process_id IS NOT NULL)
+                ORDER BY detected_at DESC LIMIT 1;
+                """,
+                (inc["agent_id"], window_start, window_end)
+            )
+            proc_row = cursor.fetchone()
+            if proc_row:
+                process_name, process_id = proc_row
+        inc["process_name"] = process_name or "No disponible"
+        inc["process_id"] = process_id if process_id is not None else "No disponible"
 
     return {
         "incidents": incidents_data,
@@ -5483,40 +6073,126 @@ REPORT_DATA_GATHERERS = {
 
 # --- Generadores de PDF (reportlab) ---
 
+def _report_canvasmaker(meta):
+    """Atajo -- arma el canvasmaker numerado con los 3 textos fijos que
+    usan los 3 builders PDF (header derecho siempre igual, footer con
+    el tipo de informe y la fecha de generación)."""
+    return _make_numbered_canvas(
+        "Área de Gestión de Incidentes Informáticos",
+        meta["report_type_label"],
+        f"Generado el {datetime.now().strftime('%d/%m/%Y')}",
+    )
+
+
+def _report_scope_line(meta):
+    return f"Endpoint: {meta['endpoint_hostname']}" if meta.get("endpoint_hostname") else "Alcance: todos los endpoints monitoreados por ALFA-Sentinel."
+
+
 def _build_security_pdf(data, meta):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1.8 * cm, bottomMargin=1.8 * cm, leftMargin=1.8 * cm, rightMargin=1.8 * cm)
     styles = _alfa_styles()
-    story = [Paragraph(f"ALFA-Sentinel &mdash; {meta['title']}", styles["AlfaTitle"]), Paragraph(meta["subtitle"], styles["AlfaSubtitle"])]
 
-    story.append(Paragraph("1. Resumen de Alertas por Severidad", styles["AlfaSection"]))
-    sev_rows = [["Severidad", "Cantidad"]]
-    for key in ("CRÍTICO", "ALTO", "MEDIO"):
-        sev_rows.append([key, str(data["severity_counts"].get(key, 0))])
-    sev_rows.append(["Total", str(data["total_alerts"])])
-    story.append(_alfa_table(sev_rows))
+    story = _build_cover_page(
+        styles, meta["report_type_label"], meta["period_label"], meta["start"], meta["end"],
+        meta["generated_by"], meta.get("endpoint_hostname")
+    )
 
-    story.append(Paragraph("2. Incidentes por Estado", styles["AlfaSection"]))
-    if data["incident_status_counts"]:
-        inc_rows = [["Estado", "Cantidad"]] + [[INCIDENT_STATUS_LABELS_ES.get(s, s), str(n)] for s, n in data["incident_status_counts"].items()]
-        story.append(_alfa_table(inc_rows))
+    start_label = meta["start"].strftime("%d/%m/%Y")
+    end_label = meta["end"].strftime("%d/%m/%Y")
+    crit_incidents = data["incident_severity_counts"].get("CRÍTICO", 0)
+    closed_incidents = data["incident_status_counts"].get("CLOSED", 0)
+
+    # 1. Resumen Ejecutivo
+    story.append(Paragraph("1. Resumen Ejecutivo", styles["AlfaSection"]))
+    kpi_rows = [
+        [_hcell(h, styles) for h in ("Endpoints monitoreados", "Alertas", "Incidentes", "Críticos", "Resueltos")],
+        [str(data["endpoints_monitored"]), str(data["total_alerts"]), str(data["total_incidents"]),
+         str(crit_incidents), str(data["resolved_alerts_count"])],
+    ]
+    story.append(_alfa_table(kpi_rows, col_widths=[3.4 * cm] * 5))
+    story.append(Spacer(1, 10))
+    if data["total_alerts"] > 0 or data["total_incidents"] > 0:
+        narrative = (
+            f"Durante el período comprendido entre el {start_label} y el {end_label} se registraron "
+            f"{data['total_alerts']} alertas y {data['total_incidents']} incidentes sobre "
+            f"{data['endpoints_monitored']} endpoint(s) monitoreado(s). De los incidentes identificados, "
+            f"{crit_incidents} alcanzaron severidad crítica y {closed_incidents} fueron cerrados durante "
+            f"el período analizado. Se registraron {data['resolved_alerts_count']} alertas resueltas."
+        )
     else:
-        story.append(Paragraph("No se abrieron incidentes en el período evaluado.", styles["Normal"]))
+        narrative = (
+            f"Durante el período comprendido entre el {start_label} y el {end_label} no se registró "
+            f"actividad de alertas ni incidentes sobre los endpoints monitoreados."
+        )
+    story.append(Paragraph(narrative, styles["AlfaExecSummary"]))
 
-    if data["classification_counts"]:
+    # 2. Periodo y Alcance
+    story.append(Paragraph("2. Periodo y Alcance", styles["AlfaSection"]))
+    story.append(Paragraph(f"Período evaluado: {start_label} al {end_label}. {_report_scope_line(meta)}", styles["AlfaBody"]))
+
+    # 3. Estado General de Seguridad
+    story.append(Paragraph("3. Estado General de Seguridad", styles["AlfaSection"]))
+    story.append(_severity_bar_table(data["severity_counts"]))
+
+    # 4. Alertas Detectadas
+    story.append(Paragraph("4. Alertas Detectadas", styles["AlfaSection"]))
+    if data["alerts_detail"]:
+        rows = [[_hcell(h, styles) for h in ("ID", "Título", "Endpoint", "Severidad", "Riesgo", "Estado", "Fecha")]]
+        for a in data["alerts_detail"]:
+            rows.append([
+                a["code"], Paragraph(a["title"], styles["Normal"]), _bcell(a["hostname"], styles),
+                Paragraph(f'<font color="{_severity_color(a["severity"])}"><b>{a["severity"]}</b></font>', styles["Normal"]),
+                f'{a["risk_score"]:.0f}', a["status_label"], a["created_at"].strftime("%d/%m/%Y %H:%M"),
+            ])
+        story.append(_alfa_table(rows, col_widths=[1.8 * cm, 4 * cm, 2.6 * cm, 2 * cm, 1.6 * cm, 2.3 * cm, 2.7 * cm]))
+        if data["alerts_detail_truncated"]:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(
+                f"Mostrando los 200 registros de mayor prioridad de un total de {data['total_alerts']}.",
+                styles["AlfaNote"]
+            ))
+    else:
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
+
+    # 5. Incidentes Registrados
+    story.append(Paragraph("5. Incidentes Registrados", styles["AlfaSection"]))
+    if data["incident_status_counts"]:
+        inc_status_rows = [[_hcell("Estado", styles), _hcell("Cantidad", styles)]] + [[INCIDENT_STATUS_LABELS_ES.get(s, s), str(n)] for s, n in data["incident_status_counts"].items()]
+        story.append(_alfa_table(inc_status_rows))
         story.append(Spacer(1, 8))
-        story.append(Paragraph("Clasificación de los incidentes cerrados en el período:", styles["Normal"]))
-        cls_rows = [["Clasificación", "Cantidad"]] + [[INCIDENT_CLASSIFICATION_LABELS_ES.get(c, c), str(n)] for c, n in data["classification_counts"].items()]
-        story.append(_alfa_table(cls_rows))
+        if data["incidents_detail"]:
+            inc_rows = [[_hcell(h, styles) for h in ("ID", "Título", "Endpoint", "Severidad", "Fecha apertura")]]
+            for inc in data["incidents_detail"]:
+                inc_rows.append([
+                    inc["code"], Paragraph(inc["title"], styles["Normal"]), _bcell(inc["hostname"], styles),
+                    Paragraph(f'<font color="{_severity_color(inc["severity"])}"><b>{inc["severity"]}</b></font>', styles["Normal"]),
+                    inc["opened_at"].strftime("%d/%m/%Y %H:%M"),
+                ])
+            story.append(_alfa_table(inc_rows, col_widths=[1.8 * cm, 5 * cm, 3.2 * cm, 2.2 * cm, 3.5 * cm]))
+    else:
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
 
-    story.append(Paragraph("3. Reglas Heurísticas Más Activas", styles["AlfaSection"]))
+    # 6. Principales Evidencias
+    story.append(Paragraph("6. Principales Evidencias", styles["AlfaSection"]))
+    story.append(Paragraph("Reglas heurísticas más activas:", styles["AlfaBody"]))
     if data["rule_counts"]:
-        rule_rows = [["Regla", "Alertas disparadas"]] + [[name or "Sin regla vinculada", str(n)] for name, n in data["rule_counts"]]
+        rule_rows = [[_hcell("Regla", styles), _hcell("Alertas disparadas", styles)]] + [[name or "Sin regla vinculada", str(n)] for name, n in data["rule_counts"]]
         story.append(_alfa_table(rule_rows))
     else:
-        story.append(Paragraph("No hubo alertas en el período evaluado.", styles["Normal"]))
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Activaciones de honeyfile más recientes:", styles["AlfaBody"]))
+    if data["honeyfile_events"]:
+        hf_rows = [[_hcell(h, styles) for h in ("ID", "Endpoint", "Archivo", "Operación", "Fecha")]]
+        for hf in data["honeyfile_events"][:30]:
+            hf_rows.append([str(hf["id"]), _bcell(hf["hostname"], styles), _bcell(hf["file_name"], styles), hf["operation"], hf["detected_at"].strftime("%d/%m/%Y %H:%M")])
+        story.append(_alfa_table(hf_rows, col_widths=[1.6 * cm, 3.2 * cm, 4.8 * cm, 3.2 * cm, 3.2 * cm]))
+    else:
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
 
-    story.append(Paragraph("4. Cobertura de Honeyfiles", styles["AlfaSection"]))
+    # 7. Actividad de Honeyfiles
+    story.append(Paragraph("7. Actividad de Honeyfiles", styles["AlfaSection"]))
     coverage_pct = round((data["honeyfiles_active"] + data["honeyfiles_triggered"]) / data["honeyfiles_total"] * 100, 1) if data["honeyfiles_total"] else 0
     hf_kv = [
         ["Honeyfiles desplegados", str(data["honeyfiles_total"])],
@@ -5526,14 +6202,47 @@ def _build_security_pdf(data, meta):
     ]
     story.append(_alfa_kv_table([[Paragraph(k, styles["Normal"]), Paragraph(v, styles["Normal"])] for k, v in hf_kv]))
 
-    story.append(Paragraph("5. Tiempo de Resolución", styles["AlfaSection"]))
-    if data["avg_resolution_seconds"] is not None:
-        minutes = round(data["avg_resolution_seconds"] / 60, 1)
-        story.append(Paragraph(f"Tiempo promedio de resolución de alertas en el período: {minutes} minutos.", styles["Normal"]))
+    # 8. Respuesta y Acciones Ejecutadas
+    story.append(Paragraph("8. Respuesta y Acciones Ejecutadas", styles["AlfaSection"]))
+    if data["isolation_actions"]:
+        iso_rows = [[_hcell(h, styles) for h in ("Endpoint", "Tipo", "Origen", "Estado", "Fecha", "Resultado")]]
+        for iso in data["isolation_actions"]:
+            iso_rows.append([
+                _bcell(iso["hostname"], styles), iso["isolation_type_label"], iso["origin"],
+                Paragraph(f'<font color="{_status_color(iso["status"])}"><b>{iso["status_label"]}</b></font>', styles["Normal"]),
+                iso["requested_at"].strftime("%d/%m/%Y %H:%M"), _bcell(iso["result"], styles),
+            ])
+        story.append(_alfa_table(iso_rows, col_widths=[2.8 * cm, 2.6 * cm, 2 * cm, 3.2 * cm, 2.8 * cm, 3.6 * cm]))
     else:
-        story.append(Paragraph("Sin datos aún -- no hay alertas resueltas en el período evaluado.", styles["Normal"]))
+        story.append(Paragraph("No se registraron acciones de aislamiento durante el período.", styles["AlfaEmptyState"]))
 
-    doc.build(story)
+    # 9. Endpoints Involucrados
+    story.append(Paragraph("9. Endpoints Involucrados", styles["AlfaSection"]))
+    if data["endpoints_involved"]:
+        ep_rows = [[_hcell(h, styles) for h in ("Endpoint", "SO", "Conectividad", "Eventos", "Alertas", "Incidentes")]]
+        for ep in data["endpoints_involved"]:
+            ep_rows.append([
+                _bcell(ep["hostname"], styles), ep["os"] or "—", ep["status_label"],
+                str(ep["event_count"]), str(ep["alert_count"]), str(ep["incident_count"]),
+            ])
+        story.append(_alfa_table(ep_rows, col_widths=[4 * cm, 3 * cm, 3.2 * cm, 2.2 * cm, 2.2 * cm, 2.4 * cm]))
+    else:
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
+
+    # 10. Conclusiones
+    story.append(Paragraph("10. Conclusiones", styles["AlfaSection"]))
+    if data["total_alerts"] == 0 and data["total_incidents"] == 0:
+        conclusion = "El período analizado no registró actividad suficiente para extraer conclusiones estadísticamente relevantes."
+    else:
+        conclusion = (
+            f"Durante el período analizado se registraron {data['total_alerts']} alertas y "
+            f"{data['total_incidents']} incidentes. De estos, {crit_incidents} alcanzaron severidad crítica "
+            f"y {len(data['isolation_actions'])} fueron gestionados mediante políticas de contención "
+            f"automática o manual."
+        )
+    story.append(Paragraph(conclusion, styles["AlfaBody"]))
+
+    doc.build(story, canvasmaker=_report_canvasmaker(meta))
     buffer.seek(0)
     return buffer
 
@@ -5542,91 +6251,261 @@ def _build_endpoints_pdf(data, meta):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1.8 * cm, bottomMargin=1.8 * cm, leftMargin=1.8 * cm, rightMargin=1.8 * cm)
     styles = _alfa_styles()
-    story = [Paragraph(f"ALFA-Sentinel &mdash; {meta['title']}", styles["AlfaTitle"]), Paragraph(meta["subtitle"], styles["AlfaSubtitle"])]
 
-    story.append(Paragraph("1. Resumen", styles["AlfaSection"]))
-    resumen = [
-        ["Endpoints evaluados", str(data["total_endpoints"])],
-        ["En línea al momento de generar", str(data["online_count"])],
-        ["Eventos totales en el período", str(data["total_events"])],
+    story = _build_cover_page(
+        styles, meta["report_type_label"], meta["period_label"], meta["start"], meta["end"],
+        meta["generated_by"], meta.get("endpoint_hostname")
+    )
+
+    start_label = meta["start"].strftime("%d/%m/%Y")
+    end_label = meta["end"].strftime("%d/%m/%Y")
+
+    # 1. Resumen Ejecutivo
+    story.append(Paragraph("1. Resumen Ejecutivo", styles["AlfaSection"]))
+    kpi_rows = [
+        [_hcell(h, styles) for h in ("Endpoints evaluados", "En línea", "Eventos totales")],
+        [str(data["total_endpoints"]), str(data["online_count"]), str(data["total_events"])],
     ]
-    story.append(_alfa_kv_table([[Paragraph(k, styles["Normal"]), Paragraph(v, styles["Normal"])] for k, v in resumen]))
+    story.append(_alfa_table(kpi_rows, col_widths=[6 * cm] * 3))
+    story.append(Spacer(1, 10))
+    if data["total_endpoints"] > 0:
+        narrative = (
+            f"Durante el período comprendido entre el {start_label} y el {end_label} se evaluaron "
+            f"{data['total_endpoints']} endpoint(s), de los cuales {data['online_count']} se encontraban "
+            f"en línea al momento de generar este informe. Se registraron {data['total_events']} eventos "
+            f"en total sobre los endpoints evaluados."
+        )
+    else:
+        narrative = "No hay endpoints registrados que coincidan con el filtro aplicado."
+    story.append(Paragraph(narrative, styles["AlfaExecSummary"]))
 
-    story.append(Paragraph("2. Detalle por Endpoint", styles["AlfaSection"]))
+    # 2. Periodo y Alcance
+    story.append(Paragraph("2. Periodo y Alcance", styles["AlfaSection"]))
+    story.append(Paragraph(f"Período evaluado: {start_label} al {end_label}. {_report_scope_line(meta)}", styles["AlfaBody"]))
+
+    # 3. Detalle por Endpoint
+    story.append(Paragraph("3. Detalle por Endpoint", styles["AlfaSection"]))
     if data["endpoints"]:
-        rows = [["Endpoint", "SO", "Conectividad", "Eventos", "Honeyfiles (desplegados / pendientes)"]]
+        rows = [[_hcell(h, styles) for h in ("Hostname", "SO", "Estado", "Versión agente", "Última comunicación", "Eventos", "Alertas", "Incidentes")]]
         for ep in data["endpoints"]:
             rows.append([
-                Paragraph(f"{ep['hostname']}<br/>{ep['ip_address']}", styles["Normal"]),
-                ep["os"] or "—", ep["status_label"], str(ep["event_count"]),
-                f"{ep['honeyfiles_deployed']} / {ep['honeyfiles_pending']}"
+                _bcell(ep["hostname"], styles), ep["os"] or "—", ep["status_label"], ep["agent_version"],
+                ep["last_seen_label"], str(ep["event_count"]), str(ep["alert_count"]), str(ep["incident_count"]),
             ])
-        story.append(_alfa_table(rows, col_widths=[4.5 * cm, 2.3 * cm, 3 * cm, 2 * cm, 4.5 * cm]))
+        story.append(_alfa_table(rows, col_widths=[2.6 * cm, 1.8 * cm, 2.2 * cm, 2 * cm, 2.8 * cm, 1.6 * cm, 1.6 * cm, 2.2 * cm]))
     else:
-        story.append(Paragraph("No hay endpoints registrados que coincidan con el filtro.", styles["Normal"]))
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
 
-    doc.build(story)
+    # 4. Conclusiones
+    story.append(Paragraph("4. Conclusiones", styles["AlfaSection"]))
+    if data["total_endpoints"] == 0:
+        conclusion = "El período analizado no registró actividad suficiente para extraer conclusiones estadísticamente relevantes."
+    else:
+        conclusion = (
+            f"De los {data['total_endpoints']} endpoints evaluados, {data['online_count']} permanecían en "
+            f"línea al momento de generar este informe, con {data['total_events']} eventos registrados en "
+            f"el período analizado."
+        )
+    story.append(Paragraph(conclusion, styles["AlfaBody"]))
+
+    doc.build(story, canvasmaker=_report_canvasmaker(meta))
     buffer.seek(0)
     return buffer
 
 
 def _build_incidents_pdf(data, meta):
+    """Cada incidente del período se rinde como un expediente/dossier
+    completo (sección 3) -- no una fila de tabla plana. Cuando el
+    resultado son 0 o 1 incidentes (p.ej. informe acotado a un
+    endpoint con un único caso en el período), esta misma sección se
+    lee como el 'informe de incidente individual' -- no existe un
+    tipo de informe ni un endpoint separado para eso, es este mismo
+    reporte con un solo expediente adentro."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1.8 * cm, bottomMargin=1.8 * cm, leftMargin=1.8 * cm, rightMargin=1.8 * cm)
     styles = _alfa_styles()
-    story = [Paragraph(f"ALFA-Sentinel &mdash; {meta['title']}", styles["AlfaTitle"]), Paragraph(meta["subtitle"], styles["AlfaSubtitle"])]
+    incident_header_style = ParagraphStyle(
+        name="AlfaIncidentHeader", parent=styles["Heading3"], fontSize=11.5,
+        textColor=colors.HexColor(ALFA_BLUE), spaceBefore=12, spaceAfter=4
+    )
+    subsection_style = ParagraphStyle(
+        name="AlfaIncidentSubsection", parent=styles["Normal"], fontSize=9.5,
+        textColor=colors.HexColor(ALFA_GREY_DARK), fontName="Helvetica-Bold", spaceBefore=6, spaceAfter=3
+    )
 
-    story.append(Paragraph(
-        "Este informe es un resumen de auditoría de los incidentes abiertos en el período -- no "
-        "incluye la traza técnica completa de cada uno (proceso, hashes, cadena de evidencia). "
-        "Para el detalle forense de un incidente puntual, usar su Reporte PDF individual desde el "
-        "Expediente en Incidentes y Alertas.",
-        styles["AlfaNote"]
-    ))
+    story = _build_cover_page(
+        styles, meta["report_type_label"], meta["period_label"], meta["start"], meta["end"],
+        meta["generated_by"], meta.get("endpoint_hostname")
+    )
 
-    story.append(Paragraph("1. Resumen", styles["AlfaSection"]))
-    resumen = [
-        ["Incidentes en el período", str(data["total_incidents"])],
-        ["Cerrados", str(data["closed_count"])],
-        ["Abiertos / en curso", str(data["open_count"])],
+    start_label = meta["start"].strftime("%d/%m/%Y")
+    end_label = meta["end"].strftime("%d/%m/%Y")
+
+    # 1. Resumen Ejecutivo
+    story.append(Paragraph("1. Resumen Ejecutivo", styles["AlfaSection"]))
+    kpi_rows = [
+        [_hcell(h, styles) for h in ("Incidentes en el período", "Cerrados", "Abiertos / en curso")],
+        [str(data["total_incidents"]), str(data["closed_count"]), str(data["open_count"])],
     ]
-    story.append(_alfa_kv_table([[Paragraph(k, styles["Normal"]), Paragraph(v, styles["Normal"])] for k, v in resumen]))
-
-    story.append(Paragraph("2. Detalle de Incidentes", styles["AlfaSection"]))
-    if data["incidents"]:
-        rows = [["ID", "Título", "Endpoint", "Regla", "Estado", "Responsable", "Abierto"]]
-        for inc in data["incidents"]:
-            rows.append([
-                inc["code"], Paragraph(inc["title"], styles["Normal"]), inc["hostname"],
-                inc["rule_label"], inc["status_label"], inc["assigned_to_name"],
-                inc["opened_at"].strftime("%d/%m/%Y")
-            ])
-        story.append(_alfa_table(rows, col_widths=[2 * cm, 4 * cm, 2.7 * cm, 3 * cm, 2.3 * cm, 2.5 * cm, 2 * cm]))
+    story.append(_alfa_table(kpi_rows, col_widths=[6 * cm] * 3))
+    story.append(Spacer(1, 10))
+    if data["total_incidents"] > 0:
+        narrative = (
+            f"Durante el período comprendido entre el {start_label} y el {end_label} se registraron "
+            f"{data['total_incidents']} incidentes, de los cuales {data['closed_count']} fueron cerrados y "
+            f"{data['open_count']} permanecen abiertos o en investigación al momento de generar este informe."
+        )
     else:
-        story.append(Paragraph("No se abrieron incidentes en el período evaluado.", styles["Normal"]))
+        narrative = f"Durante el período comprendido entre el {start_label} y el {end_label} no se registraron incidentes."
+    story.append(Paragraph(narrative, styles["AlfaExecSummary"]))
 
-    doc.build(story)
+    # 2. Periodo y Alcance
+    story.append(Paragraph("2. Periodo y Alcance", styles["AlfaSection"]))
+    story.append(Paragraph(f"Período evaluado: {start_label} al {end_label}. {_report_scope_line(meta)}", styles["AlfaBody"]))
+
+    # 3. Expedientes de Incidentes
+    story.append(Paragraph("3. Expedientes de Incidentes", styles["AlfaSection"]))
+    if not data["incidents"]:
+        story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
+    else:
+        for inc in data["incidents"]:
+            header_txt = f'{inc["code"]} &mdash; {inc["title"]}'
+            kv_data = [
+                [Paragraph("Endpoint", styles["Normal"]), Paragraph(inc["hostname"] or "—", styles["Normal"])],
+                [Paragraph("Severidad", styles["Normal"]),
+                 Paragraph(f'<font color="{_severity_color(inc["severity"])}"><b>{inc["severity"] or "—"}</b></font>', styles["Normal"])],
+                [Paragraph("Estado", styles["Normal"]), Paragraph(inc["status_label"], styles["Normal"])],
+                [Paragraph("Responsable", styles["Normal"]), Paragraph(inc["assigned_to_name"], styles["Normal"])],
+                [Paragraph("Apertura", styles["Normal"]), Paragraph(inc["opened_at"].strftime("%d/%m/%Y %H:%M"), styles["Normal"])],
+                [Paragraph("Cierre", styles["Normal"]),
+                 Paragraph(inc["closed_at"].strftime("%d/%m/%Y %H:%M") if inc["closed_at"] else "Sigue abierto", styles["Normal"])],
+            ]
+            story.append(KeepTogether([
+                Paragraph(header_txt, incident_header_style),
+                _alfa_kv_table(kv_data, col_widths=[3.5 * cm, 12.5 * cm]),
+            ]))
+
+            story.append(Paragraph("Alertas asociadas", subsection_style))
+            story.append(Paragraph(f'{inc["alert_count"]} alerta(s) asociada(s) a este incidente.', styles["AlfaBody"]))
+
+            story.append(Paragraph("Reglas que contribuyeron", subsection_style))
+            if inc["contributing_rules"]:
+                rule_rows = [[_hcell(h, styles) for h in ("Regla", "Peso aplicado", "Momento")]]
+                for rule in inc["contributing_rules"]:
+                    rule_rows.append([_bcell(rule["rule_name"], styles), f'{rule["weight_applied"]:.1f}', rule["matched_at"]])
+                story.append(_alfa_table(rule_rows, col_widths=[7 * cm, 3 * cm, 6 * cm]))
+            else:
+                story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
+
+            story.append(Paragraph("Evidencias", subsection_style))
+            if inc["honeyfile_events"]:
+                hf_rows = [[_hcell(h, styles) for h in ("Fecha", "Operación", "Archivo", "Proceso")]]
+                for hf in inc["honeyfile_events"]:
+                    hf_rows.append([hf["detected_at"], hf["operation"], _bcell(hf["file_name"], styles), _bcell(hf["process_name"], styles)])
+                story.append(_alfa_table(hf_rows, col_widths=[3.2 * cm, 3 * cm, 5.5 * cm, 4.3 * cm]))
+            else:
+                story.append(Paragraph("No se registraron eventos de este tipo durante el período analizado.", styles["AlfaEmptyState"]))
+
+            story.append(Paragraph("Procesos asociados", subsection_style))
+            story.append(Paragraph(f'Proceso: {inc["process_name"]} (PID: {inc["process_id"]})', styles["AlfaBody"]))
+
+            story.append(Paragraph("Acciones de respuesta", subsection_style))
+            if inc["isolation"]:
+                iso = inc["isolation"]
+                story.append(Paragraph(
+                    f'{iso["isolation_type_label"]} ({iso["origin"]}) &mdash; '
+                    f'<font color="{_status_color(iso["status"])}"><b>{iso["status_label"]}</b></font> '
+                    f'&mdash; solicitado el {iso["requested_at"]}. Resultado: {iso["result"]}.',
+                    styles["AlfaBody"]
+                ))
+            else:
+                story.append(Paragraph("No se registraron acciones de aislamiento para este incidente.", styles["AlfaEmptyState"]))
+
+            story.append(Paragraph("Estado", subsection_style))
+            story.append(Paragraph(
+                f'<font color="{_status_color(inc["status"])}"><b>{inc["status_label"]}</b></font>', styles["AlfaBody"]
+            ))
+
+            if inc["status"] == "CLOSED":
+                conclusion_line = f'Incidente cerrado como {inc["classification_label"].lower()}.'
+            elif inc["status"] in ("OPEN", "IN_PROGRESS"):
+                conclusion_line = "Incidente en investigación al momento de generar este informe."
+            else:
+                conclusion_line = f'Incidente {inc["status_label"].lower()} al momento de generar este informe.'
+            story.append(Paragraph("Conclusión", subsection_style))
+            story.append(Paragraph(conclusion_line, styles["AlfaBody"]))
+            story.append(Spacer(1, 12))
+
+    # 4. Conclusiones (agregado)
+    story.append(Paragraph("4. Conclusiones", styles["AlfaSection"]))
+    if data["total_incidents"] == 0:
+        conclusion = "El período analizado no registró actividad suficiente para extraer conclusiones estadísticamente relevantes."
+    else:
+        crit_count = sum(1 for i in data["incidents"] if i["severity"] == "CRÍTICO")
+        isolated_count = sum(1 for i in data["incidents"] if i["isolation"] is not None)
+        conclusion = (
+            f"Durante el período analizado se registraron {data['total_incidents']} incidentes. De estos, "
+            f"{crit_count} alcanzaron severidad crítica y {isolated_count} fueron gestionados mediante "
+            f"políticas de contención automática o manual."
+        )
+    story.append(Paragraph(conclusion, styles["AlfaBody"]))
+
+    doc.build(story, canvasmaker=_report_canvasmaker(meta))
     buffer.seek(0)
     return buffer
 
 
 # --- Generadores de XLSX (openpyxl) ---
+# Toque más liviano que el PDF a propósito (spec): XLSX se mantiene
+# enfocado en datos tabulares, no un rediseño de documento -- lo que
+# cambia acá es color institucional en encabezados, texto coloreado
+# por severidad/estado (mismo lenguaje visual que el PDF), ancho de
+# columna real (antes 32/22/20 fijo sin relación con el contenido) y
+# encabezados fijos al hacer scroll (freeze_panes).
+
+def _xlsx_section_colored(ws, title, headers, rows_with_color, color_col_index=None):
+    """Como _xlsx_section, pero además colorea una columna (severidad
+    o estado) con el mismo color institucional que usa el PDF.
+    'rows_with_color' es una lista de (fila, color_hex_o_None)."""
+
+    ws.append([title])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12)
+
+    if headers:
+        ws.append(headers)
+        header_row = ws.max_row
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=header_row, column=col_idx)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color=_hex_no_hash(ALFA_BLUE), end_color=_hex_no_hash(ALFA_BLUE), fill_type="solid")
+        ws.freeze_panes = ws.cell(row=header_row + 1, column=1).coordinate
+
+    for row_values, color_hex in rows_with_color:
+        ws.append(row_values)
+        if color_hex and color_col_index is not None:
+            _xlsx_color_cell(ws.cell(row=ws.max_row, column=color_col_index + 1), color_hex, bold=True)
+
+    ws.append([])
+
 
 def _build_security_xlsx(data, meta):
     wb = Workbook()
     ws = wb.active
     ws.title = "Seguridad"
     ws.append([meta["title"]])
-    ws.cell(row=1, column=1).font = Font(bold=True, size=14)
+    ws.cell(row=1, column=1).font = Font(bold=True, size=14, color=_hex_no_hash(ALFA_BLUE))
     ws.append([meta["subtitle"]])
     ws.append([])
 
-    sev_rows = [[k, data["severity_counts"].get(k, 0)] for k in ("CRÍTICO", "ALTO", "MEDIO")]
-    sev_rows.append(["Total", data["total_alerts"]])
-    _xlsx_section(ws, "Alertas por severidad", ["Severidad", "Cantidad"], sev_rows)
+    sev_rows = [([k, data["severity_counts"].get(k, 0)], _severity_color(k)) for k in ("CRÍTICO", "ALTO", "MEDIO", "BAJO")]
+    sev_rows.append((["Total", data["total_alerts"]], None))
+    _xlsx_section_colored(ws, "Alertas por severidad", ["Severidad", "Cantidad"], sev_rows, color_col_index=0)
 
-    inc_rows = [[INCIDENT_STATUS_LABELS_ES.get(s, s), n] for s, n in data["incident_status_counts"].items()]
-    _xlsx_section(ws, "Incidentes por estado", ["Estado", "Cantidad"], inc_rows or [["Sin incidentes en el período", ""]])
+    if data["incident_status_counts"]:
+        inc_rows = [([INCIDENT_STATUS_LABELS_ES.get(s, s), n], _status_color(s)) for s, n in data["incident_status_counts"].items()]
+    else:
+        inc_rows = [(["Sin incidentes en el período", ""], None)]
+    _xlsx_section_colored(ws, "Incidentes por estado", ["Estado", "Cantidad"], inc_rows, color_col_index=0)
 
     if data["classification_counts"]:
         cls_rows = [[INCIDENT_CLASSIFICATION_LABELS_ES.get(c, c), n] for c, n in data["classification_counts"].items()]
@@ -5647,8 +6526,33 @@ def _build_security_xlsx(data, meta):
     minutes = round(data["avg_resolution_seconds"] / 60, 1) if data["avg_resolution_seconds"] is not None else "Sin datos aún"
     _xlsx_section(ws, "Tiempo de resolución", None, [["Promedio (minutos)", minutes]])
 
-    for col in ws.columns:
-        ws.column_dimensions[col[0].column_letter].width = 32
+    if data["alerts_detail"]:
+        alert_rows = [
+            ([a["code"], a["title"], a["hostname"] or "—", a["severity"], a["risk_score"], a["status_label"],
+              a["created_at"].strftime("%d/%m/%Y %H:%M")], _severity_color(a["severity"]))
+            for a in data["alerts_detail"]
+        ]
+    else:
+        alert_rows = [(["Sin alertas en el período", "", "", "", "", "", ""], None)]
+    _xlsx_section_colored(
+        ws, "Detalle de alertas", ["ID", "Título", "Endpoint", "Severidad", "Riesgo", "Estado", "Fecha"],
+        alert_rows, color_col_index=3
+    )
+
+    if data["isolation_actions"]:
+        iso_rows = [
+            ([iso["hostname"], iso["isolation_type_label"], iso["origin"], iso["status_label"],
+              iso["requested_at"].strftime("%d/%m/%Y %H:%M"), iso["result"]], _status_color(iso["status"]))
+            for iso in data["isolation_actions"]
+        ]
+    else:
+        iso_rows = [(["Sin acciones de aislamiento en el período", "", "", "", "", ""], None)]
+    _xlsx_section_colored(
+        ws, "Acciones de aislamiento", ["Endpoint", "Tipo", "Origen", "Estado", "Fecha", "Resultado"],
+        iso_rows, color_col_index=3
+    )
+
+    _xlsx_autosize_columns(ws)
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -5661,7 +6565,7 @@ def _build_endpoints_xlsx(data, meta):
     ws = wb.active
     ws.title = "Endpoints"
     ws.append([meta["title"]])
-    ws.cell(row=1, column=1).font = Font(bold=True, size=14)
+    ws.cell(row=1, column=1).font = Font(bold=True, size=14, color=_hex_no_hash(ALFA_BLUE))
     ws.append([meta["subtitle"]])
     ws.append([])
 
@@ -5673,17 +6577,21 @@ def _build_endpoints_xlsx(data, meta):
     _xlsx_section(ws, "Resumen", None, resumen_rows)
 
     ep_rows = [
-        [ep["hostname"], ep["ip_address"], ep["os"] or "—", ep["status_label"], ep["event_count"], ep["honeyfiles_deployed"], ep["honeyfiles_pending"]]
+        [
+            ep["hostname"], ep["ip_address"], ep["os"] or "—", ep["status_label"], ep["agent_version"],
+            ep["last_seen_label"], ep["event_count"], ep["alert_count"], ep["incident_count"],
+            ep["honeyfiles_deployed"], ep["honeyfiles_pending"]
+        ]
         for ep in data["endpoints"]
     ]
     _xlsx_section(
         ws, "Detalle por endpoint",
-        ["Endpoint", "IP", "SO", "Conectividad", "Eventos", "Honeyfiles desplegados", "Honeyfiles pendientes"],
-        ep_rows or [["Sin endpoints que coincidan con el filtro", "", "", "", "", "", ""]]
+        ["Endpoint", "IP", "SO", "Conectividad", "Versión agente", "Última comunicación", "Eventos",
+         "Alertas", "Incidentes", "Honeyfiles desplegados", "Honeyfiles pendientes"],
+        ep_rows or [["Sin endpoints que coincidan con el filtro", "", "", "", "", "", "", "", "", "", ""]]
     )
 
-    for col in ws.columns:
-        ws.column_dimensions[col[0].column_letter].width = 22
+    _xlsx_autosize_columns(ws)
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -5696,9 +6604,8 @@ def _build_incidents_xlsx(data, meta):
     ws = wb.active
     ws.title = "Incidentes"
     ws.append([meta["title"]])
-    ws.cell(row=1, column=1).font = Font(bold=True, size=14)
+    ws.cell(row=1, column=1).font = Font(bold=True, size=14, color=_hex_no_hash(ALFA_BLUE))
     ws.append([meta["subtitle"]])
-    ws.append(["Resumen de auditoría -- para traza forense completa de un incidente puntual, usar su Reporte PDF individual."])
     ws.append([])
 
     resumen_rows = [
@@ -5708,24 +6615,29 @@ def _build_incidents_xlsx(data, meta):
     ]
     _xlsx_section(ws, "Resumen", None, resumen_rows)
 
-    inc_rows = [
-        [
-            inc["code"], inc["title"], inc["hostname"], inc["rule_label"], inc["status_label"],
-            inc["classification_label"], inc["assigned_to_name"],
-            inc["opened_at"].strftime("%d/%m/%Y %H:%M"),
-            inc["closed_at"].strftime("%d/%m/%Y %H:%M") if inc["closed_at"] else "Sigue abierto",
-            inc["risk_score"]
+    if data["incidents"]:
+        inc_rows = [
+            (
+                [
+                    inc["code"], inc["title"], inc["hostname"], inc["severity"] or "—", inc["status_label"],
+                    inc["classification_label"], inc["assigned_to_name"],
+                    inc["opened_at"].strftime("%d/%m/%Y %H:%M"),
+                    inc["closed_at"].strftime("%d/%m/%Y %H:%M") if inc["closed_at"] else "Sigue abierto",
+                    inc["risk_score"]
+                ],
+                _severity_color(inc["severity"])
+            )
+            for inc in data["incidents"]
         ]
-        for inc in data["incidents"]
-    ]
-    _xlsx_section(
+    else:
+        inc_rows = [(["Sin incidentes en el período", "", "", "", "", "", "", "", "", ""], None)]
+    _xlsx_section_colored(
         ws, "Detalle de incidentes",
-        ["ID", "Título", "Endpoint", "Regla", "Estado", "Clasificación", "Responsable", "Abierto", "Cerrado", "Riesgo máx."],
-        inc_rows or [["Sin incidentes en el período", "", "", "", "", "", "", "", "", ""]]
+        ["ID", "Título", "Endpoint", "Severidad", "Estado", "Clasificación", "Responsable", "Abierto", "Cerrado", "Riesgo máx."],
+        inc_rows, color_col_index=3
     )
 
-    for col in ws.columns:
-        ws.column_dimensions[col[0].column_letter].width = 20
+    _xlsx_autosize_columns(ws)
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -5784,7 +6696,22 @@ def generar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_us
                 f"&mdash; Período evaluado: {start.strftime('%d/%m/%Y')} al {end.strftime('%d/%m/%Y')} "
                 f"&mdash; {('Endpoint: ' + endpoint_hostname) if endpoint_hostname else 'Todos los endpoints'}"
             )
-            meta = {"title": title, "subtitle": subtitle}
+            # 'meta' ampliado (rediseño visual 2026-08-18, ver
+            # PENDIENTES.md): 'title'/'subtitle' siguen existiendo tal
+            # cual porque los builders XLSX los siguen usando en sus
+            # filas superiores -- los campos nuevos son lo que necesitan
+            # la portada institucional y el encabezado/pie numerado de
+            # los builders PDF (ver _build_cover_page/_make_numbered_canvas).
+            meta = {
+                "title": title,
+                "subtitle": subtitle,
+                "report_type_label": type_label,
+                "period_label": period_label,
+                "start": start,
+                "end": end,
+                "generated_by": user.get("full_name", "usuario"),
+                "endpoint_hostname": endpoint_hostname,
+            }
 
             buffer = REPORT_BUILDERS[(payload.report_type, payload.format)](data, meta)
 
@@ -6725,14 +7652,24 @@ def report_alert(
             )
             incident_id = cursor.fetchone()[0]
 
-            # Sección 28: CRÍTICO por score solo no alcanza -- hace
-            # falta evidencia fuerte además (honeyfile, correlación de
-            # al menos 3 reglas distintas, o al menos 2 reglas
-            # "fuertes" distintas coincidiendo).
+            # Sección 28 (ampliado 2026-08-18, ver PENDIENTES.md): se
+            # pidió explícitamente que la pantalla de Incidentes
+            # incluya alertas de severidad ALTO además de CRÍTICO.
+            # CRÍTICO por sí solo YA es evidencia suficiente para
+            # abrir incidente (score correlacionado, no un único
+            # indicador) -- además así SIEMPRE queda un incident_id
+            # disponible para el aislamiento automático de más abajo,
+            # que también se pidió que dependa solo de la severidad.
+            # ALTO sigue exigiendo evidencia fuerte adicional
+            # (honeyfile, correlación de al menos 3 reglas distintas,
+            # o al menos 2 reglas "fuertes" distintas coincidiendo) --
+            # igual que antes se exigía para CRÍTICO -- para no abrir
+            # un incidente por cada alerta ALTA sin correlación real.
             strong_count = len(linked_names & STRONG_RULE_NAMES)
+            is_critical = final_score >= 75
             meets_incident_condition = (
-                final_score >= 75
-                and (is_honeyfile or distinct_rule_count >= 3 or strong_count >= 2)
+                final_score >= 50
+                and (is_critical or is_honeyfile or distinct_rule_count >= 3 or strong_count >= 2)
             )
 
             incident_created = False
@@ -6779,48 +7716,54 @@ def report_alert(
             # endpoint) -- solo ordena y registra el resultado.
             isolation_requested = False
 
-            if incident_id is not None:
-                strong_file_matched = linked_names & STRONG_FILE_ACTIVITY_RULES
-                condition_a = is_honeyfile and len(strong_file_matched) >= 1
-                condition_b = final_score >= 75 and len(strong_file_matched) >= 2
-
-                if condition_a or condition_b:
-                    # No duplicar una orden ya en curso o ya cumplida
-                    # para este mismo ENDPOINT (mismo criterio de "no
-                    # duplicar evidencia/órdenes ya registradas" que
-                    # already_linked más arriba).
-                    #
-                    # BUG REAL corregido 2026-08-18 (problema H, ver
-                    # PENDIENTES.md): filtraba por 'incident_id = %s' --
-                    # el incidente de ESTE episodio puntual. Un agente con
-                    # más de un incidente (ej. ya aislado por un episodio
-                    # anterior) podía disparar esta condición de nuevo
-                    # desde un incidente DISTINTO -- 'incident_id' nunca
-                    # coincidía con la orden ya existente (que tiene el
-                    # incident_id del episodio anterior), así que el
-                    # servidor insertaba una SEGUNDA orden 'REQUESTED'
-                    # automática para un endpoint que ya estaba aislado.
-                    # Mismo criterio único que _agent_is_isolated_sql().
-                    cursor.execute(
-                        f"SELECT 1 WHERE {_agent_is_isolated_sql('%s')};",
-                        (agent_id,)
+            # Sección 30 (simplificado 2026-08-18, ver PENDIENTES.md):
+            # antes se exigía, además de severidad CRÍTICA, evidencia
+            # extra (condition_a/condition_b -- honeyfile + indicador
+            # fuerte, o 2 indicadores fuertes distintos). Se pidió
+            # explícitamente que TODA alerta que alcance severidad
+            # CRÍTICA aísle el endpoint automáticamente, sin
+            # condiciones adicionales -- la severidad ya es resultado
+            # de un score correlacionado (pesos + bonus de
+            # correlación entre reglas), no de un único indicador
+            # aislado, así que no hace falta pedir evidencia aparte.
+            # 'meets_incident_condition' de arriba garantiza que
+            # 'incident_id' ya existe siempre que is_critical es
+            # verdadero (host_isolations.incident_id es NOT NULL en
+            # el esquema).
+            if incident_id is not None and is_critical:
+                # No duplicar una orden ya en curso o ya cumplida
+                # para este mismo ENDPOINT (mismo criterio de "no
+                # duplicar evidencia/órdenes ya registradas" que
+                # already_linked más arriba).
+                #
+                # BUG REAL corregido 2026-08-18 (problema H, ver
+                # PENDIENTES.md): filtraba por 'incident_id = %s' --
+                # el incidente de ESTE episodio puntual. Un agente con
+                # más de un incidente (ej. ya aislado por un episodio
+                # anterior) podía disparar esta condición de nuevo
+                # desde un incidente DISTINTO -- 'incident_id' nunca
+                # coincidía con la orden ya existente (que tiene el
+                # incident_id del episodio anterior), así que el
+                # servidor insertaba una SEGUNDA orden 'REQUESTED'
+                # automática para un endpoint que ya estaba aislado.
+                # Mismo criterio único que _agent_is_isolated_sql().
+                cursor.execute(
+                    f"SELECT 1 WHERE {_agent_is_isolated_sql('%s')};",
+                    (agent_id,)
+                )
+                if cursor.fetchone() is None:
+                    reason = (
+                        f"Severidad CRÍTICA (risk_score {final_score:.2f}) -- aislamiento automático del "
+                        f"endpoint, reglas involucradas: {', '.join(sorted(linked_names))}."
                     )
-                    if cursor.fetchone() is None:
-                        reason = (
-                            "Condición A: honeyfile activado + al menos un indicador fuerte de actividad de archivos "
-                            f"({', '.join(sorted(strong_file_matched))})."
-                            if condition_a else
-                            "Condición B: severidad CRÍTICA + al menos dos indicadores fuertes de actividad maliciosa "
-                            f"({', '.join(sorted(strong_file_matched))})."
-                        )
-                        cursor.execute(
-                            """
-                            INSERT INTO host_isolations (agent_id, incident_id, isolation_type, status, reason)
-                            VALUES (%s, %s, 'NETWORK', 'REQUESTED', %s);
-                            """,
-                            (agent_id, incident_id, reason)
-                        )
-                        isolation_requested = True
+                    cursor.execute(
+                        """
+                        INSERT INTO host_isolations (agent_id, incident_id, isolation_type, status, reason)
+                        VALUES (%s, %s, 'NETWORK', 'REQUESTED', %s);
+                        """,
+                        (agent_id, incident_id, reason)
+                    )
+                    isolation_requested = True
 
             connection.commit()
 

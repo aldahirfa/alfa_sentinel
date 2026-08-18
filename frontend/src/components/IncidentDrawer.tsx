@@ -223,7 +223,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       </div>
                     </div>
                     <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Risk score</div>
+                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Puntos de riesgo</div>
                       <div className="mt-1 text-[12px] font-semibold tabular-nums" style={{ color: "var(--tx)" }}>
                         {data.risk_score !== null ? data.risk_score.toFixed(1) : "—"}
                       </div>
@@ -356,7 +356,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       )}
                     </div>
                     <Field
-                      label="Risk score"
+                      label="Puntos de riesgo"
                       value={data.origin_alert.risk_score !== null ? data.origin_alert.risk_score.toFixed(1) : "—"}
                     />
                     <Field label="Endpoint" value={data.hostname} />

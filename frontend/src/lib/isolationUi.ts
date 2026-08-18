@@ -23,6 +23,24 @@
 // var(--warn) para "Liberar"/"En curso" (Liberar es lo opuesto de
 // aislar, no una acción de riesgo -- nunca rojo).
 
+import type { CSSProperties } from "react";
+
+// Botón "Aislar" compacto (celdas de tabla) -- ÚNICA fuente del
+// fondo/borde/tamaño (2026-08-18, ver PENDIENTES.md, "cosas a
+// corregir": "el boton de aislar de la pantalla no es igual a la de
+// incidentes, no tienen el mismo background"). Antes IncidentesTable.tsx
+// usaba una píldora rellena (borde + fondo var(--crit-soft)) y
+// CriticalIncidentsTable.tsx usaba un link de texto plano sin fondo --
+// misma acción, dos apariencias distintas. Ambas tablas ahora importan
+// estas 2 constantes en vez de escribir su propio className/style.
+export const ISOLATE_BUTTON_CLASS_COMPACT =
+  "flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap transition-premium btn-hover";
+export const ISOLATE_BUTTON_STYLE_COMPACT: CSSProperties = {
+  border: "1px solid var(--crit)",
+  color: "var(--crit)",
+  background: "var(--crit-soft)",
+};
+
 export const ISOLATE_ICON_CLASS = "ph ph-plugs";
 export const ISOLATED_ICON_CLASS = "ph-fill ph-plugs";
 export const RELEASE_ICON_CLASS = "ph ph-plug";

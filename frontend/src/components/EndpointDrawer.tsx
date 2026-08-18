@@ -259,7 +259,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                       </div>
                     </div>
                     <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Heartbeat</div>
+                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Última conexión</div>
                       <div className="mt-1 text-[12px] font-medium" style={{ color: "var(--tx)" }}>{data.last_seen_ago}</div>
                     </div>
                   </div>

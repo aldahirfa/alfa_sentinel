@@ -1292,3 +1292,41 @@ No se agregó ninguna tabla nueva (ni "tabla de títulos", ni "de severidad", ni
 Probar en el navegador real el toggle "Vista: Activas | Todos" y el flujo completo de aislar/liberar desde las 5 pantallas con la confirmación nueva -- lo verificado acá es el comportamiento del backend y la consistencia de datos contra un servidor real, no una revisión visual manual. Si se quiere reforzar el guard de doble aislamiento con protección a nivel de base de datos (además del guard a nivel de aplicación ya corregido), se podría evaluar un índice único parcial sobre `host_isolations (agent_id) WHERE status IN ('REQUESTED','EXECUTED','RELEASE_REQUESTED')` -- no se agregó en esta tarea por ser un cambio de schema no pedido explícitamente, pero queda como mejora futura razonable dado que el bug encontrado era justamente de esta naturaleza.
 
 ---
+
+## Aislamiento automático por severidad crítica, incidentes en ALTO, botón unificado, i18n de la UI e informes institucionales (2026-08-18, tarde)
+
+Pedido explícito del usuario, 5 puntos independientes.
+
+### 1. Toda alerta CRÍTICA aísla automáticamente
+
+`report_alert()` (`server/main.py`) exigía antes, además de `risk_score >= 75`, evidencia adicional (Condición A: honeyfile + 1 regla fuerte de archivos; Condición B: >=2 reglas fuertes de archivos) para dispararse. Simplificado: `is_critical = final_score >= 75` alcanza por sí solo -- ya es un score correlacionado (pesos + bonus de correlación entre reglas), no una señal aislada. `STRONG_FILE_ACTIVITY_RULES`/condition_a/condition_b eliminados del disparo (la constante queda declarada, sin uso, no se borró por si algo más la referencia en el futuro).
+
+### 2. Incidentes también en severidad ALTO
+
+`meets_incident_condition` exigía `score >= 75` (CRÍTICO) más evidencia. Ahora es `score >= 50 and (is_critical or is_honeyfile or distinct_rule_count >= 3 or strong_count >= 2)` -- ALTO puede abrir incidente si hay evidencia real de correlación (igual de estricto que antes se exigía para CRÍTICO); CRÍTICO abre incidente siempre (necesario además para que el aislamiento automático del punto 1 tenga siempre un `incident_id` real donde enganchar la orden -- `host_isolations.incident_id` es `NOT NULL`). `GET /api/incidentes` no filtraba por severidad -- no necesitó cambios.
+
+### 3. Botón "Aislar" -- fondo unificado en las tablas compactas
+
+`isolationUi.ts` (sesión anterior) unificó texto/icono/tooltip pero no el fondo del `<button>`: `IncidentesTable.tsx` usaba una píldora (borde + fondo `var(--crit-soft)`) y `CriticalIncidentsTable.tsx` un link de texto plano sin fondo -- misma acción, dos apariencias. Agregadas `ISOLATE_BUTTON_CLASS_COMPACT`/`ISOLATE_BUTTON_STYLE_COMPACT` a `isolationUi.ts`; ambas tablas las importan en vez de definir su propio `className`/`style`.
+
+### 4. Etiquetas de la interfaz en español
+
+Campos que mostraban el nombre en inglés del atributo de la base (los datos siguen intactos, solo cambia el label visual): "Risk score" -> "Puntos de riesgo" (`AlertDrawer.tsx`, `AlertsTable.tsx`, `EscalateAlertModal.tsx`, `IncidentDrawer.tsx`, `IncidentesTable.tsx`, `RuleEditModal.tsx`), "Weight"/"Threshold"/"Window" -> "Peso"/"Umbral"/"Ventana" (`AgentRulesModal.tsx`, y "Threshold" -> "Umbral" también en `RuleCard.tsx`, que ya tenía "Ventana"/"Peso en el score" pero no "Umbral"), "Online"/"Offline" -> "En línea"/"Fuera de línea" (`EndpointStatusPanel.tsx`, `EndpointsSummaryCards.tsx`), "Agent Health" -> "Salud del agente" (`EndpointStatusPanel.tsx`), "Username" -> "Usuario" (`ProfileInfoCard.tsx`), "Heartbeat" -> "Última conexión" (`EndpointDrawer.tsx`, `EndpointsTable.tsx`). Se dejaron sin traducir los préstamos técnicos ya asentados de forma consistente en todo el sistema ("Hostname", "Endpoint", "Honeyfile", "PID") -- traducirlos solo a ellos habría creado una inconsistencia nueva, no resuelto una.
+
+### 5. Rediseño institucional de los informes PDF/XLSX
+
+Todo el subsistema vive en `server/main.py` (~1150-1184 constantes, ~5008-5961 generación) -- sin cambios de arquitectura (sigue siendo reportlab + openpyxl, 3 tipos de informe, mismos endpoints `POST /reportes/generar` / `GET /api/reportes` / `GET /reportes/{id}/archivo`, mismo contrato `REPORT_BUILDERS[(tipo, formato)](data, meta) -> BytesIO`).
+
+Agregado: paleta institucional (`ALFA_BLUE`/grises/`ALFA_CRIT`/`ALFA_ALTO`/`ALFA_MEDIO`/`ALFA_OK`, rojo/naranja/amarillo/verde SOLO para criticidad), portada sobria (ALFA-Sentinel, tagline, tipo de informe, Área, Institución -- AGETIC completo --, Período, fecha de generación, generado por), encabezado+pie institucional en todas las páginas EXCEPTO la portada ("Página X de Y" real via `_make_numbered_canvas`, patrón estándar de reportlab de dos pasadas), sin inventar una clasificación documental (confirmado que no existe ese campo en ningún lado del sistema, no se agregó).
+
+Informe de Seguridad General: 10 secciones reales (Resumen Ejecutivo con narrativa generada solo a partir de agregados reales, Periodo y Alcance, barra de severidad, Alertas Detectadas -- tabla nueva, Incidentes Registrados, Principales Evidencias, Actividad de Honeyfiles, Respuesta y Acciones Ejecutadas -- nueva, distingue automático/manual por `requested_by IS NULL`--, Endpoints Involucrados, Conclusiones). Informe de Actividad de Endpoints: sumó versión de agente, última comunicación, alertas e incidentes por endpoint (antes solo hostname/SO/conectividad/eventos). Informe de Incidentes: cada incidente ahora es un expediente completo (info general, línea temporal implícita en fechas, alertas asociadas, reglas que contribuyeron con peso y momento -- mismo criterio que `get_incidente_drawer()`, reutilizado a propósito para no inventar una segunda definición de "evidencia" --, honeyfiles activados, proceso asociado o "No disponible" si no hay atribución real, acciones de respuesta, estado, conclusión); con un solo incidente en el período (ej. filtrado por endpoint) el informe se lee exactamente como el "informe de incidente individual" pedido, sin necesidad de un tipo de informe ni endpoint nuevo. Se borró la mención a un `/incidentes/{id}/reporte.pdf` que el texto viejo prometía pero que nunca existió en el código. XLSX: encabezados en azul institucional en vez de casi negro, texto de severidad/estado coloreado igual que el PDF, `freeze_panes`, ancho de columna real según contenido en vez de un ancho fijo para todas.
+
+**Archivos modificados:** `server/main.py` (único archivo tocado para este punto).
+
+**Validado:** generación real de los 3 tipos de informe (SECURITY/ENDPOINTS/INCIDENTS, PDF y XLSX) contra un servidor real con datos sembrados a propósito (alertas en CRÍTICO/ALTO/MEDIO, un incidente con aislamiento automático y otro con aislamiento manual pendiente, una activación de honeyfile, eventos con proceso atribuido) -- 35/35 verificaciones automáticas (páginas, contenido de portada, apertura de XLSX) más inspección visual real de las páginas renderizadas (portada, tablas, barra de severidad, expediente de incidente, pie con "Página X de Y") -- se corrigieron dos bugs encontrados recién en esa inspección visual (título duplicado en la portada, celdas de texto largo sin `Paragraph` que se superponían con la columna vecina) antes de darlo por terminado.
+
+**Regresión:** los 16 archivos de `tests/heuristic/` y los 4 de `tests/honeyfiles/` -- 100% OK (4 pruebas debieron actualizarse porque su premisa dependía del comportamiento viejo de aislamiento condicionado a evidencia extra, ahora obsoleta a propósito: `test_aislamiento_manual_liberacion.py`, `test_alertas_flotantes_open.py`, `test_episodios_incidentes_aislamiento.py`, `test_tiempo_real_orden_consistencia.py`). `npm run build` limpio.
+
+**Fuera de alcance:** no se agregó un cuarto tipo de informe ni un endpoint nuevo para "incidente individual" (ver arriba, resuelto reutilizando el tipo INCIDENTS). No se tocó la base de datos ni `roles`/`users`/`user_roles`.
+
+---

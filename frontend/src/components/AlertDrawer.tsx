@@ -166,7 +166,7 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                       </div>
                     </div>
                     <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Risk score</div>
+                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Puntos de riesgo</div>
                       <div className="mt-1 text-[12px] font-semibold tabular-nums" style={{ color: "var(--tx)" }}>
                         {data.risk_score !== null ? data.risk_score.toFixed(1) : "—"}
                       </div>

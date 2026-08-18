@@ -254,18 +254,23 @@ try:
     check("I-01: score < 75", body_i1["risk_score"] < 75, str(body_i1))
     check("I-01: NO se crea incidente", body_i1["incident_id"] is None, str(body_i1))
 
-    # I-02: score >= 75 pero SIN evidencia fuerte suficiente (2 reglas
-    # no-fuertes, ninguna condición de incidente se cumple) -> sin
-    # incidente. Con los pesos reales no alcanza 75 sin honeyfile/3
-    # reglas/2 fuertes -- se ajusta el peso de 2 reglas NO fuertes con
-    # el override por endpoint (mecanismo ya existente) para construir
-    # el caso límite exacto que pide la especificación.
+    # I-02 (actualizado 2026-08-18, ver PENDIENTES.md): score >= 75
+    # (CRÍTICO) SIN evidencia fuerte adicional (2 reglas no-fuertes) --
+    # antes esto NO alcanzaba a crear incidente. Ahora CRÍTICO por sí
+    # solo YA es evidencia suficiente (se pidió que toda alerta CRÍTICA
+    # abra incidente y aísle automáticamente, sin depender de qué
+    # reglas puntuales la componen) -> SÍ se crea incidente y SÍ se
+    # solicita aislamiento. Con los pesos reales no alcanza 75 sin
+    # honeyfile/3 reglas/2 fuertes -- se ajusta el peso de 2 reglas NO
+    # fuertes con el override por endpoint (mecanismo ya existente)
+    # para construir el caso límite exacto que pide la especificación.
     override_weight(agent_i2, "Actividad Repetitiva Automatizada", 70.0)  # HR-11, no está en STRONG_RULE_NAMES
     r_i2 = report(token_i2, ["Actividad Repetitiva Automatizada", "Consumo CPU Elevado"])
     check("I-02: report_alert 200", r_i2.status_code == 200, r_i2.text[:200])
     body_i2 = r_i2.json()
     check("I-02: score >= 75", body_i2["risk_score"] >= 75, str(body_i2))
-    check("I-02: 2 reglas, ninguna fuerte -- NO se crea incidente (evidencia insuficiente)", body_i2["incident_id"] is None, str(body_i2))
+    check("I-02: CRÍTICO por sí solo -- SÍ se crea incidente (sin exigir evidencia extra)", body_i2["incident_id"] is not None, str(body_i2))
+    check("I-02: CRÍTICO por sí solo -- SÍ se solicita aislamiento automático", body_i2["isolation_requested"] is True, str(body_i2))
 
     # I-03: score >= 75 con >= 3 reglas distintas (solo 1 fuerte) -> incidente por Condición B.
     override_weight(agent_i3, "Proceso Sospechoso", 30.0)       # HR-05, no fuerte
@@ -288,13 +293,13 @@ try:
     check("I-04: score >= 75", body_i4["risk_score"] >= 75, str(body_i4))
     check("I-04: 2 reglas fuertes (< 3 en total) -> SÍ se crea incidente (Condición C)", body_i4["incident_id"] is not None, str(body_i4))
     check(
-        "ISO-03: CRÍTICO + 2 reglas fuertes de archivos (sin honeyfile) -> aislamiento SOLICITADO (Condición B)",
+        "ISO-03: CRÍTICO (sin honeyfile) -> aislamiento SOLICITADO (severidad por sí sola)",
         body_i4.get("isolation_requested") is True, str(body_i4),
     )
     c = db_conn()
     iso_row_i4 = c.execute("SELECT status, reason FROM host_isolations WHERE incident_id = %s;", (body_i4["incident_id"],)).fetchone()
     c.close()
-    check("ISO-03 (BD): host_isolations tiene una fila REQUESTED con la Condición B en el motivo", iso_row_i4 is not None and iso_row_i4[0] == "REQUESTED" and "Condición B" in (iso_row_i4[1] or ""), str(iso_row_i4))
+    check("ISO-03 (BD): host_isolations tiene una fila REQUESTED con la severidad CRÍTICA en el motivo", iso_row_i4 is not None and iso_row_i4[0] == "REQUESTED" and "CRÍTICA" in (iso_row_i4[1] or ""), str(iso_row_i4))
 
     # I-05: honeyfile activado -> siempre incidente (Condición A), sin importar cuántas otras reglas participaron.
     r_i5 = report(token_i5, ["Acceso Honeyfile"])
@@ -308,20 +313,20 @@ try:
     # simulada -- ya cubiertos por tests/honeyfiles/test_critico_combinado.py;
     # ISO-03/Condición B ya se verificó arriba junto con I-04.)
 
-    # ISO-01: incidente real (I-03) que NO cumple ninguna condición de
-    # aislamiento (score < 75 en el aislamiento -- espera, I-03 sí tiene
-    # score>=75 pero solo 1 regla fuerte: ni Condición A (sin honeyfile)
-    # ni Condición B (necesita >=2 reglas FUERTES de archivos, acá solo
-    # hay 1: Modificacion Masiva Archivos) se cumplen) -> NO se
-    # registra ninguna orden de aislamiento para ese incidente.
+    # ISO-01 (actualizado 2026-08-18, ver PENDIENTES.md): I-03 es un
+    # incidente real con score>=75 (CRÍTICO) y solo 1 regla fuerte --
+    # antes esto NO alcanzaba a aislar (exigía Condición A/B con
+    # evidencia extra). Se pidió explícitamente que TODA alerta
+    # CRÍTICA aísle el endpoint automáticamente sin condiciones
+    # adicionales -> ahora SÍ se registra la orden de aislamiento.
     check(
-        "ISO-01: incidente real sin honeyfile y con solo 1 regla fuerte -> NO se solicita aislamiento",
-        body_i3.get("isolation_requested") is False, str(body_i3),
+        "ISO-01: incidente CRÍTICO (aunque sea con 1 sola regla fuerte) -> SÍ se solicita aislamiento",
+        body_i3.get("isolation_requested") is True, str(body_i3),
     )
     c = db_conn()
-    iso_row_i3 = c.execute("SELECT id FROM host_isolations WHERE incident_id = %s;", (body_i3["incident_id"],)).fetchone()
+    iso_row_i3 = c.execute("SELECT id, status FROM host_isolations WHERE incident_id = %s;", (body_i3["incident_id"],)).fetchone()
     c.close()
-    check("ISO-01 (BD): host_isolations NO tiene ninguna fila para ese incidente", iso_row_i3 is None, str(iso_row_i3))
+    check("ISO-01 (BD): host_isolations SÍ tiene una fila REQUESTED para ese incidente", iso_row_i3 is not None and iso_row_i3[1] == "REQUESTED", str(iso_row_i3))
 
     # ISO-05: fallo REAL de ejecución -- se fuerza ALFA_SENTINEL_ENV=production
     # (agent_paths.get_env_mode(), sin monkeypatchear ningún resultado)

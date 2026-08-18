@@ -305,12 +305,20 @@ try:
     # isolation_status (sección 18: nunca "Aislado" en una pantalla y
     # otra cosa en otra).
     # ============================================================
-    override_weight(agent_case, "Proceso Sospechoso", 60)
+    # Actualizado 2026-08-18 (ver PENDIENTES.md): toda alerta CRÍTICA
+    # ahora aísla automáticamente, así que para ejercer el ciclo de
+    # aislamiento MANUAL (CASE-A en adelante) el setup ya no puede
+    # llegar a CRÍTICO. Pesos reales (sin override) de 3 reglas
+    # distintas: 25 (Modificacion Masiva Archivos) + 10 (Proceso
+    # Sospechoso) + 5 (Consumo CPU Elevado) + 10 de bonus de
+    # correlación (3 reglas) = score 50 -> ALTO, incidente creado por
+    # evidencia (3 reglas), pero sin aislamiento automático.
     r_case = report(token_case, ["Modificacion Masiva Archivos", "Proceso Sospechoso", "Consumo CPU Elevado"])
     check("CASE setup: report_alert 200", r_case.status_code == 200, r_case.text[:300])
     body_case = r_case.json()
     check("CASE setup: se creó un incidente", body_case["incident_id"] is not None, str(body_case))
-    check("CASE setup: sin aislamiento automático (solo 1 regla fuerte)", body_case["isolation_requested"] is False, str(body_case))
+    check("CASE setup: severidad ALTO (score 50, no CRÍTICO)", body_case["severity"] == "ALTO", str(body_case))
+    check("CASE setup: sin aislamiento automático (severidad ALTO, no CRÍTICO)", body_case["isolation_requested"] is False, str(body_case))
     incident_case = body_case["incident_id"]
     alert_case_id = body_case["alert_id"]
 

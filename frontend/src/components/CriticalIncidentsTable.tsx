@@ -6,6 +6,7 @@ import {
   ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, RELEASE_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
   ISOLATE_LABEL_COMPACT, ISOLATED_LABEL_COMPACT, RELEASE_LABEL_COMPACT, PENDING_LABEL_COMPACT, SENDING_LABEL,
   ISOLATE_TOOLTIP, RELEASE_TOOLTIP, confirmIsolate,
+  ISOLATE_BUTTON_CLASS_COMPACT, ISOLATE_BUTTON_STYLE_COMPACT,
 } from "../lib/isolationUi";
 
 interface Props {
@@ -151,8 +152,8 @@ export default function CriticalIncidentsTable({ items, loading, onIsolated }: P
                       disabled={isolatingId === item.id}
                       onClick={(e) => { e.stopPropagation(); handleIsolate(item.id, item.hostname); }}
                       title={ISOLATE_TOOLTIP}
-                      className="flex items-center gap-1.5 text-[11.5px] font-bold whitespace-nowrap cursor-pointer border-0 bg-transparent disabled:opacity-50 transition-premium btn-hover"
-                      style={{ color: "var(--crit)" }}
+                      className={ISOLATE_BUTTON_CLASS_COMPACT}
+                      style={ISOLATE_BUTTON_STYLE_COMPACT}
                     >
                       <i className={isolatingId === item.id ? SPINNER_ICON_CLASS : ISOLATE_ICON_CLASS} />
                       {isolatingId === item.id ? SENDING_LABEL : ISOLATE_LABEL_COMPACT}

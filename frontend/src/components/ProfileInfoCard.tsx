@@ -109,7 +109,7 @@ export default function ProfileInfoCard({ data, roleLabel, onSaved }: Props) {
       </div>
 
       <div className="pt-3.5 border-t flex flex-col" style={{ borderColor: "var(--line-soft)" }}>
-        <Field label="Username" value={data.username} />
+        <Field label="Usuario" value={data.username} />
         <Field label="Rol" value={roleLabel} />
         <Field
           label="Estado de la cuenta"

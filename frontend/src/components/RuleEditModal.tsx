@@ -175,7 +175,7 @@ export default function RuleEditModal({ rule, onClose, onSaved }: Props) {
                   Esta regla clasifica automáticamente la actividad como CRÍTICA cuando se detecta cualquier
                   interacción con un honeyfile -- no depende de un peso ni de un umbral configurable.
                 </p>
-                <ContextRow label="Risk score resultante" value={<span style={{ color: "var(--crit)" }}>100</span>} />
+                <ContextRow label="Puntos de riesgo resultantes" value={<span style={{ color: "var(--crit)" }}>100</span>} />
                 <ContextRow label="Severidad" value={<span style={{ color: "var(--crit)" }}>CRÍTICO</span>} />
               </div>
             )}

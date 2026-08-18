@@ -9,10 +9,15 @@ real del backend, y por eso se prueba acá, es que /alerts/open devuelva los
 tres campos nuevos (risk_score, incident_id, isolation_status) con los
 valores REALES en cada escenario relevante para esa capa:
 
-  F-01: alerta ALTO sin incidente -> incident_id/isolation_status null.
-  F-02: alerta CRÍTICO con Condición B (>=2 reglas fuertes, score>=75)
-        -> incident_id no nulo, isolation_status='REQUESTED' de inmediato
-        (nunca 'RECOMMENDED', sección 23).
+  F-01: alerta ALTO con evidencia (3 reglas distintas) -> SÍ genera
+        incidente (2026-08-18: la pantalla de Incidentes debe incluir
+        también severidad ALTO, ver PENDIENTES.md), pero
+        isolation_status sigue null porque el aislamiento automático
+        ahora depende solo de severidad CRÍTICA.
+  F-02: alerta CRÍTICO (score>=75, ya alcanza por sí sola, sin
+        necesitar evidencia adicional) -> incident_id no nulo,
+        isolation_status='REQUESTED' de inmediato (nunca
+        'RECOMMENDED', sección 23).
   F-03: el agente confirma la ejecución real (POST
         /agent/isolation-status/report) -> isolation_status pasa a
         'EXECUTED' en el MISMO /alerts/open (el frontend debe ver el
@@ -153,13 +158,17 @@ try:
     def find(alerts, alert_id):
         return next((a for a in alerts if a["id"] == alert_id), None)
 
-    # ================= F-01: ALTO sin incidente =================
-    # HR-01 (25) + HR-04 (15) + HR-09 (15) = 55 + bonus 3 reglas (+10) = 65 -> ALTO, sin incidente.
+    # ================= F-01: ALTO con evidencia -> SÍ genera incidente =================
+    # HR-01 (25) + HR-04 (15) + HR-09 (15) = 55 + bonus 3 reglas (+10) = 65 -> ALTO.
+    # 3 reglas distintas es evidencia suficiente (2026-08-18) para abrir
+    # incidente aunque no llegue a CRÍTICO -- pero no CRÍTICO, así que
+    # no dispara aislamiento automático.
     r1 = report(token_alto, ["Modificacion Masiva Archivos", "Escritura Intensiva Archivos", "Eliminacion Anomala Archivos"])
     check("F-01: report_alert 200", r1.status_code == 200, r1.text[:300])
     body1 = r1.json()
     check("F-01: severidad ALTO", 50 <= body1["risk_score"] < 75, str(body1))
-    check("F-01: sin incidente", body1["incident_id"] is None, str(body1))
+    check("F-01: SÍ se creó incidente (ALTO con evidencia)", body1["incident_id"] is not None, str(body1))
+    check("F-01: sin aislamiento automático (no es CRÍTICO)", body1["isolation_requested"] is False, str(body1))
 
     alerts = open_alerts()
     row1 = find(alerts, body1["alert_id"])
@@ -167,8 +176,8 @@ try:
     if row1:
         check("F-01: severity == ALTO", row1["severity"] == "ALTO", str(row1))
         check("F-01: risk_score coincide", abs(row1["risk_score"] - body1["risk_score"]) < 0.01, str(row1))
-        check("F-01: incident_id null", row1["incident_id"] is None, str(row1))
-        check("F-01: isolation_status null", row1["isolation_status"] is None, str(row1))
+        check("F-01: incident_id coincide con el creado", row1["incident_id"] == body1["incident_id"], str(row1))
+        check("F-01: isolation_status null (sin aislamiento)", row1["isolation_status"] is None, str(row1))
 
     # ================= F-02: CRÍTICO + Condición B (aislamiento REQUESTED) =================
     # HR-01(25)+HR-02(20)+HR-04(15)+HR-09(15) = 75 + bonus 4 reglas (+15) = 90 -> CRÍTICO,

@@ -30,12 +30,12 @@ export default function EndpointStatusPanel({ status }: Props) {
       <div className="flex flex-col gap-2 mt-3">
         <div className="flex items-center gap-2 text-[12.5px]">
           <span className="w-2 h-2 rounded-full" style={{ background: "var(--ok)" }} />
-          <span style={{ color: "var(--tx-dim)" }}>Online</span>
+          <span style={{ color: "var(--tx-dim)" }}>En línea</span>
           <span className="ml-auto font-semibold" style={{ color: "var(--tx)" }}>{status.online}</span>
         </div>
         <div className="flex items-center gap-2 text-[12.5px]">
           <span className="w-2 h-2 rounded-full" style={{ background: "var(--off)" }} />
-          <span style={{ color: "var(--tx-dim)" }}>Offline</span>
+          <span style={{ color: "var(--tx-dim)" }}>Fuera de línea</span>
           <span className="ml-auto font-semibold" style={{ color: "var(--tx)" }}>{status.offline}</span>
         </div>
         <div className="flex items-center gap-2 text-[12.5px]">
@@ -46,7 +46,7 @@ export default function EndpointStatusPanel({ status }: Props) {
       </div>
 
       <div className="flex items-center gap-2.5 mt-3.5 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
-        <span className="text-xs" style={{ color: "var(--tx-dim)" }}>Agent Health</span>
+        <span className="text-xs" style={{ color: "var(--tx-dim)" }}>Salud del agente</span>
         <div className="flex-1 h-[5px] rounded-full overflow-hidden" style={{ background: "var(--surf3)" }}>
           <div className="h-full" style={{ width: `${status.agent_health_pct}%`, background: "var(--ok)" }} />
         </div>

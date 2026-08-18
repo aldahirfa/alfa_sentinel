@@ -50,7 +50,7 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
             <th className="pb-2 pr-3 font-semibold">Severidad</th>
             <th className="pb-2 pr-3 font-semibold">Alerta</th>
             <th className="pb-2 pr-3 font-semibold">Endpoint</th>
-            <th className="pb-2 pr-3 font-semibold">Risk score</th>
+            <th className="pb-2 pr-3 font-semibold">Puntos de riesgo</th>
             <th className="pb-2 pr-3 font-semibold">Estado</th>
             <th className="pb-2 pr-3 font-semibold">Fecha</th>
             <th className="pb-2 pr-3 font-semibold">Incidente</th>

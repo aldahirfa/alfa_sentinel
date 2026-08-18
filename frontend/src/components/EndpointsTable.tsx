@@ -54,7 +54,7 @@ export default function EndpointsTable({ endpoints, loading, hasFilters, onSelec
             <th className="pb-2 pr-3 font-semibold">Estado</th>
             <th className="pb-2 pr-3 font-semibold">Riesgo</th>
             <th className="pb-2 pr-3 font-semibold">Agente</th>
-            <th className="pb-2 pr-3 font-semibold">Heartbeat</th>
+            <th className="pb-2 pr-3 font-semibold">Última conexión</th>
             <th className="pb-2 pr-3 font-semibold">Alertas</th>
             <th className="pb-2 pr-3 font-semibold">Última actividad</th>
             <th className="pb-2 font-semibold" />
