@@ -169,10 +169,26 @@ CREATE TABLE honeyfiles (
     status              VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
     created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_checked_at      TIMESTAMPTZ,
+    template_id          BIGINT,
     CONSTRAINT fk_honeyfiles_agent
         FOREIGN KEY (agent_id)
         REFERENCES agents(id)
 );
+-- 'template_id' agregado 2026-08-17 (ver PENDIENTES.md, "Honeyfiles:
+-- despliegue automático, rutas, integridad, reconciliación y
+-- ejecución en tiempo real") -- nullable a propósito (columna
+-- agregada después de que la tabla ya tenía filas reales en
+-- instalaciones existentes, mismo criterio que
+-- heuristic_rules.metric_type_id más arriba). Sin este vínculo, no
+-- había forma de recrear el contenido de un honeyfile borrado ni de
+-- comparar su hash contra el de la plantilla que lo originó --
+-- 'agent_honeyfile_templates' ya guardaba esa relación para el
+-- PROCESO de asignación, pero la instancia real ('honeyfiles') no
+-- quedaba conectada a su origen. La FK y el UNIQUE(agent_id,
+-- template_id) se agregan más abajo (sección 20B), vía ALTER TABLE,
+-- porque 'honeyfile_templates' todavía no existe en este punto del
+-- script -- exactamente como pasó en la base real (se agregó con
+-- ALTER TABLE, no se pudo declarar inline).
 
 -- ============================================================
 -- 11. EVENTS
@@ -426,10 +442,21 @@ CREATE TABLE host_isolations (
         FOREIGN KEY (requested_by)
         REFERENCES users(id)
 );
--- Igual que en la base anterior: ningún endpoint del servidor escribe
--- acá todavía y el agente no tiene capacidad de aislar una red ni
--- ejecutar nada remoto (agent/main.py es de una sola pasada, sin
--- bucle de comandos). /respuesta sigue siendo un placeholder honesto.
+-- Real desde la corrección definitiva del motor heurístico
+-- (2026-08-17, ver PENDIENTES.md, "Corrección definitiva del motor
+-- heurístico, episodios, riesgo, severidad, alertas, incidentes y
+-- aislamiento"): server/main.py::report_alert() inserta 'REQUESTED'
+-- cuando corresponde aislar; agent/isolation_sync.py lo recoge
+-- (GET /agent/isolation-status) y agent/isolation_executor.py lo
+-- ejecuta de verdad (real solo si ALFA_SENTINEL_ENV=production y hay
+-- privilegios reales; en development, el flujo completo se ejerce
+-- igual pero la acción de red queda simulada), confirmando
+-- 'EXECUTED'/'ISOLATION_FAILED' vía POST /agent/isolation-status/report.
+-- 'status' sigue sin CHECK constraint (mismo criterio que el resto de
+-- las columnas de estado en esta base) -- los valores válidos los fija
+-- ISOLATION_STATUS_LABELS_ES en server/main.py: RECOMMENDED (legado),
+-- REQUESTED, EXECUTED, ISOLATION_FAILED, RELEASED (liberar un
+-- aislamiento ya aplicado queda fuera de alcance de esta tarea).
 
 -- ============================================================
 -- 19. AUDIT LOGS
@@ -453,7 +480,7 @@ CREATE TABLE audit_logs (
 -- 20. HONEYFILE TEMPLATES
 --
 -- "Qué debería existir": la definición de una trampa (nombre real,
--- tipo, contenido, ruta de destino, plataforma) separada de en qué
+-- tipo, contenido, ubicación lógica, plataforma) separada de en qué
 -- agente concreto se aplica. auto_deploy = TRUE significa "cualquier
 -- endpoint cuyo SO coincida la recibe sola, sin que nadie la asigne
 -- a mano" -- el agente la descubre la próxima vez que corre (ver
@@ -485,6 +512,32 @@ CREATE TABLE honeyfile_templates (
 -- que el watchdog o la detección de honeyfile necesiten -- ambos
 -- reaccionan a que el archivo exista y se lo toque, no a que se abra
 -- correctamente en Word/Excel. Ver PENDIENTES.md.
+--
+-- 'file_path' (2026-08-17, ver PENDIENTES.md, "Honeyfiles: despliegue
+-- automático, rutas, integridad, reconciliación y ejecución en tiempo
+-- real"): guarda una UBICACIÓN LÓGICA ('DOCUMENTS', 'DESKTOP',
+-- 'DOWNLOADS', 'PICTURES', ver agent/paths.py), no una ruta
+-- física de una máquina concreta -- el agente la resuelve a la carpeta
+-- real según su propio sistema operativo y entorno (desarrollo vs
+-- producción). Plantillas creadas antes de este cambio pueden seguir
+-- teniendo una ruta con placeholders (%USERPROFILE%, $HOME, ~) -- el
+-- resolver del agente sigue soportando ese formato como método
+-- alternativo, no se rompe nada retroactivamente.
+
+-- ============================================================
+-- 20B. HONEYFILES -- FK a HONEYFILE_TEMPLATES (diferida)
+--
+-- No se pudo declarar inline en la sección 10 (CREATE TABLE
+-- honeyfiles) porque esta tabla, 'honeyfile_templates', todavía no
+-- existía en ese punto del script -- mismo motivo por el que en la
+-- base real esto se agregó con ALTER TABLE, no al crear la tabla.
+-- ============================================================
+ALTER TABLE honeyfiles
+    ADD CONSTRAINT fk_honeyfiles_template
+        FOREIGN KEY (template_id)
+        REFERENCES honeyfile_templates(id),
+    ADD CONSTRAINT uq_honeyfiles_agent_template
+        UNIQUE (agent_id, template_id);
 
 -- ============================================================
 -- 21. AGENT HONEYFILE TEMPLATES
@@ -778,7 +831,7 @@ INSERT INTO heuristic_rules (name, description, event_type_id, metric_type_id, w
     ),
     (
         'Consumo CPU Elevado',
-        'HR-06 -- Consumo elevado de CPU por proceso: uso de CPU sostenido (no una lectura instantánea) por encima del umbral durante toda la ventana. Señal secundaria -- nunca lleva por sí sola a CRÍTICO ni dispara aislamiento.',
+        'HR-06 -- Consumo elevado de CPU por proceso: uso de CPU sostenido (no una lectura instantánea) por encima del umbral durante toda la ventana, con UNA alerta por episodio sostenido (se rearma solo tras una recuperación real por debajo del umbral). Señal secundaria -- nunca lleva por sí sola a CRÍTICO ni dispara aislamiento. El umbral (80%) es sobre la base de psutil.Process.cpu_percent(): 100% representa UN núcleo lógico completo, no la máquina entera -- un proceso multi-hilo real puede superar el 100% usando varios núcleos.',
         NULL,
         (SELECT id FROM metric_types WHERE name = 'CPU_PROCESO'),
         5.00, 80.00, 10, TRUE

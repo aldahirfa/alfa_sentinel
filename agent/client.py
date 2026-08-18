@@ -205,6 +205,67 @@ def get_rule_policy(credential):
         return None
 
 
+def get_isolation_status(credential):
+    """Agregado 2026-08-17 (ver PENDIENTES.md, "Corrección definitiva
+    del motor heurístico..."): mismo patrón de polling que
+    get_honeyfile_policy/get_rule_policy -- pregunta si el servidor
+    ordenó aislar este endpoint (GET /agent/isolation-status)."""
+
+    try:
+
+        response = httpx.get(
+            config.ISOLATION_STATUS_URL,
+            headers={
+                "X-Agent-Credential": credential
+            },
+            timeout=10
+        )
+
+        _warn_if_error(response, "pedir el estado de aislamiento")
+
+        return response
+
+    except httpx.RequestError as error:
+
+        print("No se pudo conectar con el servidor:")
+        print(error)
+
+        return None
+
+
+def report_isolation_status(credential, isolation_id, status, result):
+    """Confirma el resultado REAL de haber intentado ejecutar una
+    orden de aislamiento (ver agent/isolation_executor.py) --
+    'status' es 'EXECUTED' o 'ISOLATION_FAILED', nunca un valor
+    inventado."""
+
+    try:
+
+        response = httpx.post(
+            config.ISOLATION_STATUS_REPORT_URL,
+            json={
+                "isolation_id": isolation_id,
+                "status": status,
+                "result": result,
+            },
+            headers={
+                "X-Agent-Credential": credential
+            },
+            timeout=10
+        )
+
+        _warn_if_error(response, "reportar el resultado de un aislamiento")
+
+        return response
+
+    except httpx.RequestError as error:
+
+        print("No se pudo conectar con el servidor:")
+        print(error)
+
+        return None
+
+
 def send_alert(credential, alert_data):
 
     try:

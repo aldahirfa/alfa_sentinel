@@ -13,6 +13,8 @@ import RespuestaPage from "./pages/RespuestaPage";
 import ReportsPage from "./pages/ReportsPage";
 import AdministracionPage from "./pages/AdministracionPage";
 import PerfilPage from "./pages/PerfilPage";
+import GlobalAlertsLayer from "./components/GlobalAlertsLayer";
+import { GlobalAlertsProvider } from "./context/GlobalAlertsContext";
 import { ApiError, fetchDashboardOverview, fetchMe } from "./api/client";
 import type { DashboardOverview } from "./types/dashboard";
 import type { ItemKind } from "./types/incidentes";
@@ -226,6 +228,14 @@ export default function App() {
   const meta = PAGE_META[page];
 
   return (
+    // GlobalAlertsProvider envuelve TODA la app autenticada (sección 19
+    // de "ALFA_SENTINEL — CORRECCIÓN DE TIEMPO REAL...", 2026-08-17, ver
+    // PENDIENTES.md: "Backend -> estado real -> Global Alerts/Incidents
+    // Provider -> UI") -- un solo poll a /alerts/open acá arriba, del
+    // que cuelgan tanto GlobalAlertsLayer (flotantes) como AlertsPage/
+    // IncidentesPage (refresco de sus tablas vía refreshToken), sin que
+    // ninguna arranque un poll propio.
+    <GlobalAlertsProvider>
     <div id="app-shell" data-theme={theme} className="flex min-h-screen font-[Inter,system-ui,sans-serif] text-sm" style={wrapperStyle}>
       {/* id="app-shell": los modales que usan un portal (ej.
           RuleEditModal.tsx) lo apuntan acá en vez de a document.body --
@@ -252,7 +262,6 @@ export default function App() {
           title={meta.title}
           subtitle={meta.subtitle}
           systemOk={data.system_status.db_ok && data.system_status.api_ok}
-          notificationCount={data.summary.alerts_active}
           userName={userName}
           roleLabel={roleLabel}
           theme={theme}
@@ -285,6 +294,16 @@ export default function App() {
           <PerfilPage roleLabel={roleLabel} />
         )}
       </div>
+
+      {/* Capa global de alertas flotantes ALTO/CRÍTICO (sección 7/13,
+          2026-08-17, ver PENDIENTES.md) -- montada UNA sola vez acá,
+          no por pantalla, así hay una única fuente de polling que
+          sigue funcionando sin importar qué página esté activa.
+          Reutiliza openAlert/openIncident, las mismas funciones que
+          ya usan la campana del topbar y las páginas de Alertas/
+          Incidentes -- ninguna navegación nueva. */}
+      <GlobalAlertsLayer onViewAlert={openAlert} onViewIncident={openIncident} />
     </div>
+    </GlobalAlertsProvider>
   );
 }

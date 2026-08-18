@@ -13,8 +13,17 @@ interface Props {
   onSinceChange: (v: "24h" | "7d" | "30d" | "") => void;
   rule: string;
   onRuleChange: (v: string) => void;
+  // Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
+  // problema G).
+  view: "activas" | "todos";
+  onViewChange: (v: "activas" | "todos") => void;
   rules: RuleOption[];
 }
+
+const VIEW_OPTIONS: { value: "activas" | "todos"; label: string }[] = [
+  { value: "activas", label: "Activas" },
+  { value: "todos", label: "Todos" },
+];
 
 const SEVERITY_OPTIONS: (Severity | "")[] = ["", "MEDIO", "ALTO", "CRÍTICO"];
 const STATUS_OPTIONS: (AlertStatus | "")[] = ["", "NEW", "ACKNOWLEDGED", "ESCALATED", "CLOSED", "FALSE_POSITIVE"];
@@ -42,6 +51,8 @@ export default function AlertsFilters({
   onSinceChange,
   rule,
   onRuleChange,
+  view,
+  onViewChange,
   rules,
 }: Props) {
   return (
@@ -69,6 +80,23 @@ export default function AlertsFilters({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Vista</span>
+          <div className="flex p-0.5 rounded-lg" style={{ background: "var(--surf2)", border: "1px solid var(--line)" }}>
+            {VIEW_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => onViewChange(opt.value)}
+                title={opt.value === "activas" ? "Oculta Cerradas y Falso positivo" : "Incluye el historial completo"}
+                className="px-2.5 py-1 rounded-md text-[11.5px] font-medium border-0 cursor-pointer"
+                style={segStyle(view === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Severidad</span>
           <div className="flex p-0.5 rounded-lg" style={{ background: "var(--surf2)", border: "1px solid var(--line)" }}>

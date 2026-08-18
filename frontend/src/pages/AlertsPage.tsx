@@ -8,6 +8,7 @@ import { fetchAlerts } from "../api/client";
 import type { AlertStatus, AlertsResponse } from "../types/alerts";
 import type { Severity } from "../types/dashboard";
 import { useRowFlash } from "../hooks/useRowFlash";
+import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
 
 const PAGE_SIZE = 15;
 const DEBOUNCE_MS = 300;
@@ -30,6 +31,11 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [status, setStatus] = useState<AlertStatus | "">("");
   const [since, setSince] = useState<"24h" | "7d" | "30d" | "">("");
   const [rule, setRule] = useState("");
+  // Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
+  // problema G): por defecto solo lo que requiere atención (activas) --
+  // Cerradas/Falso positivo quedan afuera hasta que el analista elige
+  // "Todos" a propósito. No se borra nada de la base, es solo un filtro.
+  const [view, setView] = useState<"activas" | "todos">("activas");
   const [page, setPage] = useState(1);
 
   const [data, setData] = useState<AlertsResponse | null>(null);
@@ -37,6 +43,14 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const flashId = useRowFlash(selectedId);
+  // Sección 7/19/21 de "ALFA_SENTINEL — CORRECCIÓN DE TIEMPO REAL..."
+  // (2026-08-17, ver PENDIENTES.md): esta pantalla NO arranca su propio
+  // poll -- reacciona a la MISMA señal que ya consume la capa de
+  // alertas flotantes (un solo /alerts/open cada 3s, montado una vez en
+  // App.tsx). Cuando el proveedor global detecta una alerta nueva o
+  // cambiada, 'refreshToken' cambia y esto dispara un refetch normal
+  // (respetando filtros/página actuales), sin recargar toda la app.
+  const { refreshToken } = useGlobalAlertsContext();
 
   useEffect(() => {
     if (initialAlertSelection != null) setSelectedId(initialAlertSelection.id);
@@ -51,12 +65,12 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   // Cualquier cambio de filtro vuelve a la página 1.
   useEffect(() => {
     setPage(1);
-  }, [search, severity, status, since, rule]);
+  }, [search, severity, status, since, rule, view]);
 
   function load() {
     let cancelled = false;
     setLoading(true);
-    fetchAlerts({ search, severity, status, since, rule, page, page_size: PAGE_SIZE })
+    fetchAlerts({ search, severity, status, since, rule, view, page, page_size: PAGE_SIZE })
       .then((res) => {
         if (!cancelled) {
           setData(res);
@@ -74,7 +88,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
     };
   }
 
-  useEffect(load, [search, severity, status, since, rule, page]);
+  useEffect(load, [search, severity, status, since, rule, view, page, refreshToken]);
 
   const hasFilters = Boolean(search || severity || status || since || rule);
 
@@ -93,6 +107,8 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
         onSinceChange={setSince}
         rule={rule}
         onRuleChange={setRule}
+        view={view}
+        onViewChange={setView}
         rules={data?.rules ?? []}
       />
 

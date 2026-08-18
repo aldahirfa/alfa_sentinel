@@ -10,6 +10,45 @@ from client import send_event, send_alert
 from adapters import get_process_for_file_event
 
 import os
+import time
+
+# Deduplicación de "eventos técnicos" (2026-08-18, ver PENDIENTES.md,
+# "Revisión y corrección integral de ALFA-Sentinel", problema B):
+# investigado ANTES de tocar código, tal como pidió la especificación --
+# esto es un comportamiento real y documentado de aplicaciones de
+# escritorio (Office en particular), no un defecto de watchdog ni del
+# agente: guardar un archivo UNA vez puede generar más de un evento de
+# filesystem real (reescritura del mismo archivo dos veces seguidas,
+# o el patrón "escribir temporal -> borrar original -> renombrar").
+#
+# La telemetría cruda ('events' en la base) NO se toca por esto -- cada
+# evento real se sigue reportando tal cual vía send_event() más abajo,
+# ANTES de este chequeo (sección B: "no eliminar eventos reales del
+# registro solo para que la consola se vea mejor"). Lo que sí se evita es
+# que DOS notificaciones técnicas casi simultáneas del mismo
+# (ruta, tipo de evento) -- casi siempre la misma acción real del
+# usuario, no dos acciones distintas -- lleguen dos veces al motor
+# heurístico y cuenten como dos operaciones separadas hacia un umbral
+# (Escritura Intensiva, Actividad Repetitiva Automatizada, etc.).
+#
+# Se implementa ACÁ, no dentro de FileActivityAnalyzer.register_event()
+# (agent/heuristic_engine.py) -- a propósito: esa clase es una función
+# determinista de la secuencia de eventos que recibe, y así la prueba
+# tests/heuristic/test_file_rules_regression.py, que verifica
+# explícitamente que HR-04 cuenta OPERACIONES totales (no archivos
+# únicos) llamando register_event() varias veces seguidas sobre el MISMO
+# archivo sin ninguna pausa real -- deduplicar por tiempo transcurrido
+# ahí adentro habría roto esa prueba y el contrato que ya prueba
+# (sección "NO rompas la lógica existente"). Acá, en cambio, SÍ hay
+# tiempo real entre eventos de watchdog (a diferencia de un test
+# sintético en bucle), así que acá es donde corresponde decidir si dos
+# eventos consecutivos son, en la práctica, la misma acción técnica.
+#
+# 2.0s es conservador: separa "ruido técnico del mismo guardado"
+# (típicamente milisegundos) de una repetición real y deliberada sobre
+# el mismo archivo (que sí debe seguir contando aparte).
+DEDUP_WINDOW_SECONDS = 2.0
+
 
 class FileActivityHandler(FileSystemEventHandler):
 
@@ -18,6 +57,18 @@ class FileActivityHandler(FileSystemEventHandler):
         self.analyzer = analyzer
         self.honeyfile_monitor = honeyfile_monitor
         self.credential = credential
+        self._last_technical_event = {}  # (file_path, event_type) -> último timestamp real
+
+    def _is_technical_duplicate(self, file_path, event_type):
+        """Ver DEDUP_WINDOW_SECONDS arriba. Actualiza el registro en
+        cada llamada (no solo cuando devuelve True), así que una ráfaga
+        de eventos técnicos seguidos del mismo guardado cuenta como UNA
+        sola operación real, no una cada DEDUP_WINDOW_SECONDS."""
+        now = time.time()
+        key = (file_path, event_type)
+        last = self._last_technical_event.get(key)
+        self._last_technical_event[key] = now
+        return last is not None and (now - last) <= DEDUP_WINDOW_SECONDS
 
 
     # Títulos/descripciones legibles por regla -- el título es fijo por
@@ -44,7 +95,16 @@ class FileActivityHandler(FileSystemEventHandler):
         "Actividad Repetitiva Automatizada": "Actividad automatizada del mismo proceso",
     }
 
-    def register_file_event(self, file_path, event_type):
+    def register_file_event(self, file_path, event_type, honeyfile_hit=False):
+        """'honeyfile_hit' (2026-08-17, ver PENDIENTES.md, "Honeyfiles +
+        monitorización completa del endpoint..."): permite forzar que
+        ESTE evento cuente como interacción con un honeyfile incluso si
+        'file_path' (el nombre reportado, sección 12) no está en
+        known_paths -- necesario para renombrados externos (test H5:
+        "Proceso externo renombra honeyfile -> HR-03"): si el archivo
+        VIEJO era un honeyfile, el evento (que se reporta con el
+        nombre NUEVO, ver on_moved) sigue siendo una interacción con un
+        honeyfile, aunque el nombre nuevo ya no lo sea."""
 
         extension = os.path.splitext(file_path)[1].lower()
 
@@ -68,7 +128,7 @@ class FileActivityHandler(FileSystemEventHandler):
         if process_info:
             print(
                 f"Proceso atribuido: PID {process_info.get('process_id')} "
-                f"({process_info.get('process_name')})"
+                f"({process_info.get('process_name')}, usuario: {process_info.get('username') or '—'})"
             )
 
         # Reportar el evento crudo al servidor (tabla 'events'). Antes
@@ -77,10 +137,13 @@ class FileActivityHandler(FileSystemEventHandler):
         # pero esa tabla no existe en la nueva estructura (alfa_sentinel)
         # -- ver PENDIENTES.md. Se sigue mandando el evento igual, solo
         # que ya no se hace nada con el id de vuelta. 'executable_path'
-        # no viaja acá -- 'events' no tiene columna para eso (sección 15
-        # de la especificación: no se inventa una columna nueva sin
-        # necesidad real comprobada); process_id/process_name sí, esas
-        # columnas ya existían.
+        # y 'username' (agregado 2026-08-16 a la salida de los
+        # adaptadores) no viajan acá -- 'events' no tiene columnas para
+        # eso (sección 10 de la especificación de atribución: "no
+        # cambiar la estructura de la BD solamente para satisfacer esta
+        # tarea"; quedan como información interna del agente, usadas
+        # solo para evaluar HR-05 y para el log en consola);
+        # process_id/process_name sí, esas columnas ya existían.
         send_event(
             self.credential,
             {
@@ -98,18 +161,46 @@ class FileActivityHandler(FileSystemEventHandler):
         # Comprobar honeyfile ANTES de evaluar reglas: HR-03 es
         # inmediata (sección 12 de la especificación), no depende de
         # ninguna ventana ni se acumula con las demás reglas.
-        is_honeyfile = self.honeyfile_monitor.is_honeyfile(file_path)
+        is_honeyfile = self.honeyfile_monitor.is_honeyfile(file_path) or honeyfile_hit
 
-        if is_honeyfile:
+        # Exclusión de actividad interna del agente (sección 22/34 de
+        # la especificación de monitorización completa, 2026-08-17):
+        # si ESTE MISMO agente acaba de crear/recrear este honeyfile
+        # (agent/honeyfile_deployer.py, durante el despliegue o la
+        # reconciliación periódica), el evento de watchdog que llega
+        # ahora no es una interacción externa -- no debe activar HR-03.
+        # El evento se sigue mandando igual (línea de abajo) y las
+        # demás reglas se siguen evaluando igual -- solo se fuerza
+        # is_honeyfile=False para ESTA evaluación puntual.
+        if is_honeyfile and self.honeyfile_monitor.is_internal_operation(file_path):
+
+            print(f"(actividad interna del agente sobre este honeyfile -- HR-03 no se evalúa: {file_path})")
+            is_honeyfile = False
+
+        elif is_honeyfile:
 
             print()
             print("⚠ HONEYFILE ACTIVADO")
             print(f"Archivo: {file_path}")
             print()
 
-        matched_rules = self.analyzer.register_event(
-            file_path, event_type, is_honeyfile=is_honeyfile, process_info=process_info
-        )
+        # Deduplicación de eventos técnicos (ver DEDUP_WINDOW_SECONDS al
+        # inicio del módulo, problema B, 2026-08-18): si ESTE MISMO
+        # (file_path, event_type) ya se vio hace menos de
+        # DEDUP_WINDOW_SECONDS, se trata como la misma acción técnica de
+        # un solo guardado real -- no se vuelve a evaluar contra el motor
+        # heurístico una segunda vez (evita inflar artificialmente
+        # umbrales como Escritura Intensiva Archivos o Actividad
+        # Repetitiva Automatizada). El evento YA se reportó tal cual a
+        # /agent/events arriba -- la telemetría cruda no se pierde, solo
+        # se evita contarlo dos veces hacia un umbral.
+        if self._is_technical_duplicate(file_path, event_type):
+            print(f"(evento técnico duplicado del mismo guardado -- no se reevalúa el motor heurístico: {file_path})")
+            matched_rules = []
+        else:
+            matched_rules = self.analyzer.register_event(
+                file_path, event_type, is_honeyfile=is_honeyfile, process_info=process_info
+            )
 
         file_count = self.analyzer.get_unique_file_count()
 
@@ -118,8 +209,23 @@ class FileActivityHandler(FileSystemEventHandler):
             f"{file_count}"
         )
 
+        # Corregido 2026-08-18 (ver PENDIENTES.md, "Revisión y corrección
+        # integral de ALFA-Sentinel", problema A): la línea anterior decía
+        # solo "Reglas activas: ninguna" cuando NINGUNA regla cruzó su
+        # umbral con ESTE evento puntual -- lo normal en la inmensa
+        # mayoría de los eventos individuales (la mayoría de las reglas
+        # requieren varios eventos dentro de una ventana, ej. 20 archivos
+        # en 10s). Esa frase se confundía con "no hay reglas cargadas",
+        # que es un problema completamente distinto (y que, de existir,
+        # ya se reportaría al arrancar el agente -- ver agent/main.py).
+        # Ahora se imprimen dos números separados y sin ambigüedad: cuántas
+        # reglas tiene cargadas el motor (constante mientras el agente
+        # corre) y cuántas de esas coincidieron con ESTE evento (variable,
+        # normalmente 0).
+        print(f"Reglas evaluadas: {len(self.analyzer.rules)}")
         print(
-            f"Reglas activas: {matched_rules if matched_rules else 'ninguna'}"
+            f"Reglas coincidentes con este evento: "
+            f"{', '.join(matched_rules) if matched_rules else 'ninguna'}"
         )
 
         if matched_rules:
@@ -196,10 +302,74 @@ class FileActivityHandler(FileSystemEventHandler):
             # se mira la extensión del nombre VIEJO, un rename a
             # "informe.docx.locked" nunca se detectaría porque la
             # extensión sospechosa está en el nombre nuevo.
-            self.register_file_event(event.dest_path, "file_renamed")
+            #
+            # Para HR-03 es al revés (2026-08-17, ver PENDIENTES.md,
+            # "Honeyfiles + monitorización completa del endpoint..." --
+            # test H5, "proceso externo renombra honeyfile -> HR-03"):
+            # si el nombre VIEJO era un honeyfile conocido, esto sigue
+            # siendo una interacción con un honeyfile aunque el nombre
+            # nuevo no esté en known_paths -- se consulta ANTES de
+            # reportar, porque is_honeyfile() depende de known_paths,
+            # que no cambia solo porque el archivo se renombró.
+            source_was_honeyfile = self.honeyfile_monitor.is_honeyfile(event.src_path)
+
+            self.register_file_event(event.dest_path, "file_renamed", honeyfile_hit=source_was_honeyfile)
 
 
-def start_file_monitor(path, credential, known_honeyfile_paths=None, rule_policy=None):
+def watch_extra_directory(observer, event_handler, file_path, watched_roots, watched_extra_dirs):
+    """Agrega al Observer, sin reiniciarlo, la carpeta que contiene
+    'file_path' -- salvo que ya esté cubierta por el watch recursivo de
+    alguna de 'watched_roots' o ya se haya agregado antes (evita
+    duplicar el mismo watch dos veces, lo que watchdog permite pero
+    solo generaría eventos repetidos).
+
+    'watched_roots' es una lista (2026-08-17, ver PENDIENTES.md,
+    "Honeyfiles + monitorización completa del endpoint..." -- antes
+    era una sola carpeta raíz, ahora el agente vigila varias raíces
+    globales a la vez, ver get_monitored_roots() en agent/paths.py).
+    En la práctica, con ALFA_ARCHIVOS anidado dentro de una ruta lógica
+    ya vigilada (Documents, Desktop, ...), esta función casi nunca
+    encuentra una carpeta sin cubrir -- sigue existiendo para
+    plantillas viejas con una ruta libre (formato legado, ver
+    agent/paths.py::resolve_logical_path) que caiga fuera de las
+    raíces monitorizadas.
+
+    Extraído como función reusable (2026-08-17) porque ya no es algo
+    que se resuelve una sola vez al arrancar: agent/honeyfile_sync.py
+    la llama en cada ciclo de sincronización cuando aparece un
+    honeyfile nuevo en una carpeta todavía no vigilada, sin necesidad
+    de reiniciar el agente."""
+
+    directory = os.path.dirname(os.path.abspath(file_path))
+
+    if not directory or directory in watched_extra_dirs:
+        return
+
+    if any(directory.startswith(root) for root in watched_roots):
+        return
+
+    if os.path.isdir(directory):
+
+        observer.schedule(
+            event_handler,
+            directory,
+            recursive=False
+        )
+
+        watched_extra_dirs.add(directory)
+
+        print(f"Vigilando también: {directory}")
+
+
+def start_file_monitor(monitored_roots, credential, known_honeyfile_paths=None, rule_policy=None):
+    """'monitored_roots': lista de carpetas a vigilar de forma
+    recursiva -- ya NO es una sola carpeta de trabajo del agente
+    (sección 3/26/40 de la especificación de monitorización completa,
+    2026-08-17: "el agente debe monitorizar TODO el endpoint... NO
+    solamente ALFA_ARCHIVOS"). Normalmente es el resultado de
+    agent/paths.py::get_monitored_roots() -- Documents/Desktop/
+    Downloads/Pictures/Videos/Music (reales en producción, carpetas de
+    prueba dedicadas en desarrollo)."""
 
     # 'rule_policy' es la lista 'rules' que devuelve GET /agent/rule-policy
     # (ver agent/main.py, agent/client.py::get_rule_policy) -- la
@@ -209,7 +379,6 @@ def start_file_monitor(path, credential, known_honeyfile_paths=None, rule_policy
     analyzer = FileActivityAnalyzer.from_policy(rule_policy)
 
     honeyfile_monitor = HoneyfileMonitor(
-        "honeyfiles",
         known_paths=known_honeyfile_paths
     )
 
@@ -221,45 +390,34 @@ def start_file_monitor(path, credential, known_honeyfile_paths=None, rule_policy
 
     observer = Observer()
 
-    watched_root = os.path.abspath(path)
+    watched_roots = [os.path.abspath(root) for root in monitored_roots]
 
-    observer.schedule(
-        event_handler,
-        path,
-        recursive=True
-    )
+    for root in watched_roots:
+        observer.schedule(
+            event_handler,
+            root,
+            recursive=True
+        )
+        print(f"Vigilando: {root}")
 
     # Los honeyfiles desplegados por plantilla (agent/honeyfile_deployer.py)
-    # pueden vivir fuera de 'path' (ej. el Desktop del usuario, no la
-    # carpeta desde donde corre el agente) -- sin esto, watchdog nunca
-    # ve actividad ahí, porque el watch recursivo de 'path' no llega.
-    extra_dirs = set()
+    # pueden, en configuraciones legado, vivir fuera de las carpetas
+    # anteriores -- sin esto, watchdog nunca vería actividad ahí. Con
+    # ALFA_ARCHIVOS anidado dentro de una ruta lógica ya vigilada, esto
+    # en la práctica ya no agrega nada para plantillas nuevas -- ver
+    # watch_extra_directory().
+    watched_extra_dirs = set()
 
     for honeyfile_path in (known_honeyfile_paths or []):
-
-        directory = os.path.dirname(os.path.abspath(honeyfile_path))
-
-        if directory and not directory.startswith(watched_root):
-            extra_dirs.add(directory)
-
-    for directory in extra_dirs:
-
-        if os.path.isdir(directory):
-
-            observer.schedule(
-                event_handler,
-                directory,
-                recursive=False
-            )
-
-            print(f"Vigilando también: {directory}")
+        watch_extra_directory(observer, event_handler, honeyfile_path, watched_roots, watched_extra_dirs)
 
     observer.start()
 
-    # Se devuelve también 'analyzer' -- agent/main.py lo usa para leer
-    # la configuración YA RESUELTA de reglas que no se evalúan acá
-    # (ej. "Consumo CPU Elevado", que arranca su propio hilo aparte,
-    # ver cpu_monitor.py) sin tener que volver a parsear 'rule_policy'
-    # por su cuenta -- una sola fuente de verdad para "qué está activo
-    # y con qué parámetros para este agente".
-    return observer, analyzer
+    # Se devuelven también 'analyzer' (agent/main.py lo usa para leer
+    # la configuración YA RESUELTA de reglas que no se evalúan acá, ej.
+    # "Consumo CPU Elevado", ver cpu_monitor.py), 'honeyfile_monitor' y
+    # 'watched_extra_dirs' (agent/honeyfile_sync.py los necesita para
+    # sumar honeyfiles nuevos sin reiniciar el observer, ver ese
+    # módulo) y 'watched_roots' (para saber si una carpeta nueva ya
+    # está cubierta por algún watch recursivo, sin volver a calcularlo).
+    return observer, analyzer, honeyfile_monitor, event_handler, watched_roots, watched_extra_dirs

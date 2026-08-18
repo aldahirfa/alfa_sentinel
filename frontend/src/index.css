@@ -92,3 +92,20 @@ body {
 .btn-hover:active {
   filter: brightness(0.9);
 }
+
+/* Entrada de las tarjetas de la capa de alertas flotantes globales
+   (sección "Alertas flotantes globales de alta prioridad",
+   2026-08-17, ver PENDIENTES.md) -- desliza desde la derecha + fade,
+   consistente con transition-premium de arriba pero como keyframe
+   porque son elementos que aparecen (mount), no que cambian de
+   estado (donde alcanza una transition normal). */
+@keyframes alfaFloatIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

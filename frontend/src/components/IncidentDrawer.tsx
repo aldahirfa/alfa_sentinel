@@ -4,6 +4,8 @@ import {
   classifyIncident,
   escalateAlertToIncident,
   fetchIncidenteDrawer,
+  isolateIncident,
+  releaseIsolation,
   updateIncidentStatus,
 } from "../api/client";
 import type { IncidenteDrawerData } from "../types/alerts";
@@ -12,6 +14,11 @@ import { severityPillStyle } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import type { AlertStatus } from "../types/alerts";
 import { INCIDENT_CLASSIFICATION_LABEL, INCIDENT_STATUS_LABEL } from "../lib/incidentStatus";
+import {
+  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, RELEASE_ICON_CLASS, PENDING_ICON_CLASS,
+  ISOLATE_LABEL_FULL, ISOLATED_LABEL_FULL, RELEASE_LABEL_FULL, PENDING_LABEL_FULL,
+  ISOLATE_TOOLTIP, RELEASE_TOOLTIP, confirmIsolate,
+} from "../lib/isolationUi";
 
 interface Props {
   selected: { kind: ItemKind; id: number } | null;
@@ -253,7 +260,13 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 )}
               </Section>
 
-              {/* Reglas asociadas -- solo llega itemizado para una alerta suelta */}
+              {/* Reglas asociadas -- para un incidente agrupado son la
+                  unión de las reglas de todas las alertas que lo
+                  componen (2026-08-18, ver PENDIENTES.md, "Corrección
+                  definitiva en la lógica y presentación de ALERTAS" --
+                  antes esta lista quedaba vacía para kind === 'incident').
+                  Orden de relevancia real, no cronológico ni accidental
+                  -- ver sort_contributing_rules() en el servidor. */}
               {data.rules.length > 0 && (
                 <Section title="Reglas asociadas">
                   <div className="flex flex-col gap-2">
@@ -271,6 +284,17 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                   </div>
                 </Section>
               )}
+
+              {/* Proceso involucrado (2026-08-18, ver PENDIENTES.md,
+                  "Corrección definitiva en la lógica y presentación de
+                  ALERTAS", sección 5) -- correlación real por ventana
+                  de tiempo, nunca inventado. */}
+              <Section title="Proceso involucrado">
+                <Field label="Proceso" value={data.process.process_name ?? "No disponible"} />
+                <Field label="PID" value={data.process.process_id !== null ? data.process.process_id : "No disponible"} />
+                <Field label="Ruta" value={data.process.executable_path ?? "No disponible"} />
+                <Field label="Usuario" value={data.process.username ?? "No disponible"} />
+              </Section>
 
               {/* Gestión del caso -- solo para incidentes agrupados */}
               {selected.kind === "incident" && (
@@ -410,23 +434,75 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 </Section>
               )}
 
-              {/* Acción de aislamiento -- mismo estado honesto que en
-                  EndpointDrawer: el agente no tiene canal de comandos
-                  remotos, así que no hay forma real de aislarlo. */}
-              <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
-                <button
-                  disabled
-                  title="ALFA-Sentinel no puede aislar un host todavía: el agente no tiene forma de recibir ni ejecutar un comando remoto."
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-not-allowed opacity-50"
-                  style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
-                >
-                  <i className="ph ph-plugs" style={{ fontSize: "15px" }} />
-                  Aislar endpoint
-                </button>
-                <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
-                  El aislamiento remoto todavía no está implementado en el agente.
-                </p>
-              </div>
+              {/* Acción de aislamiento -- disparo MANUAL real (2026-08-17,
+                  ver PENDIENTES.md, "Aislamiento de host -- modo
+                  development, laboratorio y producción"): usa el mismo
+                  mecanismo de backend/agente que el automático (POST
+                  /incidents/{id}/isolate), reutilizando runAction() --
+                  la misma función que ya usan el resto de las acciones
+                  de este drawer (asignar, clasificar, cambiar estado). */}
+              {data.isolation_status === "REQUESTED" || data.isolation_status === "RELEASE_REQUESTED" ? (
+                <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                  <div
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
+                    style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                  >
+                    <i className={PENDING_ICON_CLASS} style={{ fontSize: "15px" }} />
+                    {PENDING_LABEL_FULL}
+                  </div>
+                </div>
+              ) : data.isolation_status === "EXECUTED" ? (
+                // Liberar reusa runAction() -- mismo backend/máquina de
+                // estados que "Liberar" en IsolationsHistoryTable.tsx,
+                // CriticalIncidentsTable.tsx y EndpointDrawer.tsx (POST
+                // /host-isolations/{id}/release), una sola implementación
+                // en todo el sistema (sección 13, 2026-08-17, ver
+                // PENDIENTES.md). Amarillo, nunca rojo (sección 11).
+                <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                  <div
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold mb-2.5"
+                    style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
+                  >
+                    <i className={ISOLATED_ICON_CLASS} style={{ fontSize: "15px" }} />
+                    {ISOLATED_LABEL_FULL}
+                  </div>
+                  <button
+                    disabled={saving || !data.isolation_id}
+                    onClick={() => runAction(() => releaseIsolation(data.isolation_id!))}
+                    title={data.isolation_id ? RELEASE_TOOLTIP : "No se encontró la orden de aislamiento asociada."}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
+                    style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                  >
+                    <i className={RELEASE_ICON_CLASS} style={{ fontSize: "15px" }} />
+                    {RELEASE_LABEL_FULL}
+                  </button>
+                </div>
+              ) : (
+                <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                  <button
+                    disabled={saving || !data.isolatable_incident_id}
+                    onClick={() => {
+                      if (!confirmIsolate(data.hostname)) return;
+                      runAction(() => isolateIncident(data.isolatable_incident_id!));
+                    }}
+                    title={
+                      data.isolatable_incident_id
+                        ? ISOLATE_TOOLTIP
+                        : "Esta alerta todavía no forma parte de un incidente -- el aislamiento se asocia siempre a un incidente real."
+                    }
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
+                    style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
+                  >
+                    <i className={ISOLATE_ICON_CLASS} style={{ fontSize: "15px" }} />
+                    {ISOLATE_LABEL_FULL}
+                  </button>
+                  {!data.isolatable_incident_id && (
+                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
+                      Esta alerta todavía no forma parte de un incidente -- escalala primero (arriba) para poder aislar.
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>

@@ -34,6 +34,13 @@ export interface CombinedItem {
   detection_count: number;
   assigned_to: number | null;
   assigned_to_name: string | null;
+  // Agregado 2026-08-17 (ver PENDIENTES.md, "Corrección de tiempo real,
+  // ordenamiento y consistencia", sección 12) -- estado más reciente de
+  // aislamiento para este incidente (null para 'kind===alert' o si
+  // nunca se ordenó ninguno). Lo que necesita el botón "Aislar" de esta
+  // misma tabla (antes deshabilitado permanentemente) para no ofrecer
+  // aislar de nuevo si ya hay una orden en curso/cumplida.
+  isolation_status: string | null;
 }
 
 export interface IncidentesSummary {
@@ -77,6 +84,9 @@ export interface IncidentesQuery {
   rule?: string;
   since?: "24h" | "7d" | "30d" | "";
   search?: string;
+  // Ver AlertsQuery.view (2026-08-18, ver PENDIENTES.md, problema G) --
+  // mismo criterio, acá "activas" excluye el bucket 'cerrado'.
+  view?: "activas" | "todos";
   page?: number;
 }
 

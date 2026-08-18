@@ -81,6 +81,19 @@ export interface EndpointDrawerData {
   risk_bucket: Severity;
   risk_score: number;
   is_isolated: boolean;
+  // Fila más reciente de host_isolations para este endpoint (o null) --
+  // lo que necesita el botón "Liberar" para llamar a
+  // POST /host-isolations/{id}/release. Agregados 2026-08-17, ver
+  // PENDIENTES.md, "Corrección de tiempo real, ordenamiento y
+  // consistencia".
+  isolation_id: number | null;
+  isolation_status: string | null;
+  // Incidente activo más reciente de este endpoint, o null si no hay
+  // ninguno -- lo que necesita el botón "Aislar endpoint manualmente"
+  // para saber a qué incidente asociar la orden (host_isolations.
+  // incident_id es NOT NULL). Agregado 2026-08-17, ver PENDIENTES.md,
+  // "Aislamiento de host -- modo development, laboratorio y producción".
+  active_incident_id: number | null;
   alerts_active: number;
   incidents_total: number;
   incidents_active: number;

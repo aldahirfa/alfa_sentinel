@@ -222,6 +222,20 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                 </Section>
               )}
 
+              {/* Proceso involucrado (2026-08-18, ver PENDIENTES.md,
+                  "Corrección definitiva en la lógica y presentación de
+                  ALERTAS", sección 5) -- correlación real por ventana
+                  de tiempo, nunca inventado: si el agente no pudo
+                  atribuir el proceso (o el dato simplemente no existe
+                  en la base, como 'ruta'/'usuario' hoy), se muestra
+                  "No disponible" en vez de fabricar un valor. */}
+              <Section title="Proceso involucrado">
+                <Field label="Proceso" value={data.process.process_name ?? "No disponible"} />
+                <Field label="PID" value={data.process.process_id !== null ? data.process.process_id : "No disponible"} />
+                <Field label="Ruta" value={data.process.executable_path ?? "No disponible"} />
+                <Field label="Usuario" value={data.process.username ?? "No disponible"} />
+              </Section>
+
               {/* Incidente relacionado -- el sistema tiene su propio
                   mecanismo automático de escalamiento (motor
                   heurístico), pero un analista puede decidir que una

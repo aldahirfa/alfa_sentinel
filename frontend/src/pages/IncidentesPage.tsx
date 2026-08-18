@@ -8,6 +8,7 @@ import { fetchIncidentes } from "../api/client";
 import type { CombinedItem, IncidentesResponse, ItemKind, StatusBucket } from "../types/incidentes";
 import type { Severity } from "../types/dashboard";
 import { useRowFlash } from "../hooks/useRowFlash";
+import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
 
 const DEBOUNCE_MS = 300;
 
@@ -29,6 +30,9 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const [severity, setSeverity] = useState<Severity | "">("");
   const [since, setSince] = useState<"24h" | "7d" | "30d" | "">("");
   const [rule, setRule] = useState("");
+  // Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
+  // problema G) -- mismo criterio que AlertsPage.tsx.
+  const [view, setView] = useState<"activas" | "todos">("activas");
   const [page, setPage] = useState(1);
 
   const [data, setData] = useState<IncidentesResponse | null>(null);
@@ -39,6 +43,10 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   // tabla -- ver lib/rowSelection.ts / hooks/useRowFlash.ts.
   const selectedKey = selected ? `${selected.kind}:${selected.id}` : null;
   const flashKey = useRowFlash(selectedKey);
+  // Mismo criterio que AlertsPage.tsx -- reacciona a la señal del
+  // proveedor global (2026-08-17, ver PENDIENTES.md, sección 19), no
+  // arranca un poll propio.
+  const { refreshToken } = useGlobalAlertsContext();
 
   useEffect(() => {
     if (initialSelection != null) setSelected(initialSelection);
@@ -51,12 +59,12 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
 
   useEffect(() => {
     setPage(1);
-  }, [search, status, severity, since, rule]);
+  }, [search, status, severity, since, rule, view]);
 
   function load() {
     let cancelled = false;
     setLoading(true);
-    fetchIncidentes({ search, status, severity, since, rule, page })
+    fetchIncidentes({ search, status, severity, since, rule, view, page })
       .then((res) => {
         if (!cancelled) {
           setData(res);
@@ -77,7 +85,7 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   useEffect(() => {
     return load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, severity, since, rule, page]);
+  }, [search, status, severity, since, rule, view, page, refreshToken]);
 
   const hasFilters = Boolean(search || status || severity || since || rule);
 
@@ -96,6 +104,8 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
         onSinceChange={setSince}
         rule={rule}
         onRuleChange={setRule}
+        view={view}
+        onViewChange={setView}
         statusOptions={data?.filters.status_options ?? []}
         ruleOptions={data?.filters.rule_options ?? []}
       />
@@ -114,6 +124,7 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
             loading={loading}
             hasFilters={hasFilters}
             onSelect={(item: CombinedItem) => setSelected({ kind: item.kind, id: item.id })}
+            onIsolated={load}
             selectedKey={selectedKey}
             flashKey={flashKey}
           />

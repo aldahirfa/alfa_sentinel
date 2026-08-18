@@ -45,23 +45,40 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      // POST /logout (menú de usuario) y GET /alerts/open (dropdown
-      // de la campana de notificaciones) -- endpoints reales, no
-      // colisionan con la página "Alertas" (esa vive en /alertas, con
-      // acento, ver App.tsx).
+      // POST /logout (menú de usuario).
       '/logout': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      '/alerts': {
+      // GET /alerts/open (dropdown de la campana de notificaciones) --
+      // ruta EXACTA a propósito (regex, no prefijo): App.tsx reconoce
+      // "/alerts" (sin acento) como alias en inglés de la página
+      // "Alertas" (que vive en "/alertas"), así que un "/alerts" a
+      // secas tiene que caer en el fallback de SPA de Vite, igual que
+      // "/reportes" más abajo. Con un prefijo simple ("/alerts": {...})
+      // Vite reenviaba CUALQUIER ruta que empezara con "/alerts" al
+      // servidor real -- incluida esa página, que ahí no existe (el
+      // backend solo tiene GET /alerts/open y GET /api/alerts) -> 404
+      // real, encontrado en producción (ver PENDIENTES.md).
+      '^/alerts/open$': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
       // PATCH/POST /incidents/... (drawer de Incidentes: cambiar
-      // estado, responsable, clasificación, escalar una alerta suelta)
-      // -- no colisiona con la página "Incidentes" (esa vive en
-      // /incidentes, en español).
+      // estado, responsable, clasificación, escalar una alerta suelta,
+      // aislar manualmente) -- no colisiona con la página "Incidentes"
+      // (esa vive en /incidentes, en español).
       '/incidents': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // POST /host-isolations/{id}/release (liberar un aislamiento ya
+      // ejecutado, botón "Liberar" en la pantalla Respuesta, 2026-08-17,
+      // ver PENDIENTES.md, "Aislamiento de host -- modo development,
+      // laboratorio y producción") -- sin esto el request caía en el
+      // fallback de SPA de Vite (204/index.html) en vez de llegar al
+      // servidor real, mismo tipo de bug que ya pasó con /alerts.
+      '/host-isolations': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchEndpointDrawer } from "../api/client";
+import { fetchEndpointDrawer, isolateIncident, releaseIsolation } from "../api/client";
 import type { EndpointDrawerData } from "../types/endpoints";
 import { severityPillStyle } from "../lib/severity";
 import {
@@ -10,6 +10,11 @@ import {
 } from "../lib/endpointStatus";
 import type { ConnStatus } from "../types/endpoints";
 import AgentRulesModal from "./AgentRulesModal";
+import {
+  ISOLATE_ICON_CLASS, RELEASE_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
+  ISOLATE_LABEL_FULL, RELEASE_LABEL_FULL, PENDING_LABEL_FULL, SENDING_LABEL,
+  ISOLATE_TOOLTIP, RELEASE_TOOLTIP, confirmIsolate,
+} from "../lib/isolationUi";
 
 interface Props {
   endpointId: number | null;
@@ -47,12 +52,55 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
   const [data, setData] = useState<EndpointDrawerData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [isolating, setIsolating] = useState(false);
+  const [isolateError, setIsolateError] = useState<string | null>(null);
+  const [isolateRequested, setIsolateRequested] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [releaseRequested, setReleaseRequested] = useState(false);
+
+  async function handleIsolate() {
+    if (!data?.active_incident_id || isolating) return;
+    if (!confirmIsolate(data.hostname)) return;
+    setIsolating(true);
+    setIsolateError(null);
+    try {
+      await isolateIncident(data.active_incident_id);
+      setIsolateRequested(true);
+    } catch (err) {
+      setIsolateError(err instanceof Error ? err.message : "No se pudo enviar la orden de aislamiento.");
+    } finally {
+      setIsolating(false);
+    }
+  }
+
+  // Mismo backend/máquina de estados que "Liberar" en
+  // IsolationsHistoryTable.tsx/CriticalIncidentsTable.tsx -- una sola
+  // implementación (sección 13 de "ALFA_SENTINEL — CORRECCIÓN DE
+  // TIEMPO REAL...", 2026-08-17, ver PENDIENTES.md).
+  async function handleRelease() {
+    if (!data?.isolation_id || releasing) return;
+    setReleasing(true);
+    setReleaseError(null);
+    try {
+      await releaseIsolation(data.isolation_id);
+      setReleaseRequested(true);
+    } catch (err) {
+      setReleaseError(err instanceof Error ? err.message : "No se pudo enviar la orden de liberación.");
+    } finally {
+      setReleasing(false);
+    }
+  }
 
   useEffect(() => {
     if (endpointId !== null) {
       setRender(true);
       setData(null);
       setError(null);
+      setIsolateError(null);
+      setIsolateRequested(false);
+      setReleaseError(null);
+      setReleaseRequested(false);
       fetchEndpointDrawer(endpointId)
         .then(setData)
         .catch(() => setError("No se pudo cargar la información de este endpoint."));
@@ -337,21 +385,86 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 </button>
               </Section>
 
-              {/* Acción de aislamiento */}
+              {/* Acción de aislamiento -- disparo MANUAL real (2026-08-17,
+                  ver PENDIENTES.md, "Aislamiento de host -- modo
+                  development, laboratorio y producción"): usa el mismo
+                  mecanismo de backend/agente que el automático (POST
+                  /incidents/{id}/isolate). host_isolations.incident_id
+                  es NOT NULL -- sin un incidente activo real para este
+                  endpoint no hay a qué asociar la orden, así que el
+                  botón queda deshabilitado con un motivo honesto en vez
+                  de inventar un incidente. */}
               {!data.is_isolated && (
                 <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
-                  <button
-                    disabled
-                    title="ALFA-Sentinel no puede aislar un host todavía: el agente no tiene forma de recibir ni ejecutar un comando remoto."
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-not-allowed opacity-50"
-                    style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
-                  >
-                    <i className="ph ph-plugs" style={{ fontSize: "15px" }} />
-                    Aislar endpoint
-                  </button>
-                  <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
-                    El aislamiento remoto todavía no está implementado en el agente.
-                  </p>
+                  {isolateRequested ? (
+                    <div
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
+                      style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                    >
+                      <i className={PENDING_ICON_CLASS} style={{ fontSize: "15px" }} />
+                      {PENDING_LABEL_FULL}
+                    </div>
+                  ) : (
+                    <button
+                      disabled={!data.active_incident_id || isolating}
+                      onClick={handleIsolate}
+                      title={
+                        data.active_incident_id
+                          ? ISOLATE_TOOLTIP
+                          : "No hay un incidente activo asociado a este endpoint -- el aislamiento se asocia siempre a un incidente real."
+                      }
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
+                      style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
+                    >
+                      <i className={isolating ? SPINNER_ICON_CLASS : ISOLATE_ICON_CLASS} style={{ fontSize: "15px" }} />
+                      {isolating ? SENDING_LABEL : ISOLATE_LABEL_FULL}
+                    </button>
+                  )}
+                  {isolateError && (
+                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--crit)" }}>{isolateError}</p>
+                  )}
+                  {!data.active_incident_id && !isolateRequested && (
+                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
+                      No hay un incidente activo para este endpoint -- el aislamiento automático sí se ejecuta
+                      cuando el motor heurístico determina que corresponde.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Acción de liberación -- mismo backend/máquina de estados
+                  que "Liberar" en IsolationsHistoryTable.tsx y
+                  CriticalIncidentsTable.tsx (POST /host-isolations/{id}/
+                  release), una sola implementación en todo el sistema
+                  (sección 13 de "ALFA_SENTINEL — CORRECCIÓN DE TIEMPO
+                  REAL...", 2026-08-17, ver PENDIENTES.md). Amarillo,
+                  nunca rojo (sección 11) -- Liberar es lo opuesto de
+                  Aislar, no una acción de riesgo. */}
+              {data.is_isolated && (
+                <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                  {releaseRequested ? (
+                    <div
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
+                      style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                    >
+                      <i className="ph-fill ph-hourglass-medium" style={{ fontSize: "15px" }} />
+                      Orden de liberación enviada -- esperando confirmación del agente
+                    </div>
+                  ) : (
+                    <button
+                      disabled={!data.isolation_id || releasing}
+                      onClick={handleRelease}
+                      title={data.isolation_id ? RELEASE_TOOLTIP : "No se encontró la orden de aislamiento asociada a este endpoint."}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
+                      style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                    >
+                      <i className={releasing ? SPINNER_ICON_CLASS : RELEASE_ICON_CLASS} style={{ fontSize: "15px" }} />
+                      {releasing ? SENDING_LABEL : RELEASE_LABEL_FULL}
+                    </button>
+                  )}
+                  {releaseError && (
+                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--crit)" }}>{releaseError}</p>
+                  )}
                 </div>
               )}
             </>

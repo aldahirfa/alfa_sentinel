@@ -22,9 +22,15 @@ HONEYFILE_POLICY_REPORT_URL = f"{SERVER_URL}/agent/honeyfile-policy/report"
 
 RULE_POLICY_URL = f"{SERVER_URL}/agent/rule-policy"
 
+# Aislamiento real (2026-08-17, ver PENDIENTES.md, "Corrección
+# definitiva del motor heurístico..."): agent/isolation_sync.py.
+ISOLATION_STATUS_URL = f"{SERVER_URL}/agent/isolation-status"
+
+ISOLATION_STATUS_REPORT_URL = f"{SERVER_URL}/agent/isolation-status/report"
+
 # PENDIENTE: reemplaza esto con el token que te devuelva
 # POST /enrollment-tokens (ver instrucciones). Es de un solo uso y
 # expira a los 15 minutos.
-ENROLLMENT_TOKEN = "CW99LGsuVTCJN_7wfN31Teaz-dz9oKOp-kXfvmdDNtM"
+ENROLLMENT_TOKEN = "LYOkNCgi2BpwZAGTGrkrMZJcZT98dL48pFqn7owtKVc"
 
 CREDENTIAL_FILE = "agent_credential.json"

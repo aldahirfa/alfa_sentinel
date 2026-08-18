@@ -2,7 +2,15 @@ from pathlib import Path
 import time
 
 
-TEST_DIRECTORY = Path("test_files")
+# Antes de 2026-08-17 el agente vigilaba '.' completo, así que
+# cualquier carpeta local (como la vieja 'test_files/') quedaba
+# cubierta. Desde la monitorización global del endpoint (ver
+# PENDIENTES.md, "Honeyfiles + monitorización completa del endpoint...")
+# el agente vigila carpetas específicas -- se apunta acá a la carpeta
+# de pruebas DOCUMENTS (agent/paths.py::get_monitored_roots(), modo
+# development) para que este script siga generando actividad real
+# dentro de lo que el agente efectivamente vigila.
+TEST_DIRECTORY = Path(__file__).resolve().parent / "test_endpoint" / "Documents"
 
 
 TEST_DIRECTORY.mkdir(

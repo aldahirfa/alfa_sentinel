@@ -1,7 +1,14 @@
+import { useState } from "react";
 import type { CombinedItem } from "../types/incidentes";
 import { severityPillStyle } from "../lib/severity";
 import { statusBucketPillStyle } from "../lib/incidentStatus";
 import { rowSelectionStyle } from "../lib/rowSelection";
+import { isolateIncident } from "../api/client";
+import {
+  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
+  ISOLATE_LABEL_COMPACT, ISOLATED_LABEL_COMPACT, PENDING_LABEL_COMPACT, SENDING_LABEL,
+  ISOLATE_TOOLTIP, confirmIsolate,
+} from "../lib/isolationUi";
 
 interface Props {
   items: CombinedItem[];
@@ -11,6 +18,12 @@ interface Props {
   // Claves "kind:id" -- ver IncidentesPage.tsx.
   selectedKey: string | null;
   flashKey: string | null;
+  // Refresca /api/incidentes tras una orden manual exitosa (2026-08-17,
+  // ver PENDIENTES.md, "Corrección de tiempo real, ordenamiento y
+  // consistencia", sección 12) -- mismo criterio que
+  // CriticalIncidentsTable.tsx (pantalla Respuesta): el estado real
+  // vive en el servidor.
+  onIsolated: () => void;
 }
 
 function rowAccent(item: CombinedItem): string | null {
@@ -35,7 +48,25 @@ function SkeletonRow() {
   );
 }
 
-export default function IncidentesTable({ items, loading, hasFilters, onSelect, selectedKey, flashKey }: Props) {
+export default function IncidentesTable({ items, loading, hasFilters, onSelect, selectedKey, flashKey, onIsolated }: Props) {
+  const [isolatingId, setIsolatingId] = useState<number | null>(null);
+  const [rowError, setRowError] = useState<{ id: number; message: string } | null>(null);
+
+  async function handleIsolate(e: React.MouseEvent, incidentId: number, hostname?: string | null) {
+    e.stopPropagation();
+    if (!confirmIsolate(hostname)) return;
+    setIsolatingId(incidentId);
+    setRowError(null);
+    try {
+      await isolateIncident(incidentId);
+      onIsolated();
+    } catch (err) {
+      setRowError({ id: incidentId, message: err instanceof Error ? err.message : "No se pudo enviar la orden." });
+    } finally {
+      setIsolatingId(null);
+    }
+  }
+
   return (
     <section
       className="rounded-xl border p-5 overflow-x-auto shadow-sm"
@@ -120,24 +151,42 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                   </td>
                   <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-dim)" }}>{item.created_at}</td>
                   <td className="py-3">
-                    <div className="flex items-center gap-2.5 justify-end">
-                      <button
-                        disabled
-                        title="ALFA-Sentinel no puede aislar un host todavía: el agente no tiene forma de recibir ni ejecutar un comando remoto."
-                        className="flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 rounded cursor-not-allowed opacity-50 whitespace-nowrap transition-premium"
-                        style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
-                      >
-                        <i className="ph-fill ph-plugs text-[13px]" />
-                        Aislar equipo
-                      </button>
-                      <button
-                        onClick={() => onSelect(item)}
-                        className="flex items-center gap-1.5 text-[11.5px] font-bold border-0 bg-transparent cursor-pointer whitespace-nowrap transition-premium btn-hover"
-                        style={{ color: "var(--brand)" }}
-                      >
-                        Ver más detalles
-                        <i className="ph-fill ph-arrow-right text-[13px]" />
-                      </button>
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="flex items-center gap-2.5 justify-end">
+                        {item.kind !== "incident" ? null : item.isolation_status === "REQUESTED" || item.isolation_status === "RELEASE_REQUESTED" ? (
+                          <span className="flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 whitespace-nowrap" style={{ color: "var(--warn)" }}>
+                            <i className={`${PENDING_ICON_CLASS} text-[13px]`} />
+                            {PENDING_LABEL_COMPACT}
+                          </span>
+                        ) : item.isolation_status === "EXECUTED" ? (
+                          <span className="flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 whitespace-nowrap" style={{ color: "var(--crit)" }}>
+                            <i className={`${ISOLATED_ICON_CLASS} text-[13px]`} />
+                            {ISOLATED_LABEL_COMPACT}
+                          </span>
+                        ) : (
+                          <button
+                            disabled={isolatingId === item.id}
+                            onClick={(e) => handleIsolate(e, item.id, item.hostname)}
+                            title={ISOLATE_TOOLTIP}
+                            className="flex items-center gap-1.5 text-[11.5px] font-bold px-2 py-1 rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap transition-premium btn-hover"
+                            style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
+                          >
+                            <i className={isolatingId === item.id ? `${SPINNER_ICON_CLASS} text-[13px]` : `${ISOLATE_ICON_CLASS} text-[13px]`} />
+                            {isolatingId === item.id ? SENDING_LABEL : ISOLATE_LABEL_COMPACT}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => onSelect(item)}
+                          className="flex items-center gap-1.5 text-[11.5px] font-bold border-0 bg-transparent cursor-pointer whitespace-nowrap transition-premium btn-hover"
+                          style={{ color: "var(--brand)" }}
+                        >
+                          Ver más detalles
+                          <i className="ph-fill ph-arrow-right text-[13px]" />
+                        </button>
+                      </div>
+                      {rowError?.id === item.id && (
+                        <div className="text-[10px]" style={{ color: "var(--crit)" }}>{rowError.message}</div>
+                      )}
                     </div>
                   </td>
                 </tr>

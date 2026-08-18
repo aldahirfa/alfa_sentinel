@@ -928,6 +928,85 @@ def _effective_agent_rules_cte():
     )
     """
 
+
+# ============================================================
+# AISLAMIENTO -- el estado pertenece al ENDPOINT, no al incidente
+# (2026-08-18, ver PENDIENTES.md, "Revisión y corrección integral de
+# ALFA-Sentinel", problema H).
+#
+# BUG REAL ENCONTRADO (no solo cosmético): antes de esto, varias
+# consultas ('COMBINED_CTE' para la tabla de Incidentes y Alertas,
+# get_incidente_drawer(), GET /alerts/open, GET /api/respuesta, y el
+# guard de isolate_incident_manually() que impide pedir un aislamiento
+# duplicado) buscaban el estado de aislamiento filtrando por
+# 'host_isolations.incident_id = <este incidente puntual>'. Un mismo
+# endpoint puede tener varios incidentes (PC-01 -> INC-001, INC-002,
+# INC-003); aislar desde INC-001 inserta una fila con
+# incident_id = INC-001.id -- así que consultar por incident_id desde
+# INC-002 o INC-003 nunca la encontraba, y esas pantallas seguían
+# ofreciendo "Aislar" sobre un endpoint que YA estaba aislado. Peor
+# todavía: el guard de isolate_incident_manually() tenía el mismo
+# defecto, así que un segundo clic en "Aislar" desde un incidente
+# DISTINTO del mismo endpoint no era bloqueado -- se llegaba a insertar
+# una segunda orden 'REQUESTED' real para un endpoint que el agente ya
+# estaba aislando o ya había aislado.
+#
+# El aislamiento es una propiedad del AGENTE/ENDPOINT, no del incidente
+# que lo disparó (host_isolations.agent_id existe y es NOT NULL,
+# 'incident_id' solo registra CUÁL incidente lo originó, para
+# trazabilidad -- ver database/schema.sql). Estas tres funciones son la
+# única fuente de esa lógica, reutilizada en todos los lugares que antes
+# tenían su propia consulta (a veces correcta, a veces no) -- equivalente
+# al 'is_endpoint_isolated(agent_id)' pedido explícitamente. Se
+# implementan como fragmentos de SQL (mismo patrón ya establecido por
+# _effective_agent_rules_cte() arriba) en vez de una función Python que
+# ejecute su propia query, porque se usan como subconsulta DENTRO de
+# consultas más grandes (listas paginadas, CTEs) donde ejecutar una
+# consulta Python aparte por fila sería mucho más lento -- 'agent_id_expr'
+# es el nombre de columna/alias/placeholder ('agents.id',
+# 'incidents.agent_id', '%s') ya disponible en el FROM de quien la usa;
+# se interpola tal cual porque es SQL armado en Python, no un valor de
+# usuario.
+def _agent_isolation_status_sql(agent_id_expr):
+    """Estado de la orden de aislamiento MÁS RECIENTE de este agente,
+    sin importar su estado actual (incluye 'RELEASED', necesario para
+    que un aislamiento liberado se siga viendo como tal en vez de
+    desaparecer -- ver CASE-E de
+    tests/heuristic/test_tiempo_real_orden_consistencia.py, el mismo
+    criterio que ya usaba el drawer de endpoint)."""
+    return f"""(
+        SELECT host_isolations.status FROM host_isolations
+        WHERE host_isolations.agent_id = {agent_id_expr}
+        ORDER BY host_isolations.requested_at DESC LIMIT 1
+    )"""
+
+
+def _agent_isolation_id_sql(agent_id_expr):
+    """Id de esa misma fila más reciente -- lo que necesita el botón
+    'Liberar' para llamar a POST /host-isolations/{id}/release."""
+    return f"""(
+        SELECT host_isolations.id FROM host_isolations
+        WHERE host_isolations.agent_id = {agent_id_expr}
+        ORDER BY host_isolations.requested_at DESC LIMIT 1
+    )"""
+
+
+def _agent_is_isolated_sql(agent_id_expr):
+    """Booleano: ¿este agente está aislado AHORA MISMO? A diferencia de
+    las dos funciones de arriba (que traen la fila más reciente exista o
+    no un aislamiento activo, para mostrar 'Liberado'), esta es la
+    condición real para decidir si corresponde ofrecer 'Aislar' (no) o
+    bloquear una segunda orden (sí) -- 'RELEASE_REQUESTED' cuenta como
+    aislado todavía (el agente no confirmó la liberación), 'RELEASED'/
+    'ISOLATION_FAILED'/'RELEASE_FAILED' no."""
+    return f"""EXISTS (
+        SELECT 1 FROM host_isolations
+        WHERE host_isolations.agent_id = {agent_id_expr}
+          AND host_isolations.status IN ('REQUESTED', 'EXECUTED', 'RELEASE_REQUESTED')
+          AND host_isolations.released_at IS NULL
+    )"""
+
+
 # EVENT_TYPE_LABELS_ES y ALERT_RULE_LABELS_ES se eliminaron (2026-08-16,
 # ver PENDIENTES.md, auditoría de catálogos duplicados): duplicaban
 # event_types.description y heuristic_rules.name respectivamente. Los
@@ -958,6 +1037,45 @@ ALERT_STATUS_LABELS_ES = {
     "FALSE_POSITIVE": "Falso positivo",
 }
 
+# "Corrección definitiva en la lógica y presentación de ALERTAS"
+# (2026-08-18, ver PENDIENTES.md): el título VISIBLE de una alerta (o
+# de un incidente, que es el mismo concepto agrupado -- ver más abajo)
+# ya NO es el nombre de la primera regla que llegó ni el de la de
+# mayor peso -- es un título general que representa el NIVEL DE RIESGO
+# final (severity_levels.name, que ya existe y ya se calcula en todos
+# lados), consistente con que la alerta representa el EPISODIO
+# COMPLETO, no una señal individual. Los nombres de reglas
+# individuales (Consumo CPU Elevado, Acceso Honeyfile, etc.) siguen
+# existiendo tal cual -- pasan a mostrarse SOLO dentro del detalle,
+# como "señales/reglas que contribuyeron" (alert_rule/heuristic_rules,
+# sin tocar esas tablas). Este diccionario es la única fuente de esos
+# 4 nombres -- si `severity_levels` alguna vez agrega un nivel nuevo,
+# el fallback a BAJO evita que una alerta se quede sin título en vez
+# de romper.
+ALERT_GENERAL_TITLE_ES = {
+    "BAJO": "ACTIVIDAD ANÓMALA",
+    "MEDIO": "ACTIVIDAD SOSPECHOSA",
+    "ALTO": "POSIBLE ATAQUE DE RANSOMWARE",
+    "CRÍTICO": "ATAQUE DE RANSOMWARE PROBABLE",
+}
+
+
+def alert_general_title(severity_name):
+    """Título general por severidad -- ver ALERT_GENERAL_TITLE_ES.
+    Se calcula EN CADA LECTURA a partir de la severidad ACTUAL (nunca
+    se guarda un título fijo en 'alerts.title'/'incidents.title' para
+    mostrarlo tal cual), así que cuando un episodio recibe evidencia
+    nueva y su severidad sube, el título general "se recalcula" solo
+    -- no hace falta ningún UPDATE adicional ni ningún estado a
+    mantener sincronizado (sección 11 de la especificación: "cuando
+    una nueva evidencia se incorpora al episodio... recalcular título
+    general"). 'alerts.title'/'incidents.title' (las columnas
+    guardadas) NO se tocan -- siguen existiendo con el texto original
+    que mandó el agente para el primer evento del episodio, útil como
+    evidencia/búsqueda interna, pero ya no se usan para el título que
+    ve el analista."""
+    return ALERT_GENERAL_TITLE_ES.get(severity_name, ALERT_GENERAL_TITLE_ES["BAJO"])
+
 # Igual que ALERT_STATUS_LABELS_ES: 'incidents.status' ya no tiene
 # CHECK constraint en la base nueva, así que estos 4 valores los fija
 # este diccionario. "CONTAINED" significa que ya se tomaron las
@@ -972,15 +1090,38 @@ INCIDENT_STATUS_LABELS_ES = {
 }
 
 # 'host_isolations.status' -- agregado 2026-08-16 junto con el motor
-# heurístico: 'RECOMMENDED' es nuevo y lo escribe report_alert cuando
-# se cumple la condición de aislamiento (sección 30 de la
-# especificación), sin ejecutar nada. 'REQUESTED'/'EXECUTED' quedan
-# documentados para cuando exista una vía real de aislamiento manual o
-# remoto -- hoy ningún endpoint los escribe todavía.
+# heurístico, corregido 2026-08-17 (ver PENDIENTES.md, "Corrección
+# definitiva del motor heurístico..."): 'REQUESTED' es lo que
+# report_alert() escribe cuando se cumple la condición de aislamiento
+# (sección 30) -- una orden real, no una nota informativa. El agente de
+# ese endpoint (agent/isolation_sync.py) la recoge y la ejecuta
+# (agent/isolation_executor.py), y confirma vía
+# POST /agent/isolation-status/report: 'EXECUTED' si pudo aislar de
+# verdad, 'ISOLATION_FAILED' si lo intentó y no pudo (sin privilegios,
+# comando no disponible, error real del SO -- nunca se finge éxito).
+# 'RECOMMENDED' queda como valor LEGADO -- ninguna ruta nueva lo
+# escribe, se conserva en el diccionario solo para traducir filas
+# viejas de una base creada antes de esta corrección.
+#
+# Extendido 2026-08-17 (ver PENDIENTES.md, "Aislamiento de host --
+# modo development, laboratorio y producción") con la operación
+# inversa (sección 18 de esa especificación: "UNISOLATE"), reutilizando
+# la misma columna 'status' sin CHECK constraint (ver comentario en
+# database/schema.sql) -- mismo criterio que se usó para agregar
+# REQUESTED/EXECUTED/ISOLATION_FAILED en la corrección anterior, sin
+# tocar la estructura de la tabla:
+# 'RELEASE_REQUESTED' (orden de liberar, el agente todavía no
+# confirmó) -> 'RELEASED' (confirmado) o, si falla, vuelve a
+# 'EXECUTED' (sigue aislado de verdad, que es el estado real -- no
+# existe un 'RELEASE_FAILED' persistido porque nada cambió realmente
+# respecto de antes de intentar liberar; el motivo del fallo queda en
+# 'result' igual que cualquier otro intento).
 ISOLATION_STATUS_LABELS_ES = {
-    "RECOMMENDED": "Recomendado (no ejecutado)",
-    "REQUESTED": "Solicitado",
+    "RECOMMENDED": "Recomendado (legado, no ejecutado)",
+    "REQUESTED": "Solicitado (esperando confirmación del agente)",
     "EXECUTED": "Ejecutado",
+    "ISOLATION_FAILED": "Falló la ejecución",
+    "RELEASE_REQUESTED": "Liberación solicitada (esperando confirmación del agente)",
     "RELEASED": "Liberado",
 }
 
@@ -1142,19 +1283,66 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             # de la última alerta acá, solo el nivel).
             representative_risk_score = (float(risk_min_score) + float(risk_max_score)) / 2
 
-            # Aislamiento activo -- hoy siempre va a dar "no aislado":
-            # ningún endpoint del servidor escribe en host_isolations
-            # (ver nota de honestidad más abajo, en el botón del drawer).
+            # Aislamiento activo -- real desde la corrección definitiva
+            # del motor heurístico (2026-08-17, ver PENDIENTES.md):
+            # 'REQUESTED' (orden en curso, el agente todavía no
+            # confirmó) y 'EXECUTED' (confirmado) cuentan como aislado
+            # de cara al usuario; 'ISOLATION_FAILED' NO cuenta. Este era
+            # ya el criterio CORRECTO (agent_id, no incident_id) -- desde
+            # 2026-08-18 (problema H, ver PENDIENTES.md) se expresa con
+            # _agent_is_isolated_sql(), la misma fuente única que ahora
+            # usan también COMBINED_CTE, get_incidente_drawer(),
+            # /alerts/open, /api/respuesta y el guard de
+            # isolate_incident_manually().
             cursor.execute(
-                """
-                SELECT id, status FROM host_isolations
-                WHERE agent_id = %s AND status IN ('REQUESTED', 'EXECUTED') AND released_at IS NULL
-                ORDER BY id DESC LIMIT 1;
-                """,
+                f"SELECT {_agent_is_isolated_sql('%s')};",
                 (agent_id,)
             )
-            iso_row = cursor.fetchone()
-            is_isolated = iso_row is not None
+            is_isolated = bool(cursor.fetchone()[0])
+            # Agregados 2026-08-17 (ver PENDIENTES.md, "Corrección de
+            # tiempo real, ordenamiento y consistencia") -- 'is_isolated'
+            # (booleano) ya alcanzaba para pintar el badge de estado,
+            # pero el nuevo botón "Liberar" de este drawer necesita el
+            # id real de la fila y el status exacto.
+            #
+            # OJO: esto es una consulta APARTE de la de 'is_isolated' de
+            # arriba, no la misma fila -- la de arriba filtra
+            # 'released_at IS NULL' porque solo le interesa si el
+            # endpoint está aislado AHORA. Reusar ese mismo resultado acá
+            # rompía la consistencia entre pantallas (sección 18): una
+            # vez que el agente confirma 'RELEASED' (released_at deja de
+            # ser NULL), esa consulta ya no encuentra ninguna fila y
+            # 'isolation_status' quedaba en None -- mientras que
+            # /api/incidentes, el drawer del incidente y /alerts/open
+            # (que sí usan "la fila más reciente sin importar su estado
+          # actual", igual que en COMBINED_CTE) seguían mostrando
+            # 'RELEASED' para el mismo aislamiento. Detectado por
+            # tests/heuristic/test_tiempo_real_orden_consistencia.py
+            # (CASE-E). Acá se usa el mismo criterio que esos otros tres
+            # lugares: la fila más reciente por 'requested_at', exista o
+            # no un aislamiento activo en este momento.
+            cursor.execute(
+                f"SELECT {_agent_isolation_id_sql('%s')}, {_agent_isolation_status_sql('%s')};",
+                (agent_id, agent_id)
+            )
+            iso_row_latest = cursor.fetchone()
+            isolation_id = iso_row_latest[0] if iso_row_latest else None
+            isolation_status = iso_row_latest[1] if iso_row_latest else None
+
+            # Incidente activo más reciente de este endpoint -- lo que
+            # necesita el botón "Aislar endpoint manualmente" (sección
+            # 20 de "Aislamiento de host -- modo development,
+            # laboratorio y producción", 2026-08-17, ver PENDIENTES.md)
+            # para saber a qué incidente asociar la orden. 'host_isolations.
+            # incident_id' es NOT NULL -- sin un incidente activo real,
+            # no hay a qué asociar el aislamiento manual (no se inventa
+            # un incidente solo para poder aislar).
+            cursor.execute(
+                "SELECT id FROM incidents WHERE agent_id = %s AND status != 'CLOSED' ORDER BY opened_at DESC LIMIT 1;",
+                (agent_id,)
+            )
+            active_incident_row = cursor.fetchone()
+            active_incident_id = active_incident_row[0] if active_incident_row else None
 
             # Honeyfiles en este host
             cursor.execute(
@@ -1175,17 +1363,27 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             violated_file = violated_evt[0] if violated_evt else None
             violated_at = violated_evt[1] if violated_evt else None
 
-            # Último evento/alerta. 'alerts' ya no tiene 'file_path' ni
-            # 'rule_name' como columnas propias (nunca las tuvo en
-            # realidad -- ver PENDIENTES.md); el nombre de la regla
-            # sale de 'alert_rule'/'heuristic_rules'.
+            # Último evento/alerta. 'alerts' ya no tiene 'file_path' como
+            # columna propia (nunca la tuvo en realidad -- ver
+            # PENDIENTES.md). Corregido 2026-08-18 (ver PENDIENTES.md,
+            # "Corrección definitiva en la lógica y presentación de
+            # ALERTAS"): antes esto traía la alerta y su regla en UNA
+            # sola consulta con LEFT JOIN alert_rule/heuristic_rules
+            # -- si esa alerta tenía más de una regla vinculada, el
+            # 'ORDER BY alerts.id DESC LIMIT 1' se aplicaba sobre filas
+            # ya multiplicadas por el JOIN y terminaba agarrando una
+            # regla arbitraria (nunca garantizada, cualquiera de las
+            # vinculadas). Ahora son dos consultas: la alerta más
+            # reciente primero (sin el join, una sola fila real), y
+            # después SUS reglas por separado, para poder aplicar el
+            # mismo orden de relevancia que el resto del sistema
+            # (sort_contributing_rules) y no depender de qué fila
+            # devolvía Postgres primero.
             cursor.execute(
                 """
-                SELECT alerts.title, severity_levels.name, alerts.created_at, heuristic_rules.name
+                SELECT alerts.id, severity_levels.name, alerts.created_at
                 FROM alerts
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                 WHERE alerts.agent_id = %s
                 ORDER BY alerts.id DESC LIMIT 1;
                 """,
@@ -1194,12 +1392,29 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             alert_row = cursor.fetchone()
             latest_alert = None
             if alert_row:
+                latest_alert_id, latest_severity, latest_created_at = alert_row
+
+                cursor.execute(
+                    """
+                    SELECT heuristic_rules.name, alert_rule.weight_applied, alert_rule.matched_at
+                    FROM alert_rule
+                    JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                    WHERE alert_rule.alert_id = %s;
+                    """,
+                    (latest_alert_id,)
+                )
+                latest_alert_rules = sort_contributing_rules(cursor.fetchall())
+
                 latest_alert = {
-                    "title": alert_row[0],
-                    "severity": alert_row[1],
-                    "created_at": alert_row[2].strftime("%d/%m/%Y %H:%M:%S") if alert_row[2] else "",
+                    # Título general por severidad, no el nombre de la
+                    # primera regla que llegó -- ver alert_general_title().
+                    "title": alert_general_title(latest_severity),
+                    "severity": latest_severity,
+                    "created_at": latest_created_at.strftime("%d/%m/%Y %H:%M:%S") if latest_created_at else "",
                     "file_path": None,
-                    "rule_name": alert_row[3] if alert_row[3] else ""
+                    # La regla más relevante (no arbitraria) entre las
+                    # que contribuyeron -- ver sort_contributing_rules().
+                    "rule_name": latest_alert_rules[0][0] if latest_alert_rules else ""
                 }
 
             return {
@@ -1220,6 +1435,9 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
                 "risk_bucket": risk_bucket,
                 "risk_score": representative_risk_score,
                 "is_isolated": is_isolated,
+                "isolation_id": isolation_id,
+                "isolation_status": isolation_status,
+                "active_incident_id": active_incident_id,
                 "alerts_active": alerts_active,
                 "incidents_total": incidents_total,
                 "incidents_active": incidents_active,
@@ -1595,19 +1813,26 @@ def deploy_honeyfile_api(request: Request, body: dict = None):
 
 @app.get("/agent/honeyfile-policy")
 def get_honeyfile_policy(x_agent_credential: str = Header(...)):
-    """El agente llama esto en cada ejecución (no solo al enrolarse:
-    hoy es un script de una sola pasada sin bucle, así que 'cada
-    ejecución' es el único momento posible) para saber qué honeyfiles
+    """El agente llama esto al arrancar Y periódicamente mientras sigue
+    corriendo (2026-08-17, ver PENDIENTES.md, "Honeyfiles: despliegue
+    automático, rutas, integridad, reconciliación y ejecución en
+    tiempo real" -- agent/honeyfile_sync.py) para saber qué honeyfiles
     debería tener en disco.
 
     Devuelve dos listas:
-    - 'pending': plantillas que todavía no se crearon en este agente
-      (asignadas a mano desde el Wizard, o resueltas ahora mismo desde
-      una plantilla con auto_deploy=TRUE que coincide con el SO de su
-      endpoint). El agente tiene que escribirlas y reportarlas.
-    - 'existing': honeyfiles que este agente ya creó en ejecuciones
-      anteriores (tabla 'honeyfiles'), para que sepa qué rutas debe
-      seguir vigilando aunque no las vuelva a crear."""
+    - 'pending': asignaciones sin crear todavía (manuales desde el
+      Wizard, resueltas ahora mismo desde una plantilla con
+      auto_deploy=TRUE, o reintentos de un intento previo que falló).
+      El agente tiene que escribirlas y reportarlas.
+    - 'existing': asignaciones YA creadas en una ejecución anterior,
+      enriquecidas con el contenido/tipo de la plantilla original y el
+      hash que el servidor tiene registrado -- no es solo "para saber
+      qué vigilar", es lo que el agente necesita para RECONCILIAR en
+      cada sincronización (sección 22 de la especificación): si el
+      archivo ya no está en disco, puede recrearlo con el mismo
+      contenido; si el hash actual no coincide con 'expected_hash',
+      puede detectar la alteración sin tener que haber estado
+      corriendo en el momento exacto en que ocurrió."""
 
     connection = get_connection()
     try:
@@ -1670,9 +1895,9 @@ def get_honeyfile_policy(x_agent_credential: str = Header(...)):
             # reintentan).
             cursor.execute(
                 """
-                SELECT agent_honeyfile_templates.id, honeyfile_templates.file_name,
-                       honeyfile_templates.file_type, honeyfile_templates.file_path,
-                       honeyfile_templates.content
+                SELECT agent_honeyfile_templates.id, honeyfile_templates.id,
+                       honeyfile_templates.file_name, honeyfile_templates.file_type,
+                       honeyfile_templates.file_path, honeyfile_templates.content
                 FROM agent_honeyfile_templates
                 JOIN honeyfile_templates ON honeyfile_templates.id = agent_honeyfile_templates.template_id
                 WHERE agent_honeyfile_templates.agent_id = %s
@@ -1684,22 +1909,51 @@ def get_honeyfile_policy(x_agent_credential: str = Header(...)):
             pending = [
                 {
                     "assignment_id": r[0],
-                    "file_name": r[1],
-                    "file_type": r[2],
-                    "file_path": r[3],
-                    "content": r[4]
+                    "template_id": r[1],
+                    "file_name": r[2],
+                    "file_type": r[3],
+                    "file_path": r[4],
+                    "content": r[5]
                 }
                 for r in cursor.fetchall()
             ]
 
-            # Ya creados en ejecuciones anteriores -- el agente los
-            # necesita para saber qué rutas vigilar, no para recrearlas.
+            # Ya creados en ejecuciones/ciclos de sincronización
+            # anteriores -- enriquecido con contenido y hash esperado
+            # para que el agente pueda reconciliar (recrear si falta,
+            # detectar si el hash cambió) sin tener que volver a pedir
+            # nada aparte. LEFT JOIN a 'honeyfiles' (no INNER): una
+            # asignación puede estar en CREATED sin que todavía exista
+            # su fila en 'honeyfiles' -- caso borde real (createdo se
+            # perdió la respuesta del report), no se descarta la
+            # asignación por eso.
             cursor.execute(
-                "SELECT id, file_path, file_name FROM honeyfiles WHERE agent_id = %s;",
+                """
+                SELECT agent_honeyfile_templates.id, honeyfile_templates.id,
+                       honeyfile_templates.file_name, honeyfile_templates.file_type,
+                       honeyfile_templates.file_path, honeyfile_templates.content,
+                       honeyfiles.id, honeyfiles.file_hash
+                FROM agent_honeyfile_templates
+                JOIN honeyfile_templates ON honeyfile_templates.id = agent_honeyfile_templates.template_id
+                LEFT JOIN honeyfiles ON honeyfiles.agent_id = agent_honeyfile_templates.agent_id
+                                     AND honeyfiles.template_id = agent_honeyfile_templates.template_id
+                WHERE agent_honeyfile_templates.agent_id = %s
+                  AND agent_honeyfile_templates.status = 'CREATED'
+                  AND honeyfile_templates.is_active = TRUE;
+                """,
                 (agent_id,)
             )
             existing = [
-                {"honeyfile_id": r[0], "file_path": r[1], "file_name": r[2]}
+                {
+                    "assignment_id": r[0],
+                    "template_id": r[1],
+                    "file_name": r[2],
+                    "file_type": r[3],
+                    "file_path": r[4],
+                    "content": r[5],
+                    "honeyfile_id": r[6],
+                    "expected_hash": r[7],
+                }
                 for r in cursor.fetchall()
             ]
 
@@ -1751,6 +2005,288 @@ def get_rule_policy(x_agent_credential: str = Header(...)):
         connection.close()
 
 
+@app.get("/agent/isolation-status")
+def get_isolation_status(x_agent_credential: str = Header(...)):
+    """El agente llama esto periódicamente (agent/isolation_sync.py,
+    2026-08-17, ver PENDIENTES.md, "Corrección definitiva del motor
+    heurístico...") para saber si el servidor ordenó aislar (o liberar)
+    ESTE endpoint. Mismo patrón de polling que GET
+    /agent/honeyfile-policy y GET /agent/rule-policy -- sin
+    WebSockets/SSE/brokers, el agente sigue siendo quien pregunta,
+    nunca el servidor quien empuja.
+
+    Devuelve como mucho UNA orden pendiente por agente -- ya sea de
+    aislar ('REQUESTED') o de liberar ('RELEASE_REQUESTED', sección 18
+    de "Aislamiento de host -- modo development, laboratorio y
+    producción", 2026-08-17, ver PENDIENTES.md); nunca ambas a la vez,
+    porque una orden de liberar solo se crea sobre una fila que ya está
+    'EXECUTED', y report_alert()/el endpoint de aislamiento manual ya
+    evitan crear una segunda fila 'REQUESTED' mientras una siga
+    REQUESTED o EXECUTED. El campo 'action' le dice al agente cuál de
+    las dos ejecutar sin tener que inferirlo del estado."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            agent_id = resolve_agent_id(cursor, x_agent_credential)
+
+            cursor.execute(
+                """
+                SELECT id, isolation_type, reason,
+                       CASE WHEN status = 'RELEASE_REQUESTED' THEN 'RELEASE' ELSE 'ISOLATE' END AS action
+                FROM host_isolations
+                WHERE agent_id = %s AND status IN ('REQUESTED', 'RELEASE_REQUESTED')
+                ORDER BY requested_at ASC
+                LIMIT 1;
+                """,
+                (agent_id,)
+            )
+            row = cursor.fetchone()
+
+        if row is None:
+            return {"pending": None}
+
+        return {
+            "pending": {
+                "isolation_id": row[0],
+                "isolation_type": row[1],
+                "reason": row[2],
+                "action": row[3],
+            }
+        }
+    finally:
+        connection.close()
+
+
+class IsolationStatusReport(BaseModel):
+    isolation_id: int
+    status: str  # 'EXECUTED'/'ISOLATION_FAILED' (aislar) o 'RELEASED'/'RELEASE_FAILED' (liberar) -- cualquier otro valor se rechaza (ver abajo)
+    result: str | None = None
+
+
+@app.post("/agent/isolation-status/report")
+def report_isolation_status(
+    report: IsolationStatusReport,
+    x_agent_credential: str = Header(...)
+):
+    """El agente confirma acá el resultado REAL de haber intentado
+    ejecutar una orden de aislamiento o de liberación
+    (agent/isolation_executor.py) -- recién en este momento la fila de
+    'host_isolations' deja de ser una orden pendiente y refleja lo que
+    de verdad pasó en el endpoint (sección 28 de la especificación
+    original: "agente ejecuta -> agente confirma -> servidor actualiza
+    estado"; sección 18 de "Aislamiento de host -- modo development,
+    laboratorio y producción", 2026-08-17, ver PENDIENTES.md, extiende
+    esto mismo a "UNISOLATE").
+
+    Cuatro resultados posibles, deliberadamente (no se inventa un
+    estado intermedio como 'ISOLATING'/'RELEASING' -- la ejecución
+    real, sea un comando de firewall real o la simulación de
+    desarrollo, es una operación de una sola pasada desde la
+    perspectiva del agente, sin un paso intermedio observable que
+    valga la pena persistir):
+    - 'EXECUTED': se aisló de verdad (o, en desarrollo, se completó el
+      flujo simulado sin tocar el firewall real). Se registra
+      'executed_at'. Solo válido si la orden pendiente era 'REQUESTED'.
+    - 'ISOLATION_FAILED': se intentó aislar y falló (sin privilegios,
+      comando no disponible, error real del SO, o la verificación
+      posterior no confirmó las reglas -- ver agent/isolation_executor.py)
+      -- 'result' trae el motivo. NO se reintenta solo -- la orden
+      queda en este estado hasta que un analista decida (mismo criterio
+      que 'FAILED' en honeyfiles: no ocultar un fallo real fingiendo
+      éxito). Solo válido si la orden pendiente era 'REQUESTED'.
+    - 'RELEASED': se liberó de verdad (o, en desarrollo, se completó el
+      flujo simulado). Se registra 'released_at'. Solo válido si la
+      orden pendiente era 'RELEASE_REQUESTED'.
+    - 'RELEASE_FAILED': se intentó liberar y falló -- el endpoint SIGUE
+      aislado de verdad (nada cambió), así que la fila vuelve a
+      'EXECUTED' en vez de quedar en un estado nuevo ('result' deja
+      registrado el motivo del fallo igual). Solo válido si la orden
+      pendiente era 'RELEASE_REQUESTED'."""
+
+    if report.status not in ("EXECUTED", "ISOLATION_FAILED", "RELEASED", "RELEASE_FAILED"):
+        raise HTTPException(status_code=422, detail="status debe ser 'EXECUTED', 'ISOLATION_FAILED', 'RELEASED' o 'RELEASE_FAILED'")
+
+    is_release_report = report.status in ("RELEASED", "RELEASE_FAILED")
+    expected_pending_status = "RELEASE_REQUESTED" if is_release_report else "REQUESTED"
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            agent_id = resolve_agent_id(cursor, x_agent_credential)
+
+            # La orden tiene que ser de ESTE agente y seguir en el
+            # estado pendiente que corresponde a este tipo de reporte
+            # -- no se confía en que isolation_id venga "limpio", y no
+            # tiene sentido reportar el resultado de una orden que otro
+            # reporte ya resolvió (evita una carrera de doble reporte),
+            # ni confirmar una liberación sobre una orden que en
+            # realidad era de aislar (o viceversa).
+            cursor.execute(
+                "SELECT id FROM host_isolations WHERE id = %s AND agent_id = %s AND status = %s;",
+                (report.isolation_id, agent_id, expected_pending_status)
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No hay una orden {expected_pending_status} con ese id para este agente"
+                )
+
+            if report.status == "EXECUTED":
+                cursor.execute(
+                    "UPDATE host_isolations SET status = 'EXECUTED', executed_at = CURRENT_TIMESTAMP, result = %s WHERE id = %s;",
+                    (report.result, report.isolation_id)
+                )
+            elif report.status == "ISOLATION_FAILED":
+                cursor.execute(
+                    "UPDATE host_isolations SET status = 'ISOLATION_FAILED', result = %s WHERE id = %s;",
+                    (report.result, report.isolation_id)
+                )
+            elif report.status == "RELEASED":
+                cursor.execute(
+                    "UPDATE host_isolations SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP, result = %s WHERE id = %s;",
+                    (report.result, report.isolation_id)
+                )
+            else:  # RELEASE_FAILED -- sigue aislado de verdad, vuelve a EXECUTED (ver docstring)
+                cursor.execute(
+                    "UPDATE host_isolations SET status = 'EXECUTED', result = %s WHERE id = %s;",
+                    (report.result, report.isolation_id)
+                )
+
+            connection.commit()
+
+        return {"message": "Resultado de aislamiento registrado", "status": report.status}
+    finally:
+        connection.close()
+
+
+@app.post("/incidents/{incident_id}/isolate")
+def isolate_incident_manually(incident_id: int, user: dict = Depends(get_current_user)):
+    """Disparo MANUAL de aislamiento desde la consola (botón "Aislar",
+    2026-08-17, ver PENDIENTES.md, "Aislamiento de host -- modo
+    development, laboratorio y producción", sección 20: "debe utilizar
+    exactamente el mismo mecanismo de backend/agente que el aislamiento
+    automático... solo cambia el origen de la orden").
+
+    Deliberadamente NO es una segunda implementación: inserta la MISMA
+    fila 'REQUESTED' en 'host_isolations' que report_alert() inserta
+    para el camino automático (sección 30 de la especificación
+    original), con el mismo guard de no-duplicar y el mismo agente de
+    endpoint (agent/isolation_sync.py + agent/isolation_executor.py)
+    recogiéndola y ejecutándola de verdad. La única diferencia real es
+    'requested_by' -- acá SÍ se completa (columna que ya existía en el
+    schema, sin usar hasta ahora porque el camino automático no tiene
+    un usuario detrás)."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute("SELECT agent_id, status FROM incidents WHERE id = %s;", (incident_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Incidente no encontrado")
+            agent_id, incident_status = row
+
+            if incident_status == "CLOSED":
+                raise HTTPException(status_code=409, detail="No se puede aislar un endpoint por un incidente ya cerrado")
+
+            # Mismo guard que usa report_alert() para el camino
+            # automático (sección 17 de la especificación original: "no
+            # duplicar evidencia/órdenes ya registradas"; sección 27 de
+            # la de host: "pulsar Aislar dos veces... no debe romper el
+            # sistema") -- si ya hay una orden en curso o cumplida para
+            # este ENDPOINT, no se crea una segunda.
+            #
+            # BUG REAL corregido 2026-08-18 (problema H/J, ver
+            # PENDIENTES.md, "Revisión y corrección integral de
+            # ALFA-Sentinel"): este guard filtraba antes por
+            # 'incident_id = %s' (el incidente puntual desde el que se
+            # clickeó "Aislar"), no por el agente. Un mismo endpoint con
+            # varios incidentes (PC-01 -> INC-001, INC-002, INC-003)
+            # podía aislarse desde INC-001 y, como el guard consultaba
+            # 'incident_id = INC-002.id' (que nunca tiene esa fila --
+            # está en INC-001.id), un clic en "Aislar" desde INC-002
+            # pasaba este chequeo sin problema e insertaba una SEGUNDA
+            # orden 'REQUESTED' real para un endpoint que el agente ya
+            # estaba aislando o ya había aislado -- exactamente la prueba
+            # obligatoria Q/14 del usuario ("no se puede ejecutar
+            # aislamiento dos veces sobre el mismo endpoint"). Ahora usa
+            # _agent_is_isolated_sql(), la misma fuente única que ya usan
+            # todas las pantallas para decidir si mostrar "Aislar" o
+            # "Endpoint aislado".
+            cursor.execute(
+                f"SELECT {_agent_isolation_status_sql('%s')} WHERE {_agent_is_isolated_sql('%s')};",
+                (agent_id, agent_id)
+            )
+            existing = cursor.fetchone()
+            if existing is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Este endpoint ya tiene una orden de aislamiento en curso o cumplida (estado actual: {ISOLATION_STATUS_LABELS_ES.get(existing[0], existing[0])})."
+                )
+
+            reason = f"Aislamiento manual solicitado por {user['full_name']} desde la consola."
+
+            cursor.execute(
+                """
+                INSERT INTO host_isolations (agent_id, incident_id, isolation_type, status, reason, requested_by)
+                VALUES (%s, %s, 'NETWORK', 'REQUESTED', %s, %s)
+                RETURNING id;
+                """,
+                (agent_id, incident_id, reason, user["id"])
+            )
+            isolation_id = cursor.fetchone()[0]
+
+            log_audit(cursor, user["id"], "MANUAL_ISOLATE_REQUEST", "host_isolations", isolation_id, reason)
+
+            connection.commit()
+
+        return {"message": "Orden de aislamiento enviada -- el agente del endpoint la ejecutará en breve", "isolation_id": isolation_id, "status": "REQUESTED"}
+    finally:
+        connection.close()
+
+
+@app.post("/host-isolations/{isolation_id}/release")
+def release_host_isolation(isolation_id: int, user: dict = Depends(get_current_user)):
+    """Operación inversa -- UNISOLATE (sección 18 de "Aislamiento de
+    host -- modo development, laboratorio y producción", 2026-08-17,
+    ver PENDIENTES.md): "CONSOLA -> SERVIDOR -> AGENTE -> UNISOLATE ->
+    restaurar comunicación -> confirmación". Mismo mecanismo de
+    polling/ejecución/confirmación que aislar (GET
+    /agent/isolation-status, agent/isolation_sync.py,
+    agent/isolation_executor.py::execute_release()), nunca recupera
+    archivos -- solo restaura el estado de red."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute("SELECT status FROM host_isolations WHERE id = %s;", (isolation_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Orden de aislamiento no encontrada")
+
+            if row[0] != "EXECUTED":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Solo se puede liberar un aislamiento con estado 'Ejecutado' (estado actual: {ISOLATION_STATUS_LABELS_ES.get(row[0], row[0])})."
+                )
+
+            cursor.execute(
+                "UPDATE host_isolations SET status = 'RELEASE_REQUESTED' WHERE id = %s;",
+                (isolation_id,)
+            )
+
+            log_audit(cursor, user["id"], "MANUAL_RELEASE_REQUEST", "host_isolations", isolation_id, f"Liberación solicitada por {user['full_name']}.")
+
+            connection.commit()
+
+        return {"message": "Orden de liberación enviada -- el agente del endpoint la ejecutará en breve", "isolation_id": isolation_id, "status": "RELEASE_REQUESTED"}
+    finally:
+        connection.close()
+
+
 class HoneyfileReportItem(BaseModel):
     assignment_id: int
     status: str
@@ -1770,10 +2306,36 @@ def report_honeyfile_policy(
     report: HoneyfileReport,
     x_agent_credential: str = Header(...)
 ):
-    """El agente confirma acá qué pudo crear de verdad y qué no. Recién
-    en este momento aparece la fila real en 'honeyfiles' -- antes de
-    esto, un honeyfile 'PENDING' es solo una intención, no un archivo
-    que exista en ningún disco."""
+    """El agente confirma acá qué pudo crear/reconciliar de verdad y qué
+    no. Recién en este momento aparece o se actualiza la fila real en
+    'honeyfiles' -- antes de esto, un honeyfile 'PENDING' es solo una
+    intención, no un archivo que exista en ningún disco.
+
+    Tres estados posibles por ítem (2026-08-17, ver PENDIENTES.md,
+    "Honeyfiles: despliegue automático, rutas, integridad,
+    reconciliación y ejecución en tiempo real"):
+
+    - 'CREATED': se escribió el archivo (primera vez, o se recreó
+      porque había desaparecido -- reconciliación caso B). UPSERT
+      contra (agent_id, template_id) en vez de INSERT liso: esto se
+      llama tanto al crear por primera vez como en cada ciclo de
+      sincronización que vuelve a verificar honeyfiles ya existentes
+      (ver GET /agent/honeyfile-policy, lista 'existing'), así que un
+      INSERT sin ON CONFLICT duplicaría la fila la segunda vez que el
+      agente reconfirma un honeyfile que ya tenía.
+    - 'MODIFIED': el hash real en disco ya no coincide con el
+      'expected_hash' que el servidor le pasó (reconciliación caso C).
+      Solo se actualiza el hash registrado -- nunca se restaura el
+      contenido ni se toca el estado de la asignación, que sigue
+      'CREATED' (el archivo existe, solo que alguien lo alteró; eso lo
+      capta HR-03 si watchdog lo vio en vivo, no es responsabilidad de
+      este endpoint recuperarlo).
+    - Cualquier otro valor ('FAILED'): no se pudo crear/recrear.
+      'agent_honeyfile_templates' pasa a FAILED, así que el próximo
+      GET /agent/honeyfile-policy lo vuelve a ofrecer como 'pending'
+      (ver ese endpoint, WHERE status IN ('PENDING','FAILED')) -- sirve
+      igual para un fallo de creación inicial que para un fallo al
+      intentar recrear un honeyfile que había desaparecido."""
 
     connection = get_connection()
     try:
@@ -1781,33 +2343,47 @@ def report_honeyfile_policy(
             agent_id = resolve_agent_id(cursor, x_agent_credential)
 
             created_count = 0
+            modified_count = 0
             failed_count = 0
 
             for item in report.results:
                 # La asignación tiene que ser de este agente -- no se
-                # confía en que assignment_id venga "limpio".
+                # confía en que assignment_id venga "limpio". Se trae
+                # también template_id: es la clave real de UPSERT
+                # contra 'honeyfiles' (UNIQUE(agent_id, template_id),
+                # ver database/schema.sql y la migración
+                # 2026-08-17_honeyfiles_template_id.sql), nunca se
+                # confía en un template_id que mandara el agente.
                 cursor.execute(
                     """
-                    SELECT id FROM agent_honeyfile_templates
+                    SELECT id, template_id FROM agent_honeyfile_templates
                     WHERE id = %s AND agent_id = %s;
                     """,
                     (item.assignment_id, agent_id)
                 )
-                if cursor.fetchone() is None:
+                row = cursor.fetchone()
+                if row is None:
                     continue
+                template_id = row[1]
 
                 if item.status == "CREATED":
                     cursor.execute(
                         """
                         INSERT INTO honeyfiles (
-                            agent_id, file_path, file_name, file_type,
-                            file_hash, status, last_checked_at
+                            agent_id, template_id, file_path, file_name,
+                            file_type, file_hash, status, last_checked_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, 'ACTIVE', CURRENT_TIMESTAMP)
-                        RETURNING id;
+                        VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE', CURRENT_TIMESTAMP)
+                        ON CONFLICT (agent_id, template_id) DO UPDATE SET
+                            file_path = EXCLUDED.file_path,
+                            file_name = EXCLUDED.file_name,
+                            file_type = EXCLUDED.file_type,
+                            file_hash = EXCLUDED.file_hash,
+                            status = 'ACTIVE',
+                            last_checked_at = CURRENT_TIMESTAMP;
                         """,
                         (
-                            agent_id, item.file_path, item.file_name,
+                            agent_id, template_id, item.file_path, item.file_name,
                             item.file_type, item.file_hash
                         )
                     )
@@ -1820,6 +2396,18 @@ def report_honeyfile_policy(
                         (item.assignment_id,)
                     )
                     created_count += 1
+
+                elif item.status == "MODIFIED":
+                    cursor.execute(
+                        """
+                        UPDATE honeyfiles
+                        SET file_hash = %s, last_checked_at = CURRENT_TIMESTAMP
+                        WHERE agent_id = %s AND template_id = %s;
+                        """,
+                        (item.file_hash, agent_id, template_id)
+                    )
+                    modified_count += 1
+
                 else:
                     cursor.execute(
                         """
@@ -1836,6 +2424,7 @@ def report_honeyfile_policy(
             return {
                 "message": "Reporte de honeyfiles procesado",
                 "created_count": created_count,
+                "modified_count": modified_count,
                 "failed_count": failed_count
             }
     finally:
@@ -1893,17 +2482,42 @@ def alerts_open(user: dict = Depends(get_current_user)):
     sin revisar (status = 'NEW'), sin importar la severidad: hasta las
     de severidad BAJO quedan fuera porque esas ni siquiera generan alerta
     (el agente solo llama a send_alert cuando is_suspicious() es
-    True)."""
+    True).
+
+    Extendido 2026-08-17 (ver PENDIENTES.md, "Alertas flotantes
+    globales de alta prioridad"): además de lo que ya usaba la
+    campanita, ahora trae 'risk_score', 'incident_id' y
+    'isolation_status' -- lo que necesita la capa de notificaciones
+    flotantes globales para decidir prioridad visual (CRÍTICO vs ALTO),
+    armar el enlace "Ver incidente" cuando ya existe uno, y mostrar el
+    estado REAL de una acción de aislamiento (nunca 'RECOMMENDED' como
+    si fuera el resultado final, sección 23 de esa especificación). Se
+    reutiliza este mismo endpoint en vez de crear uno nuevo a propósito
+    -- misma fuente de datos, una sola consulta, sin duplicar lo que la
+    campanita ya pedía (sección 19: "no crear una petición
+    independiente" por función nueva)."""
 
     connection = get_connection()
 
     try:
         with connection.cursor() as cursor:
 
+            # 'isolation_status' corregido 2026-08-18 (problema H, ver
+            # PENDIENTES.md): antes filtraba por
+            # 'host_isolations.incident_id = alerts.incident_id' -- si el
+            # endpoint fue aislado desde OTRO incidente (o la alerta
+            # todavía no tiene incident_id porque no escaló), esta
+            # columna quedaba NULL aunque el endpoint SÍ estuviera
+            # aislado, y la notificación flotante/campanita ofrecían
+            # "Aislar" sobre un endpoint ya aislado. Ver
+            # _agent_isolation_status_sql() -- misma fuente que
+            # COMBINED_CTE, get_incidente_drawer() y GET /api/respuesta.
             cursor.execute(
-                """
+                f"""
                 SELECT alerts.id, severity_levels.name, alerts.title,
-                       endpoints.hostname, alerts.created_at
+                       endpoints.hostname, alerts.created_at,
+                       alerts.risk_score, alerts.incident_id,
+                       {_agent_isolation_status_sql("agents.id")} AS isolation_status
                 FROM alerts
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -1931,9 +2545,19 @@ def alerts_open(user: dict = Depends(get_current_user)):
             {
                 "id": row[0],
                 "severity": row[1],
-                "title": row[2],
+                # Título general por severidad, no el nombre de la
+                # primera regla que llegó -- ver alert_general_title()
+                # (2026-08-18, ver PENDIENTES.md, "Corrección definitiva
+                # en la lógica y presentación de ALERTAS"). Esto alimenta
+                # tanto la campana (NotificationsBell.tsx) como la
+                # notificación flotante global (FloatingAlertCard.tsx) --
+                # una sola fuente para ambas.
+                "title": alert_general_title(row[1]),
                 "hostname": row[3],
-                "created_at": row[4].strftime("%d/%m %H:%M")
+                "created_at": row[4].strftime("%d/%m %H:%M"),
+                "risk_score": float(row[5]),
+                "incident_id": row[6],
+                "isolation_status": row[7],
             }
             for row in rows
         ]
@@ -1987,12 +2611,17 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             cursor.execute("SELECT COUNT(*) FROM agents WHERE status = 'ONLINE';")
             endpoints_online = cursor.fetchone()[0]
 
-            # 'Aislados': ningún endpoint escribe en host_isolations todavía, así
-            # que esto es 0 hoy. Es el dato real, no un placeholder:
-            # cuando el módulo de aislamiento exista, esta misma
-            # consulta ya lo va a reflejar sin tocar nada acá.
+            # 'Aislados': real desde la corrección definitiva del motor
+            # heurístico (2026-08-17, ver PENDIENTES.md) -- cuenta
+            # endpoints con una orden de aislamiento vigente (REQUESTED
+            # o EXECUTED) todavía no liberada. Filtro de status
+            # agregado en esa misma corrección: sin él, una orden que
+            # el agente reportó como ISOLATION_FAILED (nunca se aisló
+            # de verdad) también tiene released_at NULL y se hubiera
+            # contado como "aislado" -- mismo criterio que el resto de
+            # las consultas de is_isolated en este archivo.
             cursor.execute(
-                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE released_at IS NULL;"
+                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED', 'RELEASE_REQUESTED') AND released_at IS NULL;"
             )
             endpoints_isolated = cursor.fetchone()[0]
 
@@ -2125,7 +2754,9 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 {
                     "id": r[0],
                     "severity": r[1],
-                    "title": r[2],
+                    # Título general por severidad -- ver alert_general_title()
+                    # (2026-08-18, ver PENDIENTES.md).
+                    "title": alert_general_title(r[1]),
                     "hostname": r[3],
                     "process": None,
                     "time": r[4].strftime("%H:%M"),
@@ -2238,7 +2869,14 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                     "kind": r[0],
                     "severity": r[1],
                     "type_label": RECENT_ACTIVITY_LABELS.get(r[0], r[0]),
-                    "label": r[2],
+                    # Para 'alert', título general por severidad -- ver
+                    # alert_general_title() (2026-08-18, ver
+                    # PENDIENTES.md) -- en vez de 'alerts.title' crudo
+                    # (el texto del primer evento del episodio). Los
+                    # demás tipos de esta actividad ('honeyfile_created'/
+                    # 'endpoint_registered') no son alertas, su 'label'
+                    # sigue siendo el que ya traía la consulta.
+                    "label": alert_general_title(r[1]) if r[0] == "alert" else r[2],
                     "hostname": r[3],
                     "time": r[4].strftime("%H:%M"),
                     "ago": time_ago(r[4]),
@@ -2436,16 +3074,11 @@ def api_endpoints(
         with connection.cursor() as cursor:
             stale_seconds = get_agent_stale_seconds(cursor)
 
-            cte = _endpoint_cte(stale_seconds) + """
+            cte = _endpoint_cte(stale_seconds) + f"""
             , endpoint_full AS (
                 SELECT
                     endpoint_data.*,
-                    EXISTS (
-                        SELECT 1 FROM host_isolations hi
-                        WHERE hi.agent_id = endpoint_data.id
-                          AND hi.status IN ('REQUESTED', 'EXECUTED')
-                          AND hi.released_at IS NULL
-                    ) AS is_isolated,
+                    {_agent_is_isolated_sql("endpoint_data.id")} AS is_isolated,
                     (
                         SELECT COUNT(*) FROM alerts a
                         WHERE a.agent_id = endpoint_data.id AND a.status = 'NEW'
@@ -3489,7 +4122,7 @@ INCIDENTES_PAGE_SIZE = 25
 # a un set compartido solo para poder filtrar/colorear parejo -- el
 # estado real de cada fila (status_label) se sigue mostrando tal cual
 # está guardado, no se renombra.
-COMBINED_CTE = """
+COMBINED_CTE = f"""
     WITH combined AS (
         SELECT
             'incident' AS kind, incidents.id AS id, incidents.opened_at AS ts,
@@ -3517,7 +4150,15 @@ COMBINED_CTE = """
                 WHERE alerts.incident_id = incidents.id
             ) AS rule_names,
             (SELECT COUNT(*) FROM alerts WHERE alerts.incident_id = incidents.id) AS detection_count,
-            incidents.assigned_to, assigned_user.full_name AS assigned_to_name
+            incidents.assigned_to, assigned_user.full_name AS assigned_to_name,
+            -- Corregido 2026-08-18 (problema H, ver PENDIENTES.md): antes
+            -- filtraba por 'host_isolations.incident_id = incidents.id'
+            -- -- si el aislamiento se ordenó desde OTRO incidente del
+            -- mismo endpoint, esta fila no lo encontraba y seguía
+            -- ofreciendo "Aislar" sobre un endpoint ya aislado. El
+            -- aislamiento es del AGENTE, no del incidente -- ver
+            -- _agent_isolation_status_sql().
+            {_agent_isolation_status_sql("agents.id")} AS isolation_status
         FROM incidents
         JOIN agents ON agents.id = incidents.agent_id
         JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -3539,7 +4180,18 @@ COMBINED_CTE = """
             alerts.risk_score AS risk_score,
             heuristic_rules.name AS rule_names,
             0 AS detection_count,
-            NULL::BIGINT AS assigned_to, NULL::TEXT AS assigned_to_name
+            NULL::BIGINT AS assigned_to, NULL::TEXT AS assigned_to_name,
+            -- Corregido 2026-08-18 (problema H, ver PENDIENTES.md): esta
+            -- rama es SIEMPRE 'alerts.incident_id IS NULL' (ver WHERE más
+            -- abajo) -- la alerta en sí nunca tiene una orden de
+            -- aislamiento propia (el aislamiento se asocia a un
+            -- incidente), PERO el ENDPOINT de esa alerta puede estar
+            -- aislado igual por un incidente distinto y anterior sobre el
+            -- mismo agente -- antes esto era NULL fijo (siempre "no
+            -- aislado"), lo que dejaba ofrecer "Aislar" desde una alerta
+            -- suelta de un endpoint que ya estaba aislado. Ver
+            -- _agent_isolation_status_sql().
+            {_agent_isolation_status_sql("agents.id")} AS isolation_status
         FROM alerts
         JOIN agents ON agents.id = alerts.agent_id
         JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -3568,6 +4220,11 @@ def api_incidentes(
     rule: str = Query(""),
     since: str = Query(""),
     search: str = Query(""),
+    # Vista operativa vs. historial -- ver el mismo parámetro en
+    # GET /api/alerts (problema G, 2026-08-18, ver PENDIENTES.md). Acá
+    # el único bucket "final" real de un incidente es 'cerrado'
+    # (incidents.status = 'CLOSED', ver INCIDENT_STATUS_BUCKETS abajo).
+    view: str = Query("activas", pattern="^(activas|todos)$"),
     page: int = Query(1, ge=1),
     user: dict = Depends(get_current_user)
 ):
@@ -3611,6 +4268,14 @@ def api_incidentes(
             where_clauses = ["kind = 'incident'"]
             params = {}
 
+            # Igual criterio que /api/alerts: si el analista eligió un
+            # bucket de estado puntual (incluido 'cerrado'), ese filtro
+            # manda; si no eligió ninguno y la vista es la de por
+            # defecto ('activas'), se excluye 'cerrado' sin necesidad de
+            # inventar un estado nuevo.
+            if not status_bucket and view == "activas":
+                where_clauses.append("status_bucket != 'cerrado'")
+
             if agent_id:
                 where_clauses.append("agent_id = %(agent_id)s")
                 params["agent_id"] = agent_id
@@ -3643,9 +4308,11 @@ def api_incidentes(
             cursor.execute("SELECT COUNT(*) FROM alerts WHERE status IN ('NEW', 'ACKNOWLEDGED');")
             active_alerts = cursor.fetchone()[0]
 
-            # 'host_isolations' no lo escribe nada todavía, así que
-            # esto siempre da 0 hoy, de verdad.
-            cursor.execute("SELECT COUNT(*) FROM host_isolations WHERE released_at IS NULL;")
+            # Real desde la corrección definitiva del motor heurístico
+            # (2026-08-17, ver PENDIENTES.md) -- mismo filtro de status
+            # que el resto de las consultas de aislamiento en este
+            # archivo (ISOLATION_FAILED no cuenta como aislado).
+            cursor.execute("SELECT COUNT(*) FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED', 'RELEASE_REQUESTED') AND released_at IS NULL;")
             isolated_hosts = cursor.fetchone()[0]
 
             cursor.execute(
@@ -3674,7 +4341,7 @@ def api_incidentes(
                 COMBINED_CTE + f"""
                 SELECT kind, id, ts, raw_status, status_bucket, hostname, ip_address,
                        agent_id, severity, risk_score, rule_names, detection_count,
-                       assigned_to, assigned_to_name
+                       assigned_to, assigned_to_name, isolation_status
                 FROM combined
                 {where_sql}
                 ORDER BY ts DESC
@@ -3689,7 +4356,8 @@ def api_incidentes(
     items = []
     for row in rows:
         (kind, item_id, ts, raw_status, bucket, hostname, ip_address, item_agent_id,
-         severity_val, risk_score, rule_names, detection_count, assigned_to, assigned_to_name) = row
+         severity_val, risk_score, rule_names, detection_count, assigned_to, assigned_to_name,
+         isolation_status) = row
 
         items.append({
             "kind": kind,
@@ -3711,6 +4379,13 @@ def api_incidentes(
             "detection_count": detection_count,
             "assigned_to": assigned_to,
             "assigned_to_name": assigned_to_name,
+            # Agregado 2026-08-17 (ver PENDIENTES.md, "Corrección de
+            # tiempo real, ordenamiento y consistencia") -- lo que
+            # necesita el botón "Aislar" de esta misma tabla (antes
+            # deshabilitado permanentemente, sección 12 de esa
+            # especificación) para saber si ya hay una orden en
+            # curso/cumplida y no ofrecer aislar de nuevo.
+            "isolation_status": isolation_status,
         })
 
     return {
@@ -3772,12 +4447,9 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 
                 cursor.execute(
                     """
-                    SELECT alerts.id, alerts.created_at, heuristic_rules.name,
-                           severity_levels.name, alerts.risk_score
+                    SELECT alerts.id, alerts.created_at, severity_levels.name, alerts.risk_score
                     FROM alerts
                     JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                    LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                    LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                     WHERE alerts.incident_id = %s
                     ORDER BY alerts.created_at ASC;
                     """,
@@ -3785,7 +4457,6 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 )
                 linked = cursor.fetchall()
                 anchor_ts = linked[0][1] if linked else opened_at
-                is_honeyfile = any(r[2] == "Acceso Honeyfile" for r in linked)
                 code = f"INC-{inc_id:05d}"
                 status_label = INCIDENT_STATUS_LABELS_ES.get(status, status)
 
@@ -3793,7 +4464,6 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                 # de una alerta suelta (kind == 'alert').
                 incident_id_val = None
                 resolved_at_val = None
-                matched_rules = []
 
                 # "Alerta de origen": la primera alerta (por fecha) que
                 # quedó vinculada a este incidente -- ya sea porque
@@ -3808,21 +4478,53 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                     origin_alert = {
                         "id": origin_row[0],
                         "code": f"ALT-{origin_row[0]:05d}",
-                        "severity": origin_row[3],
-                        "risk_score": float(origin_row[4]) if origin_row[4] is not None else None,
+                        "severity": origin_row[2],
+                        "risk_score": float(origin_row[3]) if origin_row[3] is not None else None,
                     }
+
+                # Reglas asociadas -- corregido 2026-08-18 (ver
+                # PENDIENTES.md, "Corrección definitiva en la lógica y
+                # presentación de ALERTAS"): antes esto quedaba
+                # hardcodeado en una lista vacía ("no aplica a un
+                # incidente agrupado"), así que el drawer de un
+                # INCIDENTE nunca mostraba qué reglas lo componían --
+                # solo el de una alerta suelta las mostraba. Un
+                # incidente agrupa una o más alertas (alerts.incident_id
+                # = item_id); sus reglas son la unión de las reglas de
+                # TODAS esas alertas. No se fusionan/suman ocurrencias
+                # de una misma regla entre distintas alertas del mismo
+                # incidente -- cada coincidencia real se lista tal cual
+                # (sección 3: "no ocultar reglas secundarias").
+                cursor.execute(
+                    """
+                    SELECT heuristic_rules.name, alert_rule.weight_applied, alert_rule.matched_at
+                    FROM alert_rule
+                    JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                    JOIN alerts ON alerts.id = alert_rule.alert_id
+                    WHERE alerts.incident_id = %s;
+                    """,
+                    (item_id,)
+                )
+                contributing_rows = cursor.fetchall()
+                is_honeyfile = any(r[0] == "Acceso Honeyfile" for r in contributing_rows)
+                matched_rules = [
+                    {
+                        "rule_name": r[0],
+                        "weight_applied": float(r[1]),
+                        "matched_at": r[2].strftime("%d/%m/%Y %H:%M:%S"),
+                    }
+                    for r in sort_contributing_rules(contributing_rows)
+                ]
 
             else:
 
                 cursor.execute(
                     """
                     SELECT alerts.id, alerts.title, alerts.description, alerts.status, alerts.created_at,
-                           alerts.risk_score, severity_levels.name, heuristic_rules.name,
+                           alerts.risk_score, severity_levels.name,
                            alerts.agent_id, alerts.incident_id, alerts.resolved_at
                     FROM alerts
                     JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                    LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                    LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
                     WHERE alerts.id = %s;
                     """,
                     (item_id,)
@@ -3832,11 +4534,10 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
                     return JSONResponse({"error": "Alerta no encontrada"}, status_code=404)
 
                 (alert_id, title_val, description_val, status, anchor_ts, risk_score, severity,
-                 rule_name, agent_id, incident_id_val, resolved_at_val) = row
+                 agent_id, incident_id_val, resolved_at_val) = row
 
                 code = f"ALT-{alert_id:05d}"
                 status_label = ALERT_STATUS_LABELS_ES.get(status, status)
-                is_honeyfile = rule_name == "Acceso Honeyfile"
                 classification = None
                 assigned_to = None
                 assigned_to_name = None
@@ -3847,25 +4548,40 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 
                 # Reglas asociadas (alert_rule) -- puede haber más de una
                 # regla contribuyendo a la misma alerta, por eso es una
-                # consulta aparte (el JOIN de arriba solo trae la primera).
+                # consulta aparte. Orden de relevancia real (sección 3
+                # de "Corrección definitiva en la lógica y presentación
+                # de ALERTAS", 2026-08-18, ver PENDIENTES.md), no
+                # 'ORDER BY matched_at' simple -- ver sort_contributing_rules().
                 cursor.execute(
                     """
                     SELECT heuristic_rules.name, alert_rule.weight_applied, alert_rule.matched_at
                     FROM alert_rule
                     JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
-                    WHERE alert_rule.alert_id = %s
-                    ORDER BY alert_rule.matched_at;
+                    WHERE alert_rule.alert_id = %s;
                     """,
                     (alert_id,)
                 )
+                contributing_rows = cursor.fetchall()
+                is_honeyfile = any(r[0] == "Acceso Honeyfile" for r in contributing_rows)
                 matched_rules = [
                     {
                         "rule_name": r[0],
                         "weight_applied": float(r[1]),
                         "matched_at": r[2].strftime("%d/%m/%Y %H:%M:%S"),
                     }
-                    for r in cursor.fetchall()
+                    for r in sort_contributing_rules(contributing_rows)
                 ]
+
+            # Título general por severidad -- ver alert_general_title()
+            # (2026-08-18, ver PENDIENTES.md, "Corrección definitiva en
+            # la lógica y presentación de ALERTAS"). Aplica igual para
+            # un incidente agrupado que para una alerta suelta: ambos
+            # representan un EPISODIO (de una o varias señales), nunca
+            # el nombre de una sola regla. 'title_val' (columna guardada
+            # en 'incidents.title'/'alerts.title') sigue existiendo tal
+            # cual en la base, solo se deja de usar para lo que se
+            # muestra acá.
+            title_val = alert_general_title(severity)
 
             cursor.execute(
                 """
@@ -3939,6 +4655,100 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
             for item in timeline:
                 del item["at_raw"]
 
+            # PROCESO INVOLUCRADO (sección 5 de "Corrección definitiva en
+            # la lógica y presentación de ALERTAS", 2026-08-18, ver
+            # PENDIENTES.md): 'alerts'/'incidents' NUNCA tuvieron columna
+            # de proceso -- no se inventa un vínculo directo que la base
+            # no tiene (ver PENDIENTES.md, "Alerta ↔ eventos que la
+            # disparó", revertido a propósito en la reestructuración).
+            # Se reutiliza la MISMA correlación aproximada por ventana de
+            # tiempo que ya arma la 'cadena de evidencia' de arriba
+            # (window_start/window_end, 5 min antes / 1 min después del
+            # ancla del episodio) -- no una relación nueva, solo se le
+            # pide un dato más: el proceso real, si el agente pudo
+            # atribuirlo (agent/adapters/, best-effort, puede no estar
+            # disponible). Prioridad: honeyfile_activations primero si
+            # esta alerta/incidente incluye 'Acceso Honeyfile' (sección 7:
+            # es la señal más fuerte y su atribución de proceso ya es la
+            # más confiable del sistema), si no, el evento de archivo más
+            # reciente en la ventana que sí tenga proceso atribuido.
+            # 'ruta'/'usuario' NUNCA se completan -- ni 'events' ni
+            # 'honeyfile_activations' tienen esas columnas (el agente las
+            # calcula en memoria vía agent/adapters/ pero nunca las manda,
+            # ver PENDIENTES.md, "Atribución de proceso en eventos de
+            # archivo") -- se muestran honestamente como "No disponible"
+            # en vez de fabricar un valor.
+            process_name = None
+            process_id = None
+
+            if is_honeyfile:
+                cursor.execute(
+                    """
+                    SELECT process_name, process_id FROM honeyfile_activations
+                    WHERE agent_id = %s AND detected_at BETWEEN %s AND %s
+                      AND (process_name IS NOT NULL OR process_id IS NOT NULL)
+                    ORDER BY detected_at DESC LIMIT 1;
+                    """,
+                    (agent_id, window_start, window_end)
+                )
+                proc_row = cursor.fetchone()
+                if proc_row:
+                    process_name, process_id = proc_row
+
+            if process_name is None and process_id is None:
+                cursor.execute(
+                    """
+                    SELECT process_name, process_id FROM events
+                    WHERE agent_id = %s AND detected_at BETWEEN %s AND %s
+                      AND (process_name IS NOT NULL OR process_id IS NOT NULL)
+                    ORDER BY detected_at DESC LIMIT 1;
+                    """,
+                    (agent_id, window_start, window_end)
+                )
+                proc_row = cursor.fetchone()
+                if proc_row:
+                    process_name, process_id = proc_row
+
+            process = {
+                "process_name": process_name,
+                "process_id": process_id,
+                # Ninguna tabla real tiene estas dos columnas hoy -- ver
+                # comentario arriba. Siempre 'None' (el frontend lo
+                # muestra como "No disponible"), a propósito, no un
+                # descuido.
+                "executable_path": None,
+                "username": None,
+            }
+
+            # Incidente sobre el que aplicaría un aislamiento manual
+            # desde este drawer (2026-08-17, ver PENDIENTES.md,
+            # "Aislamiento de host -- modo development, laboratorio y
+            # producción") -- para kind == 'incident' es el propio
+            # item_id; para kind == 'alert' es incident_id_val (puede
+            # ser None si la alerta todavía no escaló a incidente, en
+            # cuyo caso no hay a qué asociar la orden). 'isolation_status'
+            # es el estado más reciente de host_isolations para ese
+            # incidente, o None si nunca se ordenó ninguno.
+            isolatable_incident_id = item_id if kind == "incident" else incident_id_val
+            # Corregido 2026-08-18 (problema H, ver PENDIENTES.md): antes
+            # esto filtraba 'host_isolations.incident_id = %s' contra
+            # 'isolatable_incident_id' -- si el aislamiento se había
+            # ordenado desde OTRO incidente de este mismo endpoint (o
+            # automáticamente desde una alerta que después escaló a un
+            # incidente DISTINTO), este drawer no lo encontraba y ofrecía
+            # "Aislar" de nuevo sobre un endpoint ya aislado. El
+            # aislamiento pertenece al AGENTE (agent_id, ya resuelto más
+            # arriba en esta función), no al incidente que lo originó --
+            # ver _agent_isolation_status_sql()/_agent_isolation_id_sql().
+            cursor.execute(
+                f"""
+                SELECT {_agent_isolation_id_sql("%s")}, {_agent_isolation_status_sql("%s")};
+                """,
+                (agent_id, agent_id)
+            )
+            iso_row = cursor.fetchone()
+            isolation_id, isolation_status = iso_row if iso_row else (None, None)
+
     finally:
         connection.close()
 
@@ -3966,6 +4776,10 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
         "incident_id": incident_id_val,
         "resolved_at": resolved_at_val.strftime("%d/%m/%Y %H:%M:%S") if resolved_at_val else None,
         "rules": matched_rules,
+        # Proceso involucrado (sección 5, 2026-08-18, ver PENDIENTES.md)
+        # -- ver el bloque de arriba para de dónde sale cada campo y por
+        # qué 'executable_path'/'username' quedan siempre en None.
+        "process": process,
         "timeline": timeline,
         # 'anchor_ts' ya se calculaba antes (para la ventana de la
         # cadena de evidencia) pero nunca se devolvía -- se agrega acá
@@ -3977,6 +4791,14 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
         # origen al caso (la primera por fecha entre las vinculadas),
         # para el bloque "Alerta de origen" del drawer.
         "origin_alert": origin_alert,
+        "isolatable_incident_id": isolatable_incident_id,
+        "isolation_status": isolation_status,
+        # Agregado 2026-08-17 (ver PENDIENTES.md, "Corrección de tiempo
+        # real, ordenamiento y consistencia") -- lo que necesita el
+        # nuevo botón "Liberar" del drawer para llamar a
+        # POST /host-isolations/{id}/release sin tener que adivinar el
+        # id de la fila.
+        "isolation_id": isolation_id,
     }
 
 
@@ -3987,6 +4809,21 @@ def api_alerts(
     status: str = Query("", pattern="^(NEW|ACKNOWLEDGED|ESCALATED|CLOSED|FALSE_POSITIVE|)$"),
     since: str = Query("", pattern="^(24h|7d|30d|)$"),
     rule: str = "",
+    # Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
+    # "Revisión y corrección integral de ALFA-Sentinel", problema G):
+    # antes esta pantalla mostraba SIEMPRE el historial completo, alertas
+    # cerradas/falsos positivos incluidos, sin ningún filtro por
+    # defecto -- el analista tenía que armar el filtro de estado a mano
+    # cada vez para ver solo lo que necesita atención. 'activas' (default)
+    # excluye CLOSED/FALSE_POSITIVE -- los 2 estados finales reales de
+    # 'alerts.status' (ver ALERT_STATUS_LABELS_ES) -- sin inventar ningún
+    # estado nuevo. 'todos' quita esa exclusión. Si 'status' viene
+    # explícito (el analista eligió un estado puntual del desplegable,
+    # incluida una de las cerradas), ESE filtro manda siempre, sin
+    # importar 'view' -- elegir un estado a propósito es más específico
+    # que la vista general. No se borra ningún registro -- 'todos' sigue
+    # trayendo el historial completo real.
+    view: str = Query("activas", pattern="^(activas|todos)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=100),
     user: dict = Depends(get_current_user)
@@ -4004,7 +4841,18 @@ def api_alerts(
             where_clauses = []
             params = {}
 
+            if not status and view == "activas":
+                where_clauses.append("alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')")
+
             if search:
+                # Busca sobre 'alerts.title' -- la columna GUARDADA
+                # (texto del primer evento del episodio, ej. "...--
+                # python.exe"), que sigue existiendo tal cual aunque ya
+                # no se use como título visible (ver alert_general_title
+                # más abajo). Se deja así a propósito: sigue siendo un
+                # texto real y buscable (nombres de proceso, etc.) --
+                # cambiar qué se busca no fue pedido y no es necesario
+                # para corregir el título.
                 where_clauses.append("(endpoints.hostname ILIKE %(search)s OR alerts.title ILIKE %(search)s)")
                 params["search"] = f"%{search}%"
             if severity:
@@ -4017,29 +4865,50 @@ def api_alerts(
                 interval = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}[since]
                 where_clauses.append(f"alerts.created_at >= CURRENT_TIMESTAMP - INTERVAL '{interval}'")
             if rule:
-                where_clauses.append("heuristic_rules.name = %(rule)s")
+                # EXISTS en vez de JOIN (2026-08-18, ver PENDIENTES.md,
+                # "Corrección definitiva en la lógica y presentación de
+                # ALERTAS") -- un JOIN contra alert_rule/heuristic_rules
+                # multiplica filas cuando una alerta tiene más de una
+                # regla vinculada (la causa real del bug de título/regla
+                # arbitraria que reportó el usuario). EXISTS filtra sin
+                # multiplicar nada.
+                where_clauses.append(
+                    """EXISTS (
+                        SELECT 1 FROM alert_rule
+                        JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
+                        WHERE alert_rule.alert_id = alerts.id AND heuristic_rules.name = %(rule)s
+                    )"""
+                )
                 params["rule"] = rule
 
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
+            # Sin LEFT JOIN alert_rule/heuristic_rules acá -- no hace
+            # falta para nada de lo que se selecciona (severidad/status/
+            # fecha ya viven en 'alerts', el filtro por regla usa EXISTS
+            # arriba). Antes estaba solo para poder mostrar UN nombre de
+            # regla por alerta más abajo, lo que obligaba a un DISTINCT
+            # ON frágil (ver historial del bug en PENDIENTES.md,
+            # "Corrección de tiempo real, ordenamiento y consistencia").
+            # Ahora el título es general por severidad y la cantidad de
+            # reglas se cuenta con una subconsulta escalar -- no hay
+            # ningún JOIN que pueda multiplicar filas en esta consulta.
             base_from = """
                 FROM alerts
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
-                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
-                LEFT JOIN heuristic_rules ON heuristic_rules.id = alert_rule.rule_id
             """
 
             # Resumen -- sin filtrar, para las 5 tarjetas de arriba.
             cursor.execute(
                 f"""
                 SELECT
-                    COUNT(DISTINCT alerts.id) AS total_n,
-                    COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS active_n,
-                    COUNT(DISTINCT alerts.id) FILTER (WHERE severity_levels.name = 'CRÍTICO' AND alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS critical_n,
-                    COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS investigating_n,
-                    COUNT(DISTINCT alerts.id) FILTER (WHERE alerts.status IN ('CLOSED', 'FALSE_POSITIVE')) AS resolved_n
+                    COUNT(*) AS total_n,
+                    COUNT(*) FILTER (WHERE alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS active_n,
+                    COUNT(*) FILTER (WHERE severity_levels.name = 'CRÍTICO' AND alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS critical_n,
+                    COUNT(*) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS investigating_n,
+                    COUNT(*) FILTER (WHERE alerts.status IN ('CLOSED', 'FALSE_POSITIVE')) AS resolved_n
                 {base_from};
                 """
             )
@@ -4049,7 +4918,7 @@ def api_alerts(
             rule_names = [r[0] for r in cursor.fetchall()]
 
             cursor.execute(
-                f"SELECT COUNT(DISTINCT alerts.id) {base_from} {where_sql};",
+                f"SELECT COUNT(*) {base_from} {where_sql};",
                 params
             )
             filtered_total = cursor.fetchone()[0]
@@ -4062,24 +4931,37 @@ def api_alerts(
             page_params["limit"] = page_size
             page_params["offset"] = offset
 
+            # Sin DISTINCT ON: cada alerta aparece en 'alerts' una sola
+            # vez (a diferencia del join anterior contra alert_rule, que
+            # la multiplicaba por cada regla vinculada), así que un
+            # ORDER BY / LIMIT / OFFSET directo sobre 'alerts.created_at
+            # DESC' ya es correcto en todas las páginas -- ver
+            # PENDIENTES.md, "Corrección de tiempo real, ordenamiento y
+            # consistencia" para el bug original de esta misma consulta.
+            # 'rule_count' (2026-08-18, ver PENDIENTES.md, "Corrección
+            # definitiva en la lógica y presentación de ALERTAS")
+            # reemplaza al nombre de una sola regla -- la tabla ya no
+            # muestra una regla individual como si fuera representativa
+            # de toda la alerta, solo cuántas contribuyeron; el detalle
+            # (drawer) sigue listando cada una.
             cursor.execute(
                 f"""
-                SELECT DISTINCT ON (alerts.id)
-                    alerts.id, severity_levels.name, alerts.title, endpoints.hostname,
+                SELECT
+                    alerts.id, severity_levels.name, endpoints.hostname,
                     alerts.risk_score, alerts.status, alerts.created_at, alerts.incident_id,
-                    heuristic_rules.name, alerts.agent_id
+                    alerts.agent_id,
+                    (
+                        SELECT COUNT(*) FROM alert_rule
+                        WHERE alert_rule.alert_id = alerts.id
+                    ) AS rule_count
                 {base_from}
                 {where_sql}
-                ORDER BY alerts.id, alerts.created_at DESC
+                ORDER BY alerts.created_at DESC
                 LIMIT %(limit)s OFFSET %(offset)s;
                 """,
                 page_params
             )
             rows = cursor.fetchall()
-
-            # DISTINCT ON reordena por alerts.id -- se reordena acá por
-            # fecha descendente, que es el orden real que ve el usuario.
-            rows.sort(key=lambda r: r[6], reverse=True)
     finally:
         connection.close()
 
@@ -4087,15 +4969,21 @@ def api_alerts(
         {
             "id": r[0],
             "severity": r[1],
-            "title": r[2],
-            "hostname": r[3],
-            "risk_score": float(r[4]),
-            "status": r[5],
-            "status_label": ALERT_STATUS_LABELS_ES.get(r[5], r[5]),
-            "created_at": r[6].strftime("%d/%m/%Y %H:%M:%S"),
-            "incident_id": r[7],
-            "rule_name": r[8] if r[8] else None,
-            "agent_id": r[9],
+            # Título general por severidad -- ver alert_general_title()
+            # (2026-08-18, ver PENDIENTES.md, "Corrección definitiva en
+            # la lógica y presentación de ALERTAS"). Ya NO es el nombre
+            # de una regla individual ("Consumo de CPU elevado",
+            # "Acceso Honeyfile", etc.) -- esas reglas siguen existiendo,
+            # se ven todas juntas en el detalle de la alerta.
+            "title": alert_general_title(r[1]),
+            "hostname": r[2],
+            "risk_score": float(r[3]),
+            "status": r[4],
+            "status_label": ALERT_STATUS_LABELS_ES.get(r[4], r[4]),
+            "created_at": r[5].strftime("%d/%m/%Y %H:%M:%S"),
+            "incident_id": r[6],
+            "agent_id": r[7],
+            "rule_count": r[8],
         }
         for r in rows
     ]
@@ -4155,17 +5043,30 @@ def _alfa_table(data, col_widths=None):
 
 @app.get("/api/respuesta")
 def api_respuesta(user: dict = Depends(get_current_user)):
-    """Datos de la pantalla Acciones de Respuesta en React (hoy un
-    placeholder honesto). No hay respuesta
-    automática implementada -- el agente no tiene canal de comandos
-    remotos (agent/main.py es de una sola pasada, sin bucle ni forma de
-    recibir órdenes) -- así que esta pantalla no simula un botón de
-    aislamiento que funcione. Lo que sí es real:
+    """Datos de la pantalla Acciones de Respuesta en React.
 
-    1. El estado de 'host_isolations' (hoy siempre vacía -- ningún
-       endpoint del servidor escribe ahí todavía, ver schema.sql).
-    2. Los incidentes críticos abiertos ahora mismo, que son los que
-       de verdad requerirían contención manual fuera de la consola.
+    Desde la corrección definitiva del motor heurístico (2026-08-17,
+    ver PENDIENTES.md), el aislamiento AUTOMÁTICO es real de punta a
+    punta: cuando report_alert() determina que corresponde (sección
+    30), deja una orden 'REQUESTED' en 'host_isolations' que el agente
+    del endpoint recoge y ejecuta (agent/isolation_sync.py +
+    agent/isolation_executor.py), confirmando 'EXECUTED' o
+    'ISOLATION_FAILED' según el resultado real.
+
+    Extendido 2026-08-17 (ver PENDIENTES.md, "Aislamiento de host --
+    modo development, laboratorio y producción"): el disparo MANUAL
+    desde la consola (POST /incidents/{id}/isolate) ya existe y usa
+    exactamente el mismo mecanismo -- esta pantalla ahora también deja
+    disparar aislamiento manual sobre los incidentes críticos listados
+    abajo, y liberar (POST /host-isolations/{id}/release) un
+    aislamiento ya ejecutado desde el historial.
+
+    Esta pantalla muestra:
+    1. El estado real de 'host_isolations' (historial completo, con el
+       resultado que reportó cada agente, incluido quién lo solicitó
+       cuando fue manual).
+    2. Los incidentes críticos abiertos ahora mismo, con un botón para
+       aislar manualmente si todavía no tienen una orden en curso.
     """
 
     connection = get_connection()
@@ -4173,7 +5074,7 @@ def api_respuesta(user: dict = Depends(get_current_user)):
         with connection.cursor() as cursor:
 
             cursor.execute(
-                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED') AND released_at IS NULL;"
+                "SELECT COUNT(DISTINCT agent_id) FROM host_isolations WHERE status IN ('REQUESTED', 'EXECUTED', 'RELEASE_REQUESTED') AND released_at IS NULL;"
             )
             isolated_now = cursor.fetchone()[0]
 
@@ -4196,8 +5097,15 @@ def api_respuesta(user: dict = Depends(get_current_user)):
             )
             isolation_rows = cursor.fetchall()
 
+            # 'isolation_status'/'isolation_id' corregidos 2026-08-18
+            # (problema H, ver PENDIENTES.md): antes filtraban por
+            # 'host_isolations.incident_id = incidents.id' -- la misma
+            # tabla de "Incidentes críticos" de Respuesta mostraba
+            # "Aislar" sobre un incidente cuyo endpoint YA estaba aislado
+            # desde otro incidente distinto. Ver
+            # _agent_isolation_status_sql()/_agent_isolation_id_sql().
             cursor.execute(
-                """
+                f"""
                 SELECT incidents.id, incidents.title, incidents.status, incidents.opened_at,
                        endpoints.hostname, incidents.assigned_to, assigned_user.full_name,
                        (
@@ -4206,7 +5114,9 @@ def api_respuesta(user: dict = Depends(get_current_user)):
                            WHERE alerts.incident_id = incidents.id
                            ORDER BY severity_levels.min_score DESC
                            LIMIT 1
-                       ) AS severity
+                       ) AS severity,
+                       {_agent_isolation_status_sql("incidents.agent_id")} AS isolation_status,
+                       {_agent_isolation_id_sql("incidents.agent_id")} AS isolation_id
                 FROM incidents
                 JOIN agents ON agents.id = incidents.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -4223,7 +5133,12 @@ def api_respuesta(user: dict = Depends(get_current_user)):
         {
             "id": r[0],
             "code": f"INC-{r[0]:05d}",
-            "title": r[1],
+            # Título general por severidad -- ver alert_general_title()
+            # (2026-08-18, ver PENDIENTES.md, "Corrección definitiva en
+            # la lógica y presentación de ALERTAS"). Un incidente
+            # agrupa una o más alertas -- el título ya no es el texto
+            # del primer evento que lo originó.
+            "title": alert_general_title(r[7]),
             "status": r[2],
             "status_label": INCIDENT_STATUS_LABELS_ES.get(r[2], r[2]),
             "opened_at": r[3].strftime("%d/%m/%Y %H:%M:%S") if r[3] else None,
@@ -4231,6 +5146,8 @@ def api_respuesta(user: dict = Depends(get_current_user)):
             "assigned_to": r[5],
             "assigned_to_name": r[6],
             "severity": r[7],
+            "isolation_status": r[8],
+            "isolation_id": r[9],
         }
         for r in incident_rows
         if r[7] in ("ALTO", "CRÍTICO")
@@ -4512,7 +5429,14 @@ def _gather_incidents_report_data(cursor, start, end, endpoint_id):
                ) AS rule_names,
                (
                    SELECT COUNT(*) FROM alerts WHERE alerts.incident_id = incidents.id
-               ) AS alert_count
+               ) AS alert_count,
+               (
+                   SELECT severity_levels.name FROM alerts
+                   JOIN severity_levels ON severity_levels.id = alerts.severity_id
+                   WHERE alerts.incident_id = incidents.id
+                   ORDER BY severity_levels.min_score DESC
+                   LIMIT 1
+               ) AS severity
         FROM incidents
         JOIN agents ON agents.id = incidents.agent_id
         JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -4527,7 +5451,11 @@ def _gather_incidents_report_data(cursor, start, end, endpoint_id):
 
     incidents_data = [
         {
-            "id": r[0], "code": f"INC-{r[0]:05d}", "title": r[1],
+            "id": r[0], "code": f"INC-{r[0]:05d}",
+            # Título general por severidad -- ver alert_general_title()
+            # (2026-08-18, ver PENDIENTES.md, "Corrección definitiva en
+            # la lógica y presentación de ALERTAS").
+            "title": alert_general_title(r[11]),
             "status": r[2], "status_label": INCIDENT_STATUS_LABELS_ES.get(r[2], r[2]),
             "classification_label": INCIDENT_CLASSIFICATION_LABELS_ES.get(r[3], "Sin clasificar"),
             "opened_at": r[4], "closed_at": r[5], "hostname": r[6],
@@ -5469,11 +6397,18 @@ def report_event(
 # en una sola alerta en vez de crear una nueva por cada evento
 # (sección 27 -- "no crear cientos de alertas idénticas"). Se
 # considera mismo episodio una alerta del mismo agente que sigue
-# NEW/ACKNOWLEDGED (no cerrada/descartada) y fue creada hace menos de
-# EPISODE_WINDOW_SECONDS. Es una decisión de producto razonable (no
-# hay un valor "correcto" único) -- 120s, generoso respecto a las
-# ventanas de las reglas individuales (10-20s) para que una ráfaga que
-# dispara varias reglas en sucesión siga cayendo en la misma alerta.
+# NEW/ACKNOWLEDGED (no cerrada/descartada) y cuya evidencia más
+# reciente (MAX(alert_rule.matched_at), no 'alerts.created_at' --
+# corregido 2026-08-17, ver PENDIENTES.md) llegó hace menos de
+# EPISODE_WINDOW_SECONDS. Es DESLIZANTE a propósito: mientras sigan
+# llegando indicadores compatibles, el episodio se mantiene abierto sin
+# importar cuánto dure en total -- solo se considera cerrado (y la
+# próxima evidencia abre uno nuevo) cuando pasan EPISODE_WINDOW_SECONDS
+# reales sin ninguna coincidencia nueva. 120s es una decisión de
+# producto razonable (no hay un valor "correcto" único) -- generoso
+# respecto a las ventanas de las reglas individuales (10-20s) para que
+# una ráfaga que dispara varias reglas en sucesión siga cayendo en la
+# misma alerta.
 EPISODE_WINDOW_SECONDS = 120
 
 # Reglas "fuertes" -- peso >= 15, es decir todas menos las señales
@@ -5495,6 +6430,46 @@ STRONG_RULE_NAMES = {
 # indicador FUERTE DE ACTIVIDAD DE ARCHIVOS", el honeyfile no cuenta
 # como su propio segundo indicador).
 STRONG_FILE_ACTIVITY_RULES = STRONG_RULE_NAMES - {"Acceso Honeyfile"}
+
+
+def sort_contributing_rules(rows):
+    """Orden de relevancia para las reglas/señales que contribuyeron a
+    una alerta o incidente (sección 3 de "Corrección definitiva en la
+    lógica y presentación de ALERTAS", 2026-08-18, ver PENDIENTES.md):
+    1) las más específicas/críticas primero -- 'Acceso Honeyfile'
+       siempre al tope (sección 7: "señal especialmente relevante"),
+       después el resto de STRONG_RULE_NAMES (ya existente, ver arriba,
+       reutilizado tal cual en vez de inventar una segunda noción de
+       "regla fuerte"), después el resto;
+    2) dentro de cada nivel, mayor 'weight_applied' primero;
+    3) en caso de empate, la coincidencia más reciente ('matched_at')
+       primero.
+    Reemplaza cualquier 'ORDER BY' que dependiera del orden en que
+    Postgres decide devolver filas empatadas (nunca garantizado) o de
+    'matched_at ASC' simple (que no distingue relevancia, solo
+    cronología). No altera los pesos guardados -- solo el orden en que
+    se muestran.
+
+    'rows' es una lista de tuplas (rule_name, weight_applied, matched_at)
+    -- 'matched_at' puede ser None (no debería pasar en la práctica,
+    pero se maneja sin romper por las dudas)."""
+
+    def _tier(rule_name):
+        if rule_name == "Acceso Honeyfile":
+            return 0
+        if rule_name in STRONG_RULE_NAMES:
+            return 1
+        return 2
+
+    def _key(row):
+        rule_name, weight_applied, matched_at = row
+        return (
+            _tier(rule_name),
+            -float(weight_applied),
+            -(matched_at.timestamp() if matched_at else 0.0),
+        )
+
+    return sorted(rows, key=_key)
 
 # HR-05/06/11 -- hasta el 2026-08-16 estaban acá porque requerían
 # datos que el agente no recopilaba (atribución de proceso a evento
@@ -5540,10 +6515,16 @@ def report_alert(
     weight en la base ya es 100, sin necesidad de un caso especial acá),
     (5) derivar la severidad consultando 'severity_levels' (sección 3),
     (6) decidir si corresponde crear un incidente automáticamente
-    (sección 28) y (7) evaluar -- sin ejecutar -- si se cumple la
-    condición de aislamiento (sección 30), dejando una recomendación
-    honesta en 'host_isolations' (status='RECOMMENDED': el agente no
-    tiene forma de aislar nada de verdad, ver PENDIENTES.md)."""
+    (sección 28) y (7) evaluar si se cumple la condición de aislamiento
+    (sección 30) y, si corresponde, ORDENARLO -- corregido 2026-08-17
+    (ver PENDIENTES.md, "Corrección definitiva del motor heurístico...
+    "): ya no se queda en una recomendación sin ejecutar; deja una
+    orden real en 'host_isolations' (status='REQUESTED') que el agente
+    de ese endpoint recoge y ejecuta de verdad (agent/isolation_sync.py
+    + agent/isolation_executor.py, real solo en producción y con
+    privilegios; en desarrollo, el flujo completo se ejerce igual pero
+    la acción de red queda simulada, nunca toca el firewall real de
+    quien está probando el sistema)."""
 
     if not alert.matched_rules:
         raise HTTPException(status_code=422, detail="matched_rules no puede estar vacío")
@@ -5582,14 +6563,32 @@ def report_alert(
             is_honeyfile = any(name == "Acceso Honeyfile" for _, name, _ in matched)
 
             # ¿Actualiza una alerta existente del mismo episodio, o
-            # crea una nueva?
+            # crea una nueva? -- corregido 2026-08-17 (ver PENDIENTES.md,
+            # "Corrección definitiva del motor heurístico..."): ANTES
+            # comparaba contra 'alerts.created_at', una ventana FIJA
+            # desde que se creó la alerta -- un ataque sostenido que
+            # sigue mandando evidencia real más allá de esos 120s
+            # (ej. cada 90s durante 10 minutos) se fragmentaba en varias
+            # alertas nuevas en vez de seguir siendo el mismo episodio,
+            # aunque nunca hubo un hueco real de inactividad. Ahora la
+            # ventana es DESLIZANTE: se mide desde la última evidencia
+            # real vinculada a la alerta (MAX(alert_rule.matched_at)),
+            # no desde su creación -- "un episodio permanece abierto
+            # mientras sigan llegando indicadores compatibles", y solo
+            # se considera cerrado cuando pasan 120s sin ninguna
+            # evidencia nueva. Con evidencia continua, un episodio puede
+            # durar mucho más de 120s en total y seguir siendo UNO solo.
             cursor.execute(
                 """
-                SELECT id FROM alerts
-                WHERE agent_id = %s
-                  AND status IN ('NEW', 'ACKNOWLEDGED')
-                  AND created_at >= NOW() - (%s || ' seconds')::INTERVAL
-                ORDER BY created_at DESC
+                SELECT alerts.id
+                FROM alerts
+                LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
+                WHERE alerts.agent_id = %s
+                  AND alerts.status IN ('NEW', 'ACKNOWLEDGED')
+                GROUP BY alerts.id, alerts.created_at
+                HAVING GREATEST(alerts.created_at, COALESCE(MAX(alert_rule.matched_at), alerts.created_at))
+                       >= NOW() - (%s || ' seconds')::INTERVAL
+                ORDER BY GREATEST(alerts.created_at, COALESCE(MAX(alert_rule.matched_at), alerts.created_at)) DESC
                 LIMIT 1;
                 """,
                 (agent_id, EPISODE_WINDOW_SECONDS)
@@ -5767,10 +6766,18 @@ def report_alert(
             # de incidente, y solo se evalúa una vez que existe un
             # incidente (la detección/contención del diagrama de la
             # especificación pasa primero por "¿corresponde incidente?").
-            # No se ejecuta nada -- solo se deja constancia de que la
-            # condición se cumplió, para que un analista decida (sección
-            # 31: el aislamiento manual sigue siendo la única vía real).
-            isolation_recommended = False
+            # Corregido 2026-08-17 (ver PENDIENTES.md): ANTES esto se
+            # quedaba en una fila 'RECOMMENDED' sin ejecutar nada. Ahora
+            # SÍ se ordena: se inserta como 'REQUESTED' y el agente de
+            # ESE endpoint (agent/isolation_sync.py, polling periódico
+            # vía GET /agent/isolation-status, mismo patrón que
+            # honeyfile_sync.py) la recoge, la ejecuta de verdad
+            # (agent/isolation_executor.py) y confirma el resultado real
+            # vía POST /agent/isolation-status/report -- recién ahí la
+            # fila pasa a 'EXECUTED' o 'ISOLATION_FAILED'. El servidor
+            # nunca ejecuta nada él mismo (no tiene acceso a la red del
+            # endpoint) -- solo ordena y registra el resultado.
+            isolation_requested = False
 
             if incident_id is not None:
                 strong_file_matched = linked_names & STRONG_FILE_ACTIVITY_RULES
@@ -5778,9 +6785,25 @@ def report_alert(
                 condition_b = final_score >= 75 and len(strong_file_matched) >= 2
 
                 if condition_a or condition_b:
+                    # No duplicar una orden ya en curso o ya cumplida
+                    # para este mismo ENDPOINT (mismo criterio de "no
+                    # duplicar evidencia/órdenes ya registradas" que
+                    # already_linked más arriba).
+                    #
+                    # BUG REAL corregido 2026-08-18 (problema H, ver
+                    # PENDIENTES.md): filtraba por 'incident_id = %s' --
+                    # el incidente de ESTE episodio puntual. Un agente con
+                    # más de un incidente (ej. ya aislado por un episodio
+                    # anterior) podía disparar esta condición de nuevo
+                    # desde un incidente DISTINTO -- 'incident_id' nunca
+                    # coincidía con la orden ya existente (que tiene el
+                    # incident_id del episodio anterior), así que el
+                    # servidor insertaba una SEGUNDA orden 'REQUESTED'
+                    # automática para un endpoint que ya estaba aislado.
+                    # Mismo criterio único que _agent_is_isolated_sql().
                     cursor.execute(
-                        "SELECT id FROM host_isolations WHERE incident_id = %s AND status = 'RECOMMENDED';",
-                        (incident_id,)
+                        f"SELECT 1 WHERE {_agent_is_isolated_sql('%s')};",
+                        (agent_id,)
                     )
                     if cursor.fetchone() is None:
                         reason = (
@@ -5793,11 +6816,11 @@ def report_alert(
                         cursor.execute(
                             """
                             INSERT INTO host_isolations (agent_id, incident_id, isolation_type, status, reason)
-                            VALUES (%s, %s, 'NETWORK', 'RECOMMENDED', %s);
+                            VALUES (%s, %s, 'NETWORK', 'REQUESTED', %s);
                             """,
                             (agent_id, incident_id, reason)
                         )
-                        isolation_recommended = True
+                        isolation_requested = True
 
             connection.commit()
 
@@ -5808,7 +6831,7 @@ def report_alert(
             "severity": severity_name,
             "incident_id": incident_id,
             "incident_created": incident_created,
-            "isolation_recommended": isolation_recommended,
+            "isolation_requested": isolation_requested,
         }
 
     finally:

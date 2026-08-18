@@ -42,6 +42,33 @@ USER_FOLDER_MARKERS = {"documents", "desktop", "downloads", "pictures", "music",
 TEMP_PATH_MARKERS = {"temp", "tmp"}
 TEMP_EXTENSIONS = {".tmp", ".temp"}
 
+# NOTA sobre deduplicación de "eventos técnicos" (2026-08-18, ver
+# PENDIENTES.md, "Revisión y corrección integral de ALFA-Sentinel",
+# problema B): aplicaciones de escritorio reales (Office en particular)
+# pueden generar más de un evento de filesystem por un solo guardado del
+# usuario (escribir un temporal, borrar el original, renombrar -- o
+# directamente reescribir dos veces seguidas, según versión/config).
+# Investigado ANTES de tocar código, como pidió la especificación: es un
+# comportamiento real y documentado del SO/editor, no un defecto de
+# watchdog ni del agente.
+#
+# La deduplicación para ese caso se implementa en file_monitor.py
+# (FileActivityHandler), NO acá -- a propósito. Esta clase
+# (FileActivityAnalyzer.register_event) es una función determinista de
+# la secuencia de eventos que recibe, y así la usa hoy toda la batería
+# de pruebas existente (tests/heuristic/test_file_rules_regression.py
+# verifica explícitamente que HR-04 cuenta OPERACIONES totales, no
+# archivos únicos, llamando register_event() varias veces seguidas
+# sobre el MISMO 'file_path' sin ningún intervalo real de tiempo --
+# agregar deduplicación por tiempo transcurrido ACÁ ADENTRO habría
+# roto esa prueba y, con ella, el contrato ya probado y documentado de
+# esta clase: "NO romper la lógica existente"). file_monitor.py sí tiene
+# acceso al tiempo REAL entre eventos de watchdog (a diferencia de un
+# test sintético que llama register_event() en bucle sin pausas) y es
+# quien decide, antes de llamar a register_event(), si dos eventos
+# consecutivos son "la misma acción técnica" -- ver
+# FileActivityHandler._is_technical_duplicate() en ese archivo.
+
 
 def _is_shared_path(file_path):
     """Heurística de "ruta compartida" para HR-07: rutas UNC de
@@ -214,6 +241,7 @@ class FileActivityAnalyzer:
                 break
             dq.popleft()
 
+
     def register_event(self, file_path, event_type, is_honeyfile=False, process_info=None):
         """Registra un evento de archivo y devuelve la lista de
         nombres de regla que están activas justo después de
@@ -222,9 +250,11 @@ class FileActivityAnalyzer:
         cantidad de eventos -- el llamador (file_monitor.py) decide
         qué hacer con la lista, y el peso real lo aplica el servidor.
 
-        'process_info' (2026-08-16): {"process_id", "process_name",
-        "executable_path"} si agent/adapters/ pudo atribuir el proceso
-        responsable de este evento, o None si no se pudo determinar
+        'process_info' (2026-08-16, campo 'username' agregado el mismo
+        día junto con la atribución vía fanotify/ETW): {"process_id",
+        "process_name", "executable_path", "username"} si
+        agent/adapters/ pudo atribuir el proceso responsable de este
+        evento, o None si no se pudo determinar
         (ver PENDIENTES.md -- limitación honesta, no se inventa).
         Habilita HR-05 (Proceso Sospechoso) y HR-11 (Actividad
         Repetitiva Automatizada); si es None, ambas reglas

@@ -93,8 +93,17 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
                   </td>
                   <td className="py-3 pr-3">
                     <div className="font-semibold tracking-tight" style={{ color: "var(--tx)" }}>{a.title}</div>
-                    {a.rule_name && (
-                      <div className="text-[11px] mt-0.5 font-medium" style={{ color: "var(--tx-mute)" }}>{a.rule_name}</div>
+                    {/* Cantidad de señales, no el nombre de una regla
+                        puntual -- mostrar una sola regla acá era
+                        exactamente el problema reportado (2026-08-18,
+                        ver PENDIENTES.md, "Corrección definitiva en la
+                        lógica y presentación de ALERTAS"): con más de
+                        una regla vinculada, esa regla se elegía de
+                        forma arbitraria. El detalle las lista todas. */}
+                    {a.rule_count > 0 && (
+                      <div className="text-[11px] mt-0.5 font-medium" style={{ color: "var(--tx-mute)" }}>
+                        {a.rule_count === 1 ? "1 señal" : `${a.rule_count} señales`}
+                      </div>
                     )}
                   </td>
                   <td className="py-3 pr-3 font-medium" style={{ color: "var(--tx-dim)" }}>{a.hostname}</td>

@@ -1,11 +1,11 @@
 import NotificationsBell from "./NotificationsBell";
 import UserMenu from "./UserMenu";
+import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
 
 interface TopbarProps {
   title?: string;
   subtitle?: string;
   systemOk: boolean;
-  notificationCount: number;
   userName: string;
   roleLabel: string;
   theme: "dark" | "light";
@@ -20,7 +20,6 @@ export default function Topbar({
   title = "Panel de control",
   subtitle = "Resumen general de seguridad y estado de los endpoints",
   systemOk,
-  notificationCount,
   userName,
   roleLabel,
   theme,
@@ -30,6 +29,19 @@ export default function Topbar({
   onViewAllAlerts,
   onOpenProfile,
 }: TopbarProps) {
+  // Corregido 2026-08-18 (ver PENDIENTES.md, "Corrección definitiva en
+  // la lógica y presentación de ALERTAS", sección 13): antes recibía
+  // este número por prop desde App.tsx, sacado de
+  // 'data.summary.alerts_active' -- el resultado del poll de
+  // /api/dashboard/overview, que corre cada 20s, un ciclo totalmente
+  // aparte del poll de 3s de GlobalAlertsProvider. La campana podía
+  // tardar hasta 20s en reflejar una alerta que la ventana flotante y
+  // las tablas de Alertas/Incidentes ya mostraban. Ahora lee
+  // 'openAlertsCount' directo del mismo Context/poll que ya usan esas
+  // dos -- sin arrancar un poll propio (sección 19: "Backend -> estado
+  // real -> Global Alerts/Incidents Provider -> UI").
+  const { openAlertsCount } = useGlobalAlertsContext();
+
   return (
     <header
       className="sticky top-0 z-20 border-b px-6 py-4 flex items-center gap-5 shadow-sm"
@@ -72,7 +84,7 @@ export default function Topbar({
           <i className={theme === "dark" ? "ph-fill ph-sun" : "ph-fill ph-moon"} style={{ fontSize: "17px" }} />
         </button>
 
-        <NotificationsBell count={notificationCount} onSelectAlert={onSelectAlert} onViewAll={onViewAllAlerts} />
+        <NotificationsBell count={openAlertsCount} onSelectAlert={onSelectAlert} onViewAll={onViewAllAlerts} />
 
         <div className="w-px h-[26px]" style={{ background: "var(--line)" }} />
 

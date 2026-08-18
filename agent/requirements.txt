@@ -1,3 +1,13 @@
 httpx
 psutil
 watchdog
+
+# Atribución de procesos vía ETW (2026-08-16, ver PENDIENTES.md,
+# "Atribución de procesos y completado del motor heurístico" --
+# agent/adapters/windows_etw.py). Marcador de entorno: pip la instala
+# solo en Windows, no rompe la instalación en Linux/macOS. Si no está
+# instalada (o falla al arrancar por falta de privilegios de
+# Administrador), el agente cae solo al mecanismo de respaldo
+# (psutil.open_files(), agent/adapters/common.py) -- no es una
+# dependencia obligatoria para que el agente funcione.
+pywintrace; sys_platform == "win32"

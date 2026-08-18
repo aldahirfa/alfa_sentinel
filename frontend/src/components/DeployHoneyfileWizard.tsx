@@ -17,6 +17,20 @@ const FILE_TYPE_OPTIONS = [
   { value: "pdf", label: "Documento PDF (.pdf)" },
 ];
 
+// Rutas LÓGICAS, no rutas físicas de una máquina concreta (2026-08-17,
+// ver PENDIENTES.md, "Honeyfiles: despliegue automático, rutas,
+// integridad, reconciliación y ejecución en tiempo real"). El agente
+// (agent/paths.py::resolve_logical_path) decide en tiempo real dónde
+// vive cada una según el sistema operativo y usuario reales del
+// endpoint, y según si corre en modo desarrollo o producción -- nunca
+// se hardcodea acá una ruta de Windows o Linux concreta.
+const TARGET_PATH_OPTIONS = [
+  { value: "DOCUMENTS", label: "Documentos" },
+  { value: "DESKTOP", label: "Escritorio" },
+  { value: "DOWNLOADS", label: "Descargas" },
+  { value: "PICTURES", label: "Imágenes" },
+];
+
 const fieldStyle: React.CSSProperties = {
   background: "var(--surf2)",
   border: "1px solid var(--line-soft)",
@@ -27,7 +41,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
   const [step, setStep] = useState<1 | 2>(1);
   const [fileName, setFileName] = useState("");
   const [fileType, setFileType] = useState("xlsx");
-  const [targetPath, setTargetPath] = useState("%USERPROFILE%\\Desktop\\");
+  const [targetPath, setTargetPath] = useState("DESKTOP");
   const [platform, setPlatform] = useState<"windows" | "linux" | "all">("windows");
   const [content, setContent] = useState("");
   const [autoDeploy, setAutoDeploy] = useState(false);
@@ -55,7 +69,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
     setStep(1);
     setFileName("");
     setFileType("xlsx");
-    setTargetPath("%USERPROFILE%\\Desktop\\");
+    setTargetPath("DESKTOP");
     setPlatform("windows");
     setContent("");
     setAutoDeploy(false);
@@ -207,15 +221,20 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                 </div>
 
                 <div>
-                  <label className="text-[11.5px] font-semibold block mb-1.5" style={{ color: "var(--tx-mute)" }}>Ruta de destino en el cliente</label>
-                  <input
-                    type="text"
+                  <label className="text-[11.5px] font-semibold block mb-1.5" style={{ color: "var(--tx-mute)" }}>Ubicación de destino en el cliente</label>
+                  <select
                     value={targetPath}
                     onChange={(e) => setTargetPath(e.target.value)}
-                    placeholder="Ej: C:\Users\Public\Docs\ o /var/backups/"
-                    className="w-full px-3 py-2 rounded-lg text-[12.5px] outline-none font-mono font-medium transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent"
+                    className="w-full px-3 py-2 rounded-lg text-[13px] outline-none cursor-pointer transition-premium focus:ring-2 focus:ring-[var(--brand)] focus:border-transparent font-medium"
                     style={fieldStyle}
-                  />
+                  >
+                    {TARGET_PATH_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+                    Carpeta real del usuario del equipo donde se cree el señuelo -- el agente resuelve la ruta física exacta según su propio sistema operativo.
+                  </p>
                 </div>
 
                 <div>

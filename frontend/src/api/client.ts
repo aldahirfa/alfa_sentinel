@@ -90,6 +90,14 @@ export interface OpenAlert {
   title: string;
   hostname: string;
   created_at: string;
+  // Agregados 2026-08-17 (ver PENDIENTES.md, "Alertas flotantes
+  // globales de alta prioridad") -- 'isolation_status' es el status
+  // REAL de host_isolations (REQUESTED/EXECUTED/ISOLATION_FAILED/
+  // RECOMMENDED legado/RELEASED), o null si no hay ninguna orden para
+  // el incidente de esta alerta (o la alerta no tiene incidente).
+  risk_score: number;
+  incident_id: number | null;
+  isolation_status: string | null;
 }
 
 export interface OpenAlertsResponse {
@@ -135,6 +143,7 @@ export function fetchAlerts(query: AlertsQuery): Promise<AlertsResponse> {
   if (query.status) params.set("status", query.status);
   if (query.since) params.set("since", query.since);
   if (query.rule) params.set("rule", query.rule);
+  params.set("view", query.view ?? "activas");
   params.set("page", String(query.page ?? 1));
   params.set("page_size", String(query.page_size ?? 15));
   return request<AlertsResponse>(`/api/alerts?${params.toString()}`);
@@ -158,6 +167,7 @@ export function fetchIncidentes(query: IncidentesQuery): Promise<IncidentesRespo
   if (query.severity) params.set("severity", query.severity);
   if (query.rule) params.set("rule", query.rule);
   if (query.since) params.set("since", query.since);
+  params.set("view", query.view ?? "activas");
   params.set("page", String(query.page ?? 1));
   return request<IncidentesResponse>(`/api/incidentes?${params.toString()}`);
 }
@@ -330,12 +340,37 @@ export async function deleteAgentRuleOverride(agentId: number, ruleId: number): 
   return res.json();
 }
 
-// GET /api/respuesta -- versión JSON del placeholder honesto de
-// /respuesta (Jinja2): no hay aislamiento automático real, se
-// muestran los incidentes críticos que requieren atención manual y el
-// historial real (vacío hoy) de 'host_isolations'.
+// GET /api/respuesta -- datos de la pantalla Acciones de Respuesta:
+// incidentes críticos abiertos (con botón para aislar manualmente) y
+// el historial real de 'host_isolations' (automático + manual).
 export function fetchRespuesta(): Promise<RespuestaResponse> {
   return request<RespuestaResponse>("/api/respuesta");
+}
+
+async function postJson<T>(path: string): Promise<T> {
+  const res = await fetch(path, { method: "POST", credentials: "include" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || `Error ${res.status} al llamar a ${path}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// POST /incidents/{id}/isolate -- disparo MANUAL de aislamiento
+// (2026-08-17, ver PENDIENTES.md, "Aislamiento de host -- modo
+// development, laboratorio y producción"). Usa exactamente el mismo
+// mecanismo de backend/agente que el aislamiento automático -- el
+// servidor deja una orden 'REQUESTED' que el agente del endpoint
+// recoge y ejecuta de verdad (o simulado, según ALFA_SENTINEL_ENV).
+export function isolateIncident(incidentId: number): Promise<{ isolation_id: number; status: string }> {
+  return postJson(`/incidents/${incidentId}/isolate`);
+}
+
+// POST /host-isolations/{id}/release -- operación inversa (UNISOLATE).
+// Solo válida sobre una orden ya 'EXECUTED'; deja 'RELEASE_REQUESTED'
+// para que el agente la confirme.
+export function releaseIsolation(isolationId: number): Promise<{ isolation_id: number; status: string }> {
+  return postJson(`/host-isolations/${isolationId}/release`);
 }
 
 // GET /api/reportes -- versión JSON de /reportes (Jinja2), misma
