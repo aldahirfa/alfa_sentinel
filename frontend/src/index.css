@@ -1,46 +1,88 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 /*
-  Tokens de diseño "Nocturne" -- copiados tal cual del mockup real
-  (Panel de control AGETIC/ALFA_SENTINEL Panel de Control.dc.html),
-  a pedido explícito: "quiero que lo copies tal cual". Los nombres
-  de variable y sus valores son los del archivo original -- no se
-  reinventaron. --brand cambia de tono entre temas a propósito (así
-  está en el mockup original: violeta en oscuro, verde en claro).
-
-  Los 4 colores de severidad (--ok/--warn/--high/--crit) son
-  EXCLUSIVOS para Normal/Sospechoso/Alto/Crítico, igual que en el
-  resto del proyecto -- --info y --brand son roles aparte (acento de
-  marca y datos informativos), nunca se usan para severidad.
+  Sistema visual Blue Team de ALFA-Sentinel.
+  Azul = identidad, interacción e información operativa.
+  Verde/ámbar/naranja/rojo = estados y severidad; no se reutilizan
+  como colores decorativos para evitar ambigüedad durante un incidente.
 */
 [data-theme="dark"] {
-  --bg: #161826; --surf: #1d1f2e; --surf2: #232532; --surf3: #282b3a;
-  --line: #31344a; --line-soft: #272a3a;
-  --tx: #e9e9ed; --tx-dim: #9397ab; --tx-mute: #75798c;
-  --brand: #9184d9; --brand-soft: rgba(145,132,217,.16); --brand-fill: rgba(145,132,217,.14);
-  --ok: #3fc98c; --ok-soft: rgba(63,201,140,.14);
-  --warn: #e2b53f; --warn-soft: rgba(226,181,63,.14); --warn-fill: rgba(226,181,63,.13);
-  --high: #ef8b4a; --high-soft: rgba(239,139,74,.15);
-  --crit: #f2616f; --crit-soft: rgba(242,97,111,.15); --crit-fill: rgba(242,97,111,.12);
-  --info: #5fa8d8; --info-soft: rgba(95,168,216,.15); --info-fill: rgba(95,168,216,.12);
-  --off: #5a5f73;
-  --shadow: 0 2px 4px rgba(0,0,0,.25), 0 1px 2px rgba(0,0,0,.15);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
-  --band-op: .45;
+  --bg: #070b13;
+  --bg-elevated: #0a101c;
+  --surf: #0d1523;
+  --surf2: #111c2d;
+  --surf3: #17243a;
+  --line: #223149;
+  --line-soft: #18253a;
+
+  --tx: #f2f6fc;
+  --tx-dim: #9eacc0;
+  --tx-mute: #6d7d94;
+
+  --brand: #4d8dff;
+  --brand-strong: #2f76f6;
+  --brand-soft: rgba(77, 141, 255, .14);
+  --brand-fill: rgba(77, 141, 255, .10);
+  --brand-glow: rgba(77, 141, 255, .22);
+
+  --ok: #36d399;
+  --ok-soft: rgba(54, 211, 153, .13);
+  --warn: #f1c75b;
+  --warn-soft: rgba(241, 199, 91, .14);
+  --warn-fill: rgba(241, 199, 91, .10);
+  --high: #fb923c;
+  --high-soft: rgba(251, 146, 60, .14);
+  --crit: #fb5c70;
+  --crit-soft: rgba(251, 92, 112, .14);
+  --crit-fill: rgba(251, 92, 112, .10);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, .13);
+  --info-fill: rgba(56, 189, 248, .09);
+  --off: #58677d;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .24), 0 8px 28px rgba(0, 0, 0, .12);
+  --shadow-lg: 0 24px 70px rgba(0, 0, 0, .48), 0 8px 24px rgba(0, 0, 0, .30);
+  --shadow-blue: 0 16px 42px rgba(25, 87, 194, .12);
+  --band-op: .65;
 }
+
 [data-theme="light"] {
-  --bg: #eef1f5; --surf: #ffffff; --surf2: #f5f7fa; --surf3: #eceff4;
-  --line: #d8dfe8; --line-soft: #e7ecf2;
-  --tx: #14202e; --tx-dim: #57657a; --tx-mute: #7b8798;
-  --brand: #0c6b3f; --brand-soft: rgba(12,107,63,.10); --brand-fill: rgba(12,107,63,.13);
-  --ok: #0f7a46; --ok-soft: rgba(15,122,70,.12);
-  --warn: #9c7106; --warn-soft: rgba(156,113,6,.13); --warn-fill: rgba(196,148,20,.16);
-  --high: #bd5a15; --high-soft: rgba(189,90,21,.13);
-  --crit: #c1273a; --crit-soft: rgba(193,39,58,.12); --crit-fill: rgba(193,39,58,.11);
-  --info: #186b96; --info-soft: rgba(24,107,150,.12); --info-fill: rgba(24,107,150,.11);
-  --off: #98a3b3;
-  --shadow: 0 2px 4px rgba(20,32,46,.06), 0 1px 2px rgba(20,32,46,.04);
-  --shadow-lg: 0 12px 32px rgba(20,32,46,.12), 0 4px 12px rgba(20,32,46,.06);
+  --bg: #f2f6fb;
+  --bg-elevated: #eaf1f9;
+  --surf: #ffffff;
+  --surf2: #f7faff;
+  --surf3: #edf3fa;
+  --line: #d6e1ee;
+  --line-soft: #e7eef6;
+
+  --tx: #0f1b2d;
+  --tx-dim: #52647c;
+  --tx-mute: #7b8ba0;
+
+  --brand: #2563eb;
+  --brand-strong: #1d4ed8;
+  --brand-soft: rgba(37, 99, 235, .10);
+  --brand-fill: rgba(37, 99, 235, .075);
+  --brand-glow: rgba(37, 99, 235, .14);
+
+  --ok: #087a50;
+  --ok-soft: rgba(8, 122, 80, .10);
+  --warn: #9b710d;
+  --warn-soft: rgba(155, 113, 13, .11);
+  --warn-fill: rgba(155, 113, 13, .08);
+  --high: #c45e16;
+  --high-soft: rgba(196, 94, 22, .10);
+  --crit: #c62f46;
+  --crit-soft: rgba(198, 47, 70, .10);
+  --crit-fill: rgba(198, 47, 70, .075);
+  --info: #087cad;
+  --info-soft: rgba(8, 124, 173, .10);
+  --info-fill: rgba(8, 124, 173, .075);
+  --off: #9aa8b8;
+
+  --shadow: 0 1px 2px rgba(23, 42, 70, .04), 0 8px 26px rgba(23, 42, 70, .055);
+  --shadow-lg: 0 26px 60px rgba(23, 42, 70, .16), 0 8px 24px rgba(23, 42, 70, .08);
+  --shadow-blue: 0 16px 40px rgba(37, 99, 235, .07);
   --band-op: 1;
 }
 
@@ -48,64 +90,174 @@
   box-sizing: border-box;
 }
 
-html, body, #root {
-  height: 100%;
+html,
+body,
+#root {
+  min-height: 100%;
   margin: 0;
 }
 
+html {
+  background: #070b13;
+}
+
 body {
+  min-width: 320px;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--tx);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: var(--line, #2a3444);
+  background: var(--line);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--tx-mute, #374254);
+  background: var(--tx-mute);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
-/* Utilidades Premium */
-.glass-panel {
+/* Superficies compartidas para una consola SOC visualmente consistente. */
+.soc-page {
+  position: relative;
+  isolation: isolate;
+}
+
+.soc-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 84% 6%, var(--brand-soft), transparent 25rem),
+    radial-gradient(circle at 46% 100%, var(--info-fill), transparent 32rem);
+  opacity: .55;
+}
+
+.soc-panel {
   background: var(--surf);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--shadow);
+}
+
+.soc-panel-strong {
+  background: linear-gradient(180deg, var(--surf2), var(--surf));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-blue);
+}
+
+.glass-panel {
+  background: color-mix(in srgb, var(--surf) 92%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.mono-data {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  letter-spacing: -.02em;
+}
+
+.blue-team-grid {
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .25), transparent 82%);
+  opacity: .18;
 }
 
 .transition-premium {
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    background-color .2s cubic-bezier(.16, 1, .3, 1),
+    border-color .2s cubic-bezier(.16, 1, .3, 1),
+    color .2s cubic-bezier(.16, 1, .3, 1),
+    box-shadow .24s cubic-bezier(.16, 1, .3, 1),
+    transform .24s cubic-bezier(.16, 1, .3, 1),
+    opacity .2s ease;
 }
 
 .btn-hover {
-  transition: all 0.2s ease;
-}
-.btn-hover:hover {
-  filter: brightness(1.15);
-}
-.btn-hover:active {
-  filter: brightness(0.9);
+  transition:
+    transform .18s ease,
+    filter .18s ease,
+    box-shadow .18s ease,
+    background-color .18s ease,
+    border-color .18s ease;
 }
 
-/* Entrada de las tarjetas de la capa de alertas flotantes globales
-   (sección "Alertas flotantes globales de alta prioridad",
-   2026-08-17, ver PENDIENTES.md) -- desliza desde la derecha + fade,
-   consistente con transition-premium de arriba pero como keyframe
-   porque son elementos que aparecen (mount), no que cambian de
-   estado (donde alcanza una transition normal). */
+.btn-hover:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.btn-hover:active {
+  filter: brightness(.96);
+  transform: translateY(0);
+}
+
 @keyframes alfaFloatIn {
   from {
     opacity: 0;
-    transform: translateX(24px);
+    transform: translateX(24px) scale(.985);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes alfaSoftPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--brand-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
   }
 }
