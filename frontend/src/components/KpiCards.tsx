@@ -8,16 +8,14 @@ interface KpiCardsProps {
 function Card({
   icon,
   label,
-  labelColor,
   value,
   valueColor,
   sub,
-  accent,
+  accent = "var(--brand)",
   highlighted,
 }: {
   icon: string;
   label: string;
-  labelColor?: string;
   value: React.ReactNode;
   valueColor?: string;
   sub?: React.ReactNode;
@@ -26,47 +24,49 @@ function Card({
 }) {
   return (
     <div
-      className="rounded-xl border p-5 relative overflow-hidden transition-premium hover:-translate-y-1"
+      className="group rounded-[14px] border px-4 py-4 relative overflow-hidden transition-premium hover:-translate-y-[2px]"
       style={{
-        background: "var(--surf)",
-        borderColor: highlighted ? "var(--crit)" : "var(--line-soft)",
-        boxShadow: highlighted ? "0 0 0 3px var(--crit-soft)" : "var(--shadow)",
+        background: highlighted
+          ? "linear-gradient(145deg, var(--crit-fill), var(--surf) 58%)"
+          : "linear-gradient(145deg, var(--surf2), var(--surf) 56%)",
+        borderColor: highlighted ? "color-mix(in srgb, var(--crit) 40%, var(--line))" : "var(--line-soft)",
+        boxShadow: highlighted ? "0 0 0 1px var(--crit-soft), var(--shadow)" : "var(--shadow)",
       }}
     >
-      {accent && (
-        <div className="absolute inset-y-0 left-0 w-[3px]" style={{ background: accent }} />
-      )}
       <div
-        className="flex items-center gap-2 text-[11px] tracking-widest uppercase font-bold"
-        style={{ color: labelColor || "var(--tx-mute)" }}
-      >
-        <i className={icon} style={{ fontSize: "15px" }} />
-        {label}
+        className="absolute inset-x-0 top-0 h-px"
+        style={{ background: `linear-gradient(90deg, ${accent}, transparent 68%)`, opacity: highlighted ? .9 : .55 }}
+      />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] tracking-[.12em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
+            {label}
+          </div>
+          <div
+            className="text-[30px] font-bold leading-none mt-3 tracking-[-.045em]"
+            style={{ color: valueColor || "var(--tx)" }}
+          >
+            {value}
+          </div>
+        </div>
+        <div
+          className="w-9 h-9 rounded-[11px] grid place-items-center shrink-0 border transition-premium group-hover:scale-[1.03]"
+          style={{
+            background: `color-mix(in srgb, ${accent} 10%, var(--surf2))`,
+            borderColor: `color-mix(in srgb, ${accent} 20%, var(--line-soft))`,
+            color: accent,
+          }}
+        >
+          <i className={icon} style={{ fontSize: "16px" }} />
+        </div>
       </div>
-      <div
-        className="text-[38px] font-bold leading-none mt-4 tracking-tighter"
-        style={{ color: valueColor || "var(--tx)" }}
-      >
-        {value}
-      </div>
-      {sub}
-    </div>
-  );
-}
-
-function SubRow({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="flex gap-2.5 mt-4 pt-3 border-t text-[11.5px] font-medium flex-wrap"
-      style={{ borderColor: "var(--line-soft)", color: "var(--tx-dim)" }}
-    >
-      {children}
+      {sub && <div className="mt-3.5 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>{sub}</div>}
     </div>
   );
 }
 
 function Dot({ color }: { color: string }) {
-  return <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />;
+  return <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />;
 }
 
 export default function KpiCards({ summary }: KpiCardsProps) {
@@ -75,26 +75,16 @@ export default function KpiCards({ summary }: KpiCardsProps) {
   const trendUp = trend > 0;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
       <Card
         icon="ph ph-desktop-tower"
-        label="Endpoints"
+        label="Endpoints protegidos"
         value={summary.endpoints_total}
         sub={
-          <SubRow>
-            <span className="flex items-center gap-1.5">
-              <Dot color="var(--ok)" />
-              {summary.endpoints_online} Online
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Dot color="var(--crit)" />
-              {summary.endpoints_isolated} Aislados
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Dot color="var(--off)" />
-              {summary.endpoints_offline} Offline
-            </span>
-          </SubRow>
+          <div className="flex gap-x-3 gap-y-1.5 flex-wrap text-[10.5px] font-medium" style={{ color: "var(--tx-dim)" }}>
+            <span className="flex items-center gap-1.5"><Dot color="var(--ok)" />{summary.endpoints_online} en línea</span>
+            <span className="flex items-center gap-1.5"><Dot color="var(--off)" />{summary.endpoints_offline} fuera de línea</span>
+          </div>
         }
       />
 
@@ -102,15 +92,19 @@ export default function KpiCards({ summary }: KpiCardsProps) {
         icon="ph ph-warning"
         label="Alertas activas"
         value={summary.alerts_active}
-        valueColor="var(--warn)"
+        valueColor={summary.alerts_active > 0 ? "var(--warn)" : undefined}
+        accent={summary.alerts_active > 0 ? "var(--warn)" : "var(--brand)"}
         sub={
-          <SubRow>
-            <span className="flex items-center gap-1" style={{ color: trendIsPlaceholder ? "var(--tx-mute)" : trendUp ? "var(--high)" : "var(--ok)" }}>
-              <i className={trendUp ? "ph-fill ph-trend-up" : "ph-fill ph-trend-down"} style={{ fontSize: "13px" }} />
-              <b>{trendUp ? "+" : ""}{trend}%</b>
+          <div className="flex items-center gap-2 text-[10.5px] font-medium" style={{ color: "var(--tx-dim)" }}>
+            <span
+              className="flex items-center gap-1"
+              style={{ color: trendIsPlaceholder ? "var(--tx-mute)" : trendUp ? "var(--high)" : "var(--ok)" }}
+            >
+              {!trendIsPlaceholder && <i className={trendUp ? "ph-fill ph-trend-up" : "ph-fill ph-trend-down"} style={{ fontSize: "12px" }} />}
+              <b>{trendIsPlaceholder ? "Sin histórico" : `${trendUp ? "+" : ""}${trend}%`}</b>
             </span>
-            {trendIsPlaceholder ? "dato de prueba -- sin 24h previas aún" : "respecto a las 24 h previas"}
-          </SubRow>
+            <span>{trendIsPlaceholder ? "aún no hay 24 h previas" : "vs. período anterior"}</span>
+          </div>
         }
       />
 
@@ -118,23 +112,21 @@ export default function KpiCards({ summary }: KpiCardsProps) {
         icon="ph ph-siren"
         label="Incidentes activos"
         value={summary.incidents_active}
-        valueColor="var(--high)"
-        sub={<div className="text-[11.5px] mt-0.5" style={{ color: "var(--tx-dim)" }}>Incidentes en investigación</div>}
+        valueColor={summary.incidents_active > 0 ? "var(--high)" : undefined}
+        accent={summary.incidents_active > 0 ? "var(--high)" : "var(--brand)"}
+        sub={<div className="text-[10.5px] font-medium" style={{ color: "var(--tx-dim)" }}>Casos actualmente en investigación</div>}
       />
 
       <Card
         icon="ph-fill ph-plugs"
         label="Endpoints aislados"
-        labelColor={summary.endpoints_isolated > 0 ? "var(--crit)" : undefined}
         value={summary.endpoints_isolated}
         valueColor={summary.endpoints_isolated > 0 ? "var(--crit)" : undefined}
         highlighted={summary.endpoints_isolated > 0}
-        accent={summary.endpoints_isolated > 0 ? "var(--crit)" : undefined}
+        accent={summary.endpoints_isolated > 0 ? "var(--crit)" : "var(--brand)"}
         sub={
-          <div className="text-[11.5px] font-medium mt-4 pt-3 border-t" style={{ borderColor: "var(--line-soft)", color: "var(--tx-dim)" }}>
-            {summary.endpoints_isolated === 0
-              ? "Ningún equipo contenido en este momento"
-              : "Actualmente aislados"}
+          <div className="text-[10.5px] font-medium" style={{ color: "var(--tx-dim)" }}>
+            {summary.endpoints_isolated === 0 ? "Sin equipos contenidos" : "Contención activa en la red"}
           </div>
         }
       />
@@ -142,11 +134,10 @@ export default function KpiCards({ summary }: KpiCardsProps) {
       <Card
         icon="ph-fill ph-file-lock"
         label="Honeyfiles activados"
-        labelColor={summary.honeyfiles_activated_today > 0 ? "var(--warn)" : undefined}
         value={summary.honeyfiles_activated_today}
         valueColor={summary.honeyfiles_activated_today > 0 ? "var(--warn)" : undefined}
-        accent={summary.honeyfiles_activated_today > 0 ? "var(--warn)" : undefined}
-        sub={<div className="text-[11.5px] mt-0.5" style={{ color: "var(--tx-dim)" }}>Activados hoy</div>}
+        accent={summary.honeyfiles_activated_today > 0 ? "var(--warn)" : "var(--brand)"}
+        sub={<div className="text-[10.5px] font-medium" style={{ color: "var(--tx-dim)" }}>Activaciones detectadas hoy</div>}
       />
     </div>
   );
