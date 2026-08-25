@@ -1,4 +1,4 @@
-import KpiCards from "../components/KpiCards";
+import SecurityOverviewHero from "../components/SecurityOverviewHero";
 import RiskDonut from "../components/RiskDonut";
 import ActivityChart from "../components/ActivityChart";
 import EndpointsAtRisk from "../components/EndpointsAtRisk";
@@ -17,12 +17,12 @@ interface Props {
 
 function SectionLabel({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
   return (
-    <div className="col-span-12 flex items-end justify-between gap-4 mt-1">
+    <div className="col-span-12 flex items-end justify-between gap-4 mt-2">
       <div>
-        <div className="text-[9.5px] font-bold tracking-[.15em] uppercase" style={{ color: "var(--brand)" }}>
+        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
           {eyebrow}
         </div>
-        <div className="text-[13px] font-semibold mt-1" style={{ color: "var(--tx)" }}>{title}</div>
+        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>{title}</div>
         {description && <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>{description}</div>}
       </div>
     </div>
@@ -31,48 +31,27 @@ function SectionLabel({ eyebrow, title, description }: { eyebrow: string; title:
 
 export default function DashboardPage({ data }: Props) {
   return (
-    <main className="soc-page grid grid-cols-12 gap-3.5 px-[22px] pt-[18px] pb-8 content-start">
-      <div className="col-span-12">
-        <QuickActions />
-      </div>
-
-      <SectionLabel
-        eyebrow="Situación actual"
-        title="Estado de seguridad"
-        description="Indicadores prioritarios de detección, contención y disponibilidad de endpoints."
-      />
-      <div className="col-span-12">
-        <KpiCards summary={data.summary} />
-      </div>
-
-      <SectionLabel
-        eyebrow="Monitoreo"
-        title="Actividad de amenazas"
-        description="Evolución de eventos y distribución actual del riesgo observado por el Sistema ALFA-Sentinel."
-      />
+    <main className="soc-page grid grid-cols-12 gap-4 px-[22px] pt-[18px] pb-8 content-start">
       <div className="col-span-12 xl:col-span-8">
-        <ActivityChart />
+        <SecurityOverviewHero data={data} />
       </div>
       <div className="col-span-12 xl:col-span-4">
         <RiskDonut data={data.risk_distribution} total={data.summary.endpoints_total} />
       </div>
 
-      <SectionLabel
-        eyebrow="Atención prioritaria"
-        title="Elementos que requieren revisión"
-        description="Endpoints con mayor riesgo, actividad de archivos señuelo y alertas recientes."
-      />
-      <div className="col-span-12 xl:col-span-7">
-        <EndpointsAtRisk endpoints={data.endpoints_at_risk} />
-      </div>
-      <div className="col-span-12 xl:col-span-5">
-        <HoneyfileActivityPanel data={data.honeyfile_activity} />
+      <div className="col-span-12">
+        <QuickActions />
       </div>
 
+      <SectionLabel
+        eyebrow="Monitoreo continuo"
+        title="Telemetría y disponibilidad"
+        description="Comportamiento de las señales de seguridad y estado operativo de los endpoints y servicios centrales."
+      />
       <div className="col-span-12 xl:col-span-8">
-        <RecentAlertsTable alerts={data.recent_alerts} />
+        <ActivityChart />
       </div>
-      <div className="col-span-12 xl:col-span-4 flex flex-col gap-3.5">
+      <div className="col-span-12 xl:col-span-4 flex flex-col gap-4">
         <div className="flex-1 flex flex-col">
           <EndpointStatusPanel status={data.endpoint_status} />
         </div>
@@ -82,8 +61,25 @@ export default function DashboardPage({ data }: Props) {
       </div>
 
       <SectionLabel
+        eyebrow="Atención prioritaria"
+        title="Elementos que requieren revisión"
+        description="Endpoints con riesgo, activaciones de archivos señuelo y detecciones que necesitan contexto operacional."
+      />
+      <div className="col-span-12 xl:col-span-7">
+        <EndpointsAtRisk endpoints={data.endpoints_at_risk} />
+      </div>
+      <div className="col-span-12 xl:col-span-5">
+        <HoneyfileActivityPanel data={data.honeyfile_activity} />
+      </div>
+
+      <div className="col-span-12">
+        <RecentAlertsTable alerts={data.recent_alerts} />
+      </div>
+
+      <SectionLabel
         eyebrow="Contexto operativo"
-        title="Tendencias y actividad reciente"
+        title="Patrones de detección y actividad reciente"
+        description="Señales dominantes y secuencia temporal de eventos observados por el Sistema ALFA-Sentinel."
       />
       <div className="col-span-12 xl:col-span-7">
         <TopDetections data={data.top_detections} />
@@ -92,7 +88,8 @@ export default function DashboardPage({ data }: Props) {
         <RecentActivityTimeline items={data.recent_activity} />
       </div>
 
-      <div className="col-span-12 flex justify-end text-[9.5px] pt-2" style={{ color: "var(--tx-mute)" }}>
+      <div className="col-span-12 flex items-center justify-end gap-2 text-[9.5px] pt-2" style={{ color: "var(--tx-mute)" }}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)" }} />
         Última actualización: {data.generated_at} · actualización automática cada 20 s
       </div>
     </main>
