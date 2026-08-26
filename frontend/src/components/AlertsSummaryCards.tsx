@@ -21,31 +21,16 @@ function Metric({
   const soft = tone === "brand" ? "var(--brand-soft)" : `var(--${tone}-soft)`;
 
   return (
-    <div
-      className="rounded-2xl border px-4 py-3.5 relative overflow-hidden transition-premium hover:-translate-y-[1px]"
-      style={{ background: "var(--surf2)", borderColor: "var(--line-soft)" }}
-    >
-      <div
-        className="absolute inset-x-0 top-0 h-px"
-        style={{ background: `linear-gradient(90deg, ${color}, transparent 72%)`, opacity: .65 }}
-      />
+    <div className="rounded-2xl border px-4 py-3.5 relative overflow-hidden transition-premium hover:-translate-y-[1px]" style={{ background: "var(--surf2)", borderColor: "var(--line-soft)" }}>
+      <div className="absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, ${color}, transparent 72%)`, opacity: .65 }} />
       <div className="flex items-start gap-3">
-        <div
-          className="w-8 h-8 rounded-xl grid place-items-center shrink-0"
-          style={{ background: soft, color }}
-        >
+        <div className="w-8 h-8 rounded-xl grid place-items-center shrink-0" style={{ background: soft, color }}>
           <i className={icon} style={{ fontSize: "15px" }} />
         </div>
         <div className="min-w-0">
-          <div className="text-[9px] font-bold tracking-[.13em] uppercase" style={{ color: "var(--tx-mute)" }}>
-            {label}
-          </div>
-          <div className="text-[24px] font-bold leading-none mt-2 tabular-nums tracking-[-.04em]" style={{ color }}>
-            {value}
-          </div>
-          <div className="text-[9.5px] mt-2 leading-relaxed" style={{ color: "var(--tx-mute)" }}>
-            {detail}
-          </div>
+          <div className="text-[9px] font-bold tracking-[.13em] uppercase" style={{ color: "var(--tx-mute)" }}>{label}</div>
+          <div className="text-[24px] font-bold leading-none mt-2 tabular-nums tracking-[-.04em]" style={{ color }}>{value}</div>
+          <div className="text-[9.5px] mt-2 leading-relaxed" style={{ color: "var(--tx-mute)" }}>{detail}</div>
         </div>
       </div>
     </div>
@@ -72,20 +57,11 @@ export default function AlertsSummaryCards({ summary }: Props) {
       <div className="relative z-[1] flex flex-col xl:flex-row xl:items-center gap-5">
         <div className="xl:w-[31%] xl:pr-5 xl:border-r" style={{ borderColor: "var(--line-soft)" }}>
           <div className="flex items-center gap-2.5">
-            <span
-              className="w-9 h-9 rounded-xl grid place-items-center border"
-              style={{
-                color: needsAttention ? "var(--crit)" : "var(--brand)",
-                background: needsAttention ? "var(--crit-soft)" : "var(--brand-soft)",
-                borderColor: needsAttention ? "var(--crit-soft)" : "var(--brand-soft)",
-              }}
-            >
+            <span className="w-9 h-9 rounded-xl grid place-items-center border" style={{ color: needsAttention ? "var(--crit)" : "var(--brand)", background: needsAttention ? "var(--crit-soft)" : "var(--brand-soft)", borderColor: needsAttention ? "var(--crit-soft)" : "var(--brand-soft)" }}>
               <i className={needsAttention ? "ph-fill ph-warning-octagon" : "ph-fill ph-shield-check"} style={{ fontSize: "17px" }} />
             </span>
             <div>
-              <div className="text-[9px] font-bold tracking-[.17em] uppercase" style={{ color: "var(--brand)" }}>
-                Cola de detecciones
-              </div>
+              <div className="text-[9px] font-bold tracking-[.17em] uppercase" style={{ color: "var(--brand)" }}>Cola de detecciones</div>
               <div className="text-[15px] font-semibold mt-0.5" style={{ color: "var(--tx)" }}>
                 {summary.critical > 0
                   ? `${summary.critical} alerta${summary.critical === 1 ? "" : "s"} crítica${summary.critical === 1 ? "" : "s"}`
@@ -98,10 +74,10 @@ export default function AlertsSummaryCards({ summary }: Props) {
 
           <p className="text-[11px] leading-relaxed mt-3 mb-0 max-w-[390px]" style={{ color: "var(--tx-dim)" }}>
             {summary.critical > 0
-              ? "Existen detecciones de criticidad alta que deben revisarse antes de continuar con el flujo normal de análisis."
+              ? "Existen detecciones críticas que deben revisarse antes de continuar con el flujo normal de análisis."
               : summary.active > 0
                 ? "La cola operativa contiene detecciones pendientes de revisión, investigación o escalamiento."
-                : "No hay detecciones abiertas que requieran intervención inmediata del equipo Blue Team."}
+                : "No hay detecciones abiertas que requieran intervención inmediata del personal responsable."}
           </p>
 
           <div className="grid grid-cols-2 gap-2 mt-4">
@@ -127,7 +103,7 @@ export default function AlertsSummaryCards({ summary }: Props) {
       <div className="relative z-[1] mt-4 pt-3 border-t flex items-center gap-3 text-[9.5px]" style={{ borderColor: "var(--line-soft)", color: "var(--tx-mute)" }}>
         <span className="flex items-center gap-1.5"><i className="ph ph-database" /> {summary.total} alertas registradas</span>
         <span className="w-1 h-1 rounded-full" style={{ background: "var(--line)" }} />
-        <span>Vista operativa prioriza eventos que aún requieren acción.</span>
+        <span>La vista operativa prioriza eventos que todavía requieren acción.</span>
       </div>
     </section>
   );
