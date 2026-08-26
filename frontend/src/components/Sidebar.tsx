@@ -80,7 +80,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
           <div className="min-w-0">
             <div className="text-[14px] font-bold tracking-[.02em] text-[#f4f7fb]">ALFA-Sentinel</div>
             <div className="text-[10px] leading-[1.35] mt-1 text-[#6f819a]">
-              Consola central · Blue Team
+              Consola central de seguridad
             </div>
           </div>
         </div>
