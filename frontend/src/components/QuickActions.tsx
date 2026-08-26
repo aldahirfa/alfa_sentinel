@@ -1,11 +1,18 @@
-const ACTIONS = [
-  { label: "Alertas críticas", icon: "ph ph-warning-octagon", href: "/alertas", tone: "critical" as const },
-  { label: "Incidentes activos", icon: "ph ph-siren", href: "/incidentes", tone: "brand" as const },
-  { label: "Endpoints aislados", icon: "ph ph-plugs", href: "/endpoints", tone: "neutral" as const },
-  { label: "Desplegar honeyfile", icon: "ph ph-file-plus", href: "/honeyfiles", tone: "neutral" as const },
+import type { Page } from "./ModuleMark";
+
+const ACTIONS: { label: string; icon: string; page: Page; tone: "critical" | "brand" | "neutral" }[] = [
+  { label: "Alertas críticas", icon: "ph ph-warning-octagon", page: "alerts", tone: "critical" },
+  { label: "Incidentes activos", icon: "ph ph-siren", page: "incidentes", tone: "brand" },
+  { label: "Endpoints aislados", icon: "ph ph-plugs", page: "endpoints", tone: "neutral" },
+  { label: "Desplegar honeyfile", icon: "ph ph-file-plus", page: "honeyfiles", tone: "neutral" },
 ];
 
-export default function QuickActions() {
+interface Props {
+  onNavigate: (page: Page) => void;
+  onPrefetch: (page: Page) => void;
+}
+
+export default function QuickActions({ onNavigate, onPrefetch }: Props) {
   return (
     <div
       className="soc-panel rounded-2xl px-4 py-3 flex items-center justify-between gap-4 flex-wrap"
@@ -26,14 +33,17 @@ export default function QuickActions() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {ACTIONS.map(({ label, icon, href, tone }) => {
+        {ACTIONS.map(({ label, icon, page, tone }) => {
           const critical = tone === "critical";
           const brand = tone === "brand";
           return (
-            <a
+            <button
               key={label}
-              href={href}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl no-underline text-[10px] font-semibold transition-premium btn-hover border"
+              type="button"
+              onMouseEnter={() => onPrefetch(page)}
+              onFocus={() => onPrefetch(page)}
+              onClick={() => onNavigate(page)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-semibold transition-premium btn-hover border cursor-pointer"
               style={
                 critical
                   ? { borderColor: "var(--crit-soft)", background: "var(--crit-fill)", color: "var(--crit)" }
@@ -45,7 +55,7 @@ export default function QuickActions() {
               <i className={icon} style={{ fontSize: "13px" }} />
               {label}
               <i className="ph ph-arrow-up-right" style={{ fontSize: "10px", opacity: .65 }} />
-            </a>
+            </button>
           );
         })}
       </div>
