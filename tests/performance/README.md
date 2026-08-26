@@ -1,6 +1,6 @@
 # Prueba de rendimiento de navegación
 
-Esta prueba mide las APIs que utiliza la consola React al entrar a cada módulo. No crea, modifica ni elimina datos: después del inicio de sesión solo ejecuta peticiones `GET`.
+Esta prueba mide las APIs que utiliza la consola React al entrar a cada módulo. Después del inicio de sesión solo ejecuta peticiones `GET`; el propio login sí actualiza `last_login_at`, igual que un inicio de sesión normal en la consola.
 
 ## 1. Preparación
 
