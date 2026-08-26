@@ -72,7 +72,7 @@ export default function SecurityOverviewHero({ data }: Props) {
       ? "Actividad bajo supervisión"
       : "Entorno estable y monitoreado";
   const description = hasImmediateRisk
-    ? "Existen eventos que requieren revisión o contención por parte del Blue Team."
+    ? "Existen eventos que requieren revisión, investigación o contención por parte del personal responsable."
     : hasOpenWork
       ? "El sistema mantiene detecciones activas que deben permanecer bajo seguimiento operacional."
       : "No se observan incidentes activos ni endpoints contenidos en este momento.";
@@ -116,7 +116,7 @@ export default function SecurityOverviewHero({ data }: Props) {
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
-                  Blue Team · Estado actual
+                  Sistema ALFA-Sentinel · Estado actual
                 </div>
                 <h2 className="m-0 mt-2 text-[26px] leading-[1.08] font-bold tracking-[-.035em]" style={{ color: "var(--tx)" }}>
                   {headline}
