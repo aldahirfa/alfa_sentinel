@@ -24,9 +24,7 @@ export default function RulesPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   function handleRuleChanged(updated: HeuristicRule) {
@@ -46,24 +44,39 @@ export default function RulesPage() {
   }
 
   return (
-    <main className="flex flex-col gap-3.5 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <RulesSummaryCards summary={data.summary} />}
 
+      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
+        <div>
+          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Lógica de detección</div>
+          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Reglas y parámetros del motor heurístico</div>
+          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+            Consulta qué comportamiento evalúa cada regla, su umbral, ventana temporal, peso y actividad reciente.
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
+          Política de detección sincronizada
+        </div>
+      </div>
+
       {error ? (
-        <div
-          className="rounded-[10px] border p-8 text-center text-sm"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", color: "var(--crit)" }}
-        >
-          {error}
+        <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
+          <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--crit-soft)" }}>
+            <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
+          </div>
+          <div className="text-[12px] font-semibold">No se pudo cargar el motor heurístico</div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : loading ? (
-        <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-[130px] rounded-[10px] animate-pulse" style={{ background: "var(--surf2)" }} />
+            <div key={i} className="h-[250px] rounded-2xl animate-pulse" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }} />
           ))}
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
           {(data?.rules ?? []).map((rule) => (
             <RuleCard key={rule.id} rule={rule} onChanged={handleRuleChanged} />
           ))}
