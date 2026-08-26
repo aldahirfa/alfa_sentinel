@@ -26,13 +26,11 @@ export default function EndpointsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const flashId = useRowFlash(selectedId);
 
-  // Debounce del buscador -- no dispara un pedido por cada tecla.
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput), DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [searchInput]);
 
-  // Cualquier cambio de filtro vuelve a la página 1.
   useEffect(() => {
     setPage(1);
   }, [search, status, risk, osFamily]);
@@ -61,8 +59,22 @@ export default function EndpointsPage() {
   const hasFilters = Boolean(search || status || risk || osFamily);
 
   return (
-    <main className="flex flex-col gap-3.5 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <EndpointsSummaryCards summary={data.summary} />}
+
+      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
+        <div>
+          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Superficie de protección</div>
+          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Inventario y estado de los agentes</div>
+          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+            Consulta conectividad, riesgo, salud del agente, actividad y alertas asociadas a cada equipo monitoreado.
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
+          Inventario sincronizado
+        </div>
+      </div>
 
       <EndpointsFilters
         search={searchInput}
@@ -77,11 +89,12 @@ export default function EndpointsPage() {
       />
 
       {error ? (
-        <div
-          className="rounded-[10px] border p-8 text-center text-sm"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", color: "var(--crit)" }}
-        >
-          {error}
+        <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
+          <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--crit-soft)" }}>
+            <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
+          </div>
+          <div className="text-[12px] font-semibold">No se pudo cargar el inventario de endpoints</div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
         <>
