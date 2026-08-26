@@ -14,17 +14,14 @@
   --surf3: #17243a;
   --line: #223149;
   --line-soft: #18253a;
-
   --tx: #f2f6fc;
   --tx-dim: #9eacc0;
   --tx-mute: #6d7d94;
-
   --brand: #4d8dff;
   --brand-strong: #2f76f6;
   --brand-soft: rgba(77, 141, 255, .14);
   --brand-fill: rgba(77, 141, 255, .10);
   --brand-glow: rgba(77, 141, 255, .22);
-
   --ok: #36d399;
   --ok-soft: rgba(54, 211, 153, .13);
   --warn: #f1c75b;
@@ -39,7 +36,6 @@
   --info-soft: rgba(56, 189, 248, .13);
   --info-fill: rgba(56, 189, 248, .09);
   --off: #58677d;
-
   --shadow: 0 1px 2px rgba(0, 0, 0, .24), 0 8px 28px rgba(0, 0, 0, .12);
   --shadow-lg: 0 24px 70px rgba(0, 0, 0, .48), 0 8px 24px rgba(0, 0, 0, .30);
   --shadow-blue: 0 16px 42px rgba(25, 87, 194, .12);
@@ -54,17 +50,14 @@
   --surf3: #edf3fa;
   --line: #d6e1ee;
   --line-soft: #e7eef6;
-
   --tx: #0f1b2d;
   --tx-dim: #52647c;
   --tx-mute: #7b8ba0;
-
   --brand: #2563eb;
   --brand-strong: #1d4ed8;
   --brand-soft: rgba(37, 99, 235, .10);
   --brand-fill: rgba(37, 99, 235, .075);
   --brand-glow: rgba(37, 99, 235, .14);
-
   --ok: #087a50;
   --ok-soft: rgba(8, 122, 80, .10);
   --warn: #9b710d;
@@ -79,16 +72,13 @@
   --info-soft: rgba(8, 124, 173, .10);
   --info-fill: rgba(8, 124, 173, .075);
   --off: #9aa8b8;
-
   --shadow: 0 1px 2px rgba(23, 42, 70, .04), 0 8px 26px rgba(23, 42, 70, .055);
   --shadow-lg: 0 26px 60px rgba(23, 42, 70, .16), 0 8px 24px rgba(23, 42, 70, .08);
   --shadow-blue: 0 16px 40px rgba(37, 99, 235, .07);
   --band-op: 1;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 html,
 body,
@@ -97,9 +87,7 @@ body,
   margin: 0;
 }
 
-html {
-  background: #070b13;
-}
+html { background: #070b13; }
 
 body {
   min-width: 320px;
@@ -111,14 +99,10 @@ body {
 button,
 input,
 select,
-textarea {
-  font: inherit;
-}
+textarea { font: inherit; }
 
 button,
-a {
-  -webkit-tap-highlight-color: transparent;
-}
+a { -webkit-tap-highlight-color: transparent; }
 
 ::selection {
   background: var(--brand-soft);
@@ -135,9 +119,7 @@ a {
   height: 9px;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar-track { background: transparent; }
 
 ::-webkit-scrollbar-thumb {
   background: var(--line);
@@ -152,11 +134,6 @@ a {
   background-clip: padding-box;
 }
 
-/*
-  Fondo compartido de las páginas de la consola.
-  No crea un stacking context: los drawers y modales fixed pueden
-  superponerse correctamente al Topbar y al resto de la aplicación.
-*/
 .soc-page {
   position: relative;
   background:
@@ -174,6 +151,43 @@ a {
   background: linear-gradient(180deg, var(--surf2), var(--surf));
   border: 1px solid var(--line);
   box-shadow: var(--shadow-blue);
+}
+
+/* Patrón común para todas las páginas operativas de la consola. */
+.module-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.module-intro {
+  min-height: 66px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.module-subsection {
+  padding-bottom: 5px;
+}
+
+.module-page > .soc-panel,
+.module-page > .soc-panel-strong {
+  border-radius: 18px;
+}
+
+.module-page input,
+.module-page select,
+.module-page textarea {
+  color-scheme: inherit;
+}
+
+.module-page select option {
+  background: var(--surf);
+  color: var(--tx);
+}
+
+.module-page table,
+.module-page [class*="tabular-nums"] {
+  font-variant-numeric: tabular-nums;
 }
 
 .glass-panel {
@@ -226,22 +240,19 @@ a {
 }
 
 @keyframes alfaFloatIn {
-  from {
-    opacity: 0;
-    transform: translateX(24px) scale(.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
+  from { opacity: 0; transform: translateX(24px) scale(.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
 }
 
 @keyframes alfaSoftPulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 var(--brand-glow);
-  }
-  50% {
-    box-shadow: 0 0 0 5px transparent;
+  0%, 100% { box-shadow: 0 0 0 0 var(--brand-glow); }
+  50% { box-shadow: 0 0 0 5px transparent; }
+}
+
+@media (max-width: 720px) {
+  .module-intro {
+    min-height: 0;
+    padding-bottom: 12px;
   }
 }
 
