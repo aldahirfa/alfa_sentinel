@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import IncidentesSummaryCards from "../components/IncidentesSummaryCards";
 import IncidentesFilters from "../components/IncidentesFilters";
 import IncidentesTable from "../components/IncidentesTable";
@@ -74,16 +75,15 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const hasFilters = Boolean(search || status || severity || since || rule);
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
-      {data && <IncidentesSummaryCards summary={data.summary} />}
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="incidentes"
+        eyebrow="Investigación y respuesta"
+        title="Gestión centralizada de casos"
+        description="Prioriza incidentes, asigna responsables y ejecuta acciones de contención sobre los endpoints afectados."
+      />
 
-      <div className="px-1 pt-1">
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Investigación y respuesta</div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Gestión centralizada de casos</div>
-        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-          Prioriza incidentes, asigna responsables y ejecuta acciones de contención sobre los endpoints afectados.
-        </div>
-      </div>
+      {data && <IncidentesSummaryCards summary={data.summary} />}
 
       <IncidentesFilters
         search={searchInput}
@@ -112,34 +112,12 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
         </div>
       ) : (
         <>
-          <IncidentesTable
-            items={data?.items ?? []}
-            loading={loading}
-            hasFilters={hasFilters}
-            onSelect={(item: CombinedItem) => setSelected({ kind: item.kind, id: item.id })}
-            onIsolated={load}
-            selectedKey={selectedKey}
-            flashKey={flashKey}
-          />
-          {data && (
-            <IncidentesPagination
-              page={data.page}
-              pageSize={data.page_size}
-              totalPages={data.total_pages}
-              filteredTotal={data.filtered_total}
-              onPageChange={setPage}
-            />
-          )}
+          <IncidentesTable items={data?.items ?? []} loading={loading} hasFilters={hasFilters} onSelect={(item: CombinedItem) => setSelected({ kind: item.kind, id: item.id })} onIsolated={load} selectedKey={selectedKey} flashKey={flashKey} />
+          {data && <IncidentesPagination page={data.page} pageSize={data.page_size} totalPages={data.total_pages} filteredTotal={data.filtered_total} onPageChange={setPage} />}
         </>
       )}
 
-      <IncidentDrawer
-        selected={selected}
-        assignableUsers={data?.filters.assignable_users ?? []}
-        onClose={() => setSelected(null)}
-        onChanged={load}
-        onViewAlert={onViewAlert}
-      />
+      <IncidentDrawer selected={selected} assignableUsers={data?.filters.assignable_users ?? []} onClose={() => setSelected(null)} onChanged={load} onViewAlert={onViewAlert} />
     </main>
   );
 }
