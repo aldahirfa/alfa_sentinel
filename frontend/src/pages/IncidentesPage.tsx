@@ -13,13 +13,7 @@ import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
 const DEBOUNCE_MS = 300;
 
 interface Props {
-  // Selección de incidente a abrir de entrada (viene de "Ver
-  // incidente" en AlertDrawer). Mismo patrón que
-  // AlertsPage::initialAlertSelection -- objeto nuevo en cada click
-  // para poder reabrir el mismo incidente dos veces seguidas.
   initialSelection?: { kind: ItemKind; id: number } | null;
-  // Navega a Alertas y abre la alerta indicada -- usado por
-  // IncidentDrawer en "Ver alerta original" (Alerta de origen).
   onViewAlert: (id: number) => void;
 }
 
@@ -30,8 +24,6 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const [severity, setSeverity] = useState<Severity | "">("");
   const [since, setSince] = useState<"24h" | "7d" | "30d" | "">("");
   const [rule, setRule] = useState("");
-  // Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
-  // problema G) -- mismo criterio que AlertsPage.tsx.
   const [view, setView] = useState<"activas" | "todos">("activas");
   const [page, setPage] = useState(1);
 
@@ -39,13 +31,8 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ kind: ItemKind; id: number } | null>(null);
-  // Clave combinada "kind:id" para comparar contra las filas de la
-  // tabla -- ver lib/rowSelection.ts / hooks/useRowFlash.ts.
   const selectedKey = selected ? `${selected.kind}:${selected.id}` : null;
   const flashKey = useRowFlash(selectedKey);
-  // Mismo criterio que AlertsPage.tsx -- reacciona a la señal del
-  // proveedor global (2026-08-17, ver PENDIENTES.md, sección 19), no
-  // arranca un poll propio.
   const { refreshToken } = useGlobalAlertsContext();
 
   useEffect(() => {
@@ -90,8 +77,26 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const hasFilters = Boolean(search || status || severity || since || rule);
 
   return (
-    <main className="flex flex-col gap-3.5 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <IncidentesSummaryCards summary={data.summary} />}
+
+      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
+        <div>
+          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
+            Investigación y respuesta
+          </div>
+          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>
+            Gestión centralizada de casos
+          </div>
+          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+            Prioriza incidentes, asigna responsables y ejecuta acciones de contención sobre los endpoints afectados.
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
+          Sincronización operacional activa
+        </div>
+      </div>
 
       <IncidentesFilters
         search={searchInput}
@@ -111,11 +116,12 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
       />
 
       {error ? (
-        <div
-          className="rounded-[10px] border p-8 text-center text-sm"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", color: "var(--crit)" }}
-        >
-          {error}
+        <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
+          <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--crit-soft)" }}>
+            <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
+          </div>
+          <div className="text-[12px] font-semibold">No se pudo cargar el centro de incidentes</div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
         <>
