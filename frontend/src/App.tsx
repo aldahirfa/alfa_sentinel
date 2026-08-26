@@ -76,8 +76,7 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [alertsInitialSelection, setAlertsInitialSelection] = useState<{ id: number } | null>(getInitialAlertsSelection);
-  const [incidentesInitialSelection, setIncidentesInitialSelection] =
-    useState<{ kind: ItemKind; id: number } | null>(getInitialIncidentesSelection);
+  const [incidentesInitialSelection, setIncidentesInitialSelection] = useState<{ kind: ItemKind; id: number } | null>(getInitialIncidentesSelection);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -211,6 +210,7 @@ export default function App() {
 
         <div className="flex-1 min-w-0 flex flex-col relative overflow-x-hidden">
           <Topbar
+            page={page}
             title={meta.title}
             subtitle={meta.subtitle}
             systemOk={data.system_status.db_ok && data.system_status.api_ok}
