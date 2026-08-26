@@ -26,7 +26,6 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const [rule, setRule] = useState("");
   const [view, setView] = useState<"activas" | "todos">("activas");
   const [page, setPage] = useState(1);
-
   const [data, setData] = useState<IncidentesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +63,7 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }
 
   useEffect(() => {
@@ -80,21 +77,11 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
     <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <IncidentesSummaryCards summary={data.summary} />}
 
-      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
-        <div>
-          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
-            Investigación y respuesta
-          </div>
-          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>
-            Gestión centralizada de casos
-          </div>
-          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-            Prioriza incidentes, asigna responsables y ejecuta acciones de contención sobre los endpoints afectados.
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
-          Sincronización operacional activa
+      <div className="px-1 pt-1">
+        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Investigación y respuesta</div>
+        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Gestión centralizada de casos</div>
+        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+          Prioriza incidentes, asigna responsables y ejecuta acciones de contención sobre los endpoints afectados.
         </div>
       </div>
 
