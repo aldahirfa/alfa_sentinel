@@ -1,7 +1,6 @@
 import NotificationsBell from "./NotificationsBell";
 import UserMenu from "./UserMenu";
-import { ModuleMark } from "./Sidebar";
-import type { Page } from "./Sidebar";
+import { ModuleMark, type Page } from "./ModuleMark";
 import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
 
 interface TopbarProps {
