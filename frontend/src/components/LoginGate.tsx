@@ -45,10 +45,23 @@ export default function LoginGate({ onSuccess }: Props) {
         className="hidden lg:flex flex-[1.08] relative flex-col justify-between px-14 xl:px-20 py-12 overflow-hidden text-[#f2f6fc] border-r border-[#17243a]"
         style={{ background: "linear-gradient(145deg, #070b13 0%, #0b1424 48%, #0d1b31 100%)" }}
       >
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 24% 18%, rgba(77,141,255,.16), transparent 32rem), radial-gradient(circle at 86% 78%, rgba(56,189,248,.08), transparent 28rem)" }} />
-        <div className="absolute inset-0 opacity-[.18] pointer-events-none" style={{ backgroundImage: "linear-gradient(#223149 1px, transparent 1px), linear-gradient(90deg, #223149 1px, transparent 1px)", backgroundSize: "42px 42px", maskImage: "linear-gradient(to bottom, rgba(0,0,0,.5), transparent 90%)" }} />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(circle at 24% 18%, rgba(77,141,255,.16), transparent 32rem), radial-gradient(circle at 86% 78%, rgba(56,189,248,.07), transparent 28rem)",
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-[.16] pointer-events-none"
+          style={{
+            backgroundImage: "linear-gradient(#223149 1px, transparent 1px), linear-gradient(90deg, #223149 1px, transparent 1px)",
+            backgroundSize: "42px 42px",
+            maskImage: "linear-gradient(to bottom, rgba(0,0,0,.5), transparent 90%)",
+          }}
+        />
 
-        <svg className="absolute inset-0 opacity-[.34] w-full h-full pointer-events-none" viewBox="0 0 500 700" preserveAspectRatio="xMidYMid slice">
+        <svg className="absolute inset-0 opacity-[.28] w-full h-full pointer-events-none" viewBox="0 0 500 700" preserveAspectRatio="xMidYMid slice">
           <g stroke="#29405f" strokeWidth="1">
             {NETWORK_LINES.map(([x1, y1, x2, y2], i) => <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />)}
           </g>
@@ -58,7 +71,10 @@ export default function LoginGate({ onSuccess }: Props) {
         </svg>
 
         <div className="relative z-10 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl border grid place-items-center" style={{ background: "rgba(77,141,255,.09)", borderColor: "rgba(77,141,255,.22)" }}>
+          <div
+            className="w-10 h-10 rounded-xl border grid place-items-center"
+            style={{ background: "rgba(77,141,255,.09)", borderColor: "rgba(77,141,255,.22)" }}
+          >
             <img src="/static/logo-icon.png" alt="Sistema ALFA-Sentinel" className="w-[27px] h-auto" />
           </div>
           <div>
@@ -67,55 +83,41 @@ export default function LoginGate({ onSuccess }: Props) {
           </div>
         </div>
 
-        <div className="relative z-10 max-w-[570px]">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-[9px] font-bold tracking-[.13em] uppercase" style={{ background: "rgba(77,141,255,.08)", borderColor: "rgba(77,141,255,.18)", color: "#72a7ff" }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-[#36d399]" />
-            Monitoreo y respuesta centralizada
-          </div>
-
-          <div className="mt-7 flex items-center gap-6">
-            <div className="relative w-[150px] h-[150px] shrink-0 hidden xl:flex items-center justify-center">
+        <div className="relative z-10 max-w-[620px]">
+          <div className="flex items-center gap-7">
+            <div className="relative w-[164px] h-[164px] shrink-0 hidden xl:flex items-center justify-center">
               <div className="absolute inset-0 rounded-full border border-[#29405f]" />
-              <div className="absolute inset-[15%] rounded-full border border-[#223755]" />
-              <div className="absolute inset-[31%] rounded-full border border-[#1c304c]" />
-              <div className="absolute w-px h-full bg-gradient-to-b from-transparent via-[#4d8dff]/40 to-transparent rotate-[38deg]" />
-              <div className="absolute h-px w-full bg-gradient-to-r from-transparent via-[#38bdf8]/30 to-transparent -rotate-[24deg]" />
-              <div className="relative w-[68px] h-[68px] rounded-[19px] border grid place-items-center" style={{ background: "linear-gradient(145deg, #12213a, #0b1424)", borderColor: "rgba(77,141,255,.32)", boxShadow: "0 18px 46px rgba(0,0,0,.4), 0 0 35px rgba(77,141,255,.09)" }}>
-                <img src="/static/logo-icon.png" alt="" className="w-[46px] h-auto" />
+              <div className="absolute inset-[16%] rounded-full border border-[#223755]" />
+              <div className="absolute inset-[32%] rounded-full border border-[#1c304c]" />
+              <div className="absolute w-px h-full bg-gradient-to-b from-transparent via-[#4d8dff]/35 to-transparent rotate-[38deg]" />
+              <div className="absolute h-px w-full bg-gradient-to-r from-transparent via-[#38bdf8]/25 to-transparent -rotate-[24deg]" />
+              <div
+                className="relative w-[72px] h-[72px] rounded-[20px] border grid place-items-center"
+                style={{
+                  background: "linear-gradient(145deg, #12213a, #0b1424)",
+                  borderColor: "rgba(77,141,255,.32)",
+                  boxShadow: "0 18px 46px rgba(0,0,0,.4), 0 0 35px rgba(77,141,255,.08)",
+                }}
+              >
+                <img src="/static/logo-icon.png" alt="" className="w-[48px] h-auto" />
               </div>
             </div>
 
             <div>
-              <div className="text-[11px] font-semibold text-[#8ca2bf]">Sistema ALFA-Sentinel</div>
-              <h1 className="m-0 mt-2 text-[32px] xl:text-[38px] leading-[1.06] font-bold tracking-[-.045em] text-[#f5f8fd]">
-                Detección temprana y supervisión de seguridad
+              <div className="text-[11px] font-semibold text-[#7f95b2]">Sistema ALFA-Sentinel</div>
+              <h1 className="m-0 mt-2 text-[34px] xl:text-[40px] leading-[1.04] font-bold tracking-[-.045em] text-[#f5f8fd]">
+                Detección temprana de ransomware
               </h1>
               <p className="m-0 mt-4 max-w-[520px] text-[12px] xl:text-[13px] leading-[1.75] text-[#8fa0b7]">
-                Centraliza el monitoreo de endpoints, el análisis heurístico, los archivos señuelo y las acciones de respuesta ante actividad potencialmente maliciosa.
+                Supervisión centralizada de endpoints mediante archivos señuelo y análisis heurístico de procesos, con gestión de alertas, incidentes y acciones de respuesta.
               </p>
             </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3 mt-8 max-w-[520px]">
-            {[
-              ["ph ph-radar", "Detección", "Monitoreo continuo"],
-              ["ph ph-file-lock", "Engaño", "Archivos señuelo"],
-              ["ph ph-shield-check", "Respuesta", "Contención centralizada"],
-            ].map(([icon, title, detail]) => (
-              <div key={title} className="rounded-xl border p-3.5" style={{ background: "rgba(13,21,35,.72)", borderColor: "#18283f" }}>
-                <i className={icon} style={{ fontSize: "16px", color: "#4d8dff" }} />
-                <div className="text-[10px] font-semibold mt-2 text-[#d7e0ec]">{title}</div>
-                <div className="text-[8.5px] mt-1 text-[#647790]">{detail}</div>
-              </div>
-            ))}
           </div>
         </div>
 
         <div className="relative z-10 flex items-center justify-between gap-4 text-[9px] text-[#53677f]">
           <span>AGETIC · Estado Plurinacional de Bolivia</span>
-          <div className="flex items-center gap-2 font-semibold tracking-[.13em] uppercase">
-            <span>Detección</span><span className="w-1 h-1 rounded-full bg-[#29405f]" /><span>Monitoreo</span><span className="w-1 h-1 rounded-full bg-[#29405f]" /><span>Respuesta</span>
-          </div>
+          <span className="font-semibold tracking-[.12em] uppercase">Sistema ALFA-Sentinel</span>
         </div>
       </section>
 
@@ -123,7 +125,10 @@ export default function LoginGate({ onSuccess }: Props) {
         <div className="absolute -top-32 -right-32 w-[420px] h-[420px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, rgba(37,99,235,.10), transparent 68%)" }} />
         <div className="absolute -bottom-40 -left-40 w-[430px] h-[430px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, rgba(8,124,173,.06), transparent 68%)" }} />
 
-        <div className="relative w-full max-w-[420px] rounded-[24px] border bg-white px-7 sm:px-10 py-9 sm:py-10" style={{ borderColor: "#dfe8f3", boxShadow: "0 34px 76px -30px rgba(23,42,70,.28), 0 10px 28px rgba(23,42,70,.06)" }}>
+        <div
+          className="relative w-full max-w-[420px] rounded-[24px] border bg-white px-7 sm:px-10 py-9 sm:py-10"
+          style={{ borderColor: "#dfe8f3", boxShadow: "0 34px 76px -30px rgba(23,42,70,.28), 0 10px 28px rgba(23,42,70,.06)" }}
+        >
           <div className="absolute top-0 left-10 right-10 h-[3px] rounded-b-full" style={{ background: "linear-gradient(90deg, #2563eb, #38bdf8)" }} />
 
           <div className="lg:hidden flex items-center gap-3 mb-8">
@@ -136,12 +141,9 @@ export default function LoginGate({ onSuccess }: Props) {
             </div>
           </div>
 
-          <div className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[9px] font-semibold mb-4" style={{ background: "#eef4ff", color: "#2563eb" }}>
-            <i className="ph ph-lock-key" />
-            Acceso autorizado
-          </div>
+          <div className="text-[9px] font-bold tracking-[.14em] uppercase mb-3 text-[#2563eb]">Acceso al sistema</div>
           <h2 className="m-0 text-[26px] font-bold tracking-[-.035em] text-[#0f1b2d]">Iniciar sesión</h2>
-          <p className="m-0 mt-2 text-[12px] leading-relaxed text-[#6d7d94]">Ingresa tus credenciales para acceder a la consola de gestión y supervisión.</p>
+          <p className="m-0 mt-2 text-[12px] leading-relaxed text-[#6d7d94]">Ingresa tus credenciales para acceder a la consola central.</p>
 
           {error && (
             <div className="mt-5 rounded-xl border px-3.5 py-3 text-[11px] flex items-start gap-2.5" style={{ background: "#fff2f4", borderColor: "#f5cbd2", color: "#c62f46" }}>
@@ -155,7 +157,16 @@ export default function LoginGate({ onSuccess }: Props) {
               <label className="block text-[10px] font-semibold text-[#52647c] mb-1.5">Usuario</label>
               <div className="relative">
                 <i className="ph ph-user absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[#7b8ba0]" />
-                <input type="text" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Nombre de usuario" className="w-full py-3 pl-10 pr-4 rounded-xl border text-[12px] text-[#0f1b2d] outline-none transition-all" style={{ background: "#f7faff", borderColor: "#d6e1ee" }} />
+                <input
+                  type="text"
+                  autoComplete="username"
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Nombre de usuario"
+                  className="w-full py-3 pl-10 pr-4 rounded-xl border text-[12px] text-[#0f1b2d] outline-none transition-all focus:border-[#2563eb] focus:shadow-[0_0_0_3px_rgba(37,99,235,.10)]"
+                  style={{ background: "#f7faff", borderColor: "#d6e1ee" }}
+                />
               </div>
             </div>
 
@@ -163,15 +174,35 @@ export default function LoginGate({ onSuccess }: Props) {
               <label className="block text-[10px] font-semibold text-[#52647c] mb-1.5">Contraseña</label>
               <div className="relative">
                 <i className="ph ph-lock-simple absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[#7b8ba0]" />
-                <input type={showPassword ? "text" : "password"} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Contraseña" className="w-full py-3 pl-10 pr-11 rounded-xl border text-[12px] text-[#0f1b2d] outline-none transition-all" style={{ background: "#f7faff", borderColor: "#d6e1ee" }} />
-                <button type="button" aria-label="Mostrar u ocultar contraseña" onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 border-0 bg-transparent cursor-pointer text-[#7b8ba0]">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Contraseña"
+                  className="w-full py-3 pl-10 pr-11 rounded-xl border text-[12px] text-[#0f1b2d] outline-none transition-all focus:border-[#2563eb] focus:shadow-[0_0_0_3px_rgba(37,99,235,.10)]"
+                  style={{ background: "#f7faff", borderColor: "#d6e1ee" }}
+                />
+                <button
+                  type="button"
+                  aria-label="Mostrar u ocultar contraseña"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 border-0 bg-transparent cursor-pointer text-[#7b8ba0]"
+                >
                   <i className={showPassword ? "ph ph-eye-slash" : "ph ph-eye"} style={{ fontSize: "16px" }} />
                 </button>
               </div>
             </div>
 
             <div className="text-right mt-2.5">
-              <button type="button" onClick={() => setShowForgotNote((v) => !v)} className="border-0 bg-transparent cursor-pointer text-[10px] font-semibold text-[#2563eb] p-0">¿Olvidaste tu contraseña?</button>
+              <button
+                type="button"
+                onClick={() => setShowForgotNote((v) => !v)}
+                className="border-0 bg-transparent cursor-pointer text-[10px] font-semibold text-[#2563eb] p-0"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
             </div>
 
             {showForgotNote && (
@@ -180,7 +211,12 @@ export default function LoginGate({ onSuccess }: Props) {
               </div>
             )}
 
-            <button type="submit" disabled={loading} className="w-full mt-6 py-3 rounded-xl border-0 cursor-pointer text-white text-[11px] font-bold tracking-[.03em] disabled:opacity-60 transition-transform hover:-translate-y-px active:translate-y-0" style={{ background: "linear-gradient(115deg, #2563eb, #2f76f6)", boxShadow: "0 16px 28px -12px rgba(37,99,235,.48)" }}>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-6 py-3 rounded-xl border-0 cursor-pointer text-white text-[11px] font-bold tracking-[.03em] disabled:opacity-60 transition-transform hover:-translate-y-px active:translate-y-0"
+              style={{ background: "linear-gradient(115deg, #2563eb, #2f76f6)", boxShadow: "0 16px 28px -12px rgba(37,99,235,.48)" }}
+            >
               <span className="inline-flex items-center justify-center gap-2">
                 <i className={loading ? "ph ph-spinner" : "ph ph-sign-in"} style={{ fontSize: "14px" }} />
                 {loading ? "Ingresando..." : "Ingresar a la consola"}
