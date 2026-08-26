@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import EndpointsSummaryCards from "../components/EndpointsSummaryCards";
 import EndpointsFilters from "../components/EndpointsFilters";
 import EndpointsTable from "../components/EndpointsTable";
@@ -56,16 +57,15 @@ export default function EndpointsPage() {
   const hasFilters = Boolean(search || status || risk || osFamily);
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
-      {data && <EndpointsSummaryCards summary={data.summary} />}
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="endpoints"
+        eyebrow="Superficie de protección"
+        title="Inventario y estado de los agentes"
+        description="Consulta conectividad, riesgo, salud del agente, actividad y alertas asociadas a cada equipo monitoreado."
+      />
 
-      <div className="px-1 pt-1">
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Superficie de protección</div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Inventario y estado de los agentes</div>
-        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-          Consulta conectividad, riesgo, salud del agente, actividad y alertas asociadas a cada equipo monitoreado.
-        </div>
-      </div>
+      {data && <EndpointsSummaryCards summary={data.summary} />}
 
       <EndpointsFilters
         search={searchInput}
@@ -89,23 +89,8 @@ export default function EndpointsPage() {
         </div>
       ) : (
         <>
-          <EndpointsTable
-            endpoints={data?.endpoints ?? []}
-            loading={loading}
-            hasFilters={hasFilters}
-            onSelect={setSelectedId}
-            selectedId={selectedId}
-            flashId={flashId}
-          />
-          {data && (
-            <EndpointsPagination
-              page={data.page}
-              pageSize={data.page_size}
-              totalPages={data.total_pages}
-              filteredTotal={data.filtered_total}
-              onPageChange={setPage}
-            />
-          )}
+          <EndpointsTable endpoints={data?.endpoints ?? []} loading={loading} hasFilters={hasFilters} onSelect={setSelectedId} selectedId={selectedId} flashId={flashId} />
+          {data && <EndpointsPagination page={data.page} pageSize={data.page_size} totalPages={data.total_pages} filteredTotal={data.filtered_total} onPageChange={setPage} />}
         </>
       )}
 
