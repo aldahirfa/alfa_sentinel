@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 /*
-  Sistema visual Blue Team de ALFA-Sentinel.
+  Sistema visual de la consola ALFA-Sentinel.
   Azul = identidad, interacción e información operativa.
   Verde/ámbar/naranja/rojo = estados y severidad; no se reutilizan
   como colores decorativos para evitar ambigüedad durante un incidente.
@@ -152,22 +152,16 @@ a {
   background-clip: padding-box;
 }
 
-/* Superficies compartidas para una consola SOC visualmente consistente. */
+/*
+  Fondo compartido de las páginas de la consola.
+  No crea un stacking context: los drawers y modales fixed pueden
+  superponerse correctamente al Topbar y al resto de la aplicación.
+*/
 .soc-page {
   position: relative;
-  isolation: isolate;
-}
-
-.soc-page::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
   background:
     radial-gradient(circle at 84% 6%, var(--brand-soft), transparent 25rem),
     radial-gradient(circle at 46% 100%, var(--info-fill), transparent 32rem);
-  opacity: .55;
 }
 
 .soc-panel {
