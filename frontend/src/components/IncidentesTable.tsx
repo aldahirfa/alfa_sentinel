@@ -73,7 +73,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[11px] min-w-[1120px]">
+        <table className="w-full border-collapse text-[11px] min-w-[1180px]">
           <thead style={{ background: "color-mix(in srgb, var(--surf2) 88%, transparent)" }}>
             <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
               <th className="px-4 py-3 font-semibold">Caso</th>
@@ -178,8 +178,14 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                               </button>
                             )
                           )}
-                          <button onClick={(e) => { e.stopPropagation(); onSelect(item); }} className="w-8 h-8 rounded-xl border grid place-items-center cursor-pointer transition-premium btn-hover" style={{ background: "var(--surf2)", borderColor: "var(--line-soft)", color: "var(--brand)" }} title="Abrir investigación">
-                            <i className="ph ph-arrow-up-right" style={{ fontSize: "13px" }} />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onSelect(item); }}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover whitespace-nowrap"
+                            style={{ background: "var(--brand-fill)", borderColor: "var(--brand-soft)", color: "var(--brand)" }}
+                            title="Ver detalles del caso"
+                          >
+                            <i className="ph ph-eye" style={{ fontSize: "13px" }} />
+                            <span className="text-[10px] font-semibold">Ver detalles</span>
                           </button>
                         </div>
                         {rowError?.id === item.id && <div className="text-[9px] max-w-[190px] text-right" style={{ color: "var(--crit)" }}>{rowError.message}</div>}
