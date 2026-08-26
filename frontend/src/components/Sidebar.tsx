@@ -6,6 +6,7 @@ interface Props {
   incidentsActive: number;
   page: Page;
   onNavigate: (page: Page) => void;
+  onPrefetch: (page: Page) => void;
 }
 
 type NavItem = {
@@ -41,7 +42,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-export default function Sidebar({ alertsActive, incidentsActive, page, onNavigate }: Props) {
+export default function Sidebar({ alertsActive, incidentsActive, page, onNavigate, onPrefetch }: Props) {
   const badgeValue = { alerts: alertsActive, incidents: incidentsActive };
 
   return (
@@ -93,6 +94,8 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
                   <a
                     key={item.label}
                     href="#"
+                    onMouseEnter={() => onPrefetch(item.page)}
+                    onFocus={() => onPrefetch(item.page)}
                     onClick={(e) => {
                       e.preventDefault();
                       onNavigate(item.page);
