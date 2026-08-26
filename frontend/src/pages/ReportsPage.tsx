@@ -59,17 +59,11 @@ export default function ReportsPage() {
 
       {data && <ReportsSummaryCards totalReports={data.total_reports} lastGeneratedAt={data.last_generated_at} lastGeneratedBy={data.last_generated_by} />}
 
-      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
-        <div>
-          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Documentación y evidencia</div>
-          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Generación y consulta de informes</div>
-          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-            Consolida información de seguridad, endpoints e incidentes en documentos preparados para revisión y respaldo institucional.
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
-          Repositorio disponible
+      <div className="px-1 pt-1">
+        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Documentación y evidencia</div>
+        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Generación y consulta de informes</div>
+        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+          Consolida información de seguridad, endpoints e incidentes en documentos preparados para revisión y respaldo institucional.
         </div>
       </div>
 
