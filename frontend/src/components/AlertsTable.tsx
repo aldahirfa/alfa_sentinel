@@ -65,7 +65,7 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[11px] min-w-[1000px]">
+        <table className="w-full border-collapse text-[11px] min-w-[1060px]">
           <thead style={{ background: "color-mix(in srgb, var(--surf2) 88%, transparent)" }}>
             <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
               <th className="px-4 py-3 font-semibold">Severidad</th>
@@ -188,11 +188,12 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
                     <td className="px-4 py-3.5 text-right">
                       <button
                         onClick={(e) => { e.stopPropagation(); onSelect(a.id); }}
-                        className="w-8 h-8 rounded-xl border grid place-items-center ml-auto cursor-pointer transition-premium btn-hover"
-                        style={{ background: "var(--surf2)", borderColor: "var(--line-soft)", color: "var(--brand)" }}
-                        title="Abrir detalle de alerta"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover whitespace-nowrap"
+                        style={{ background: "var(--brand-fill)", borderColor: "var(--brand-soft)", color: "var(--brand)" }}
+                        title="Ver detalles de la alerta"
                       >
-                        <i className="ph ph-arrow-up-right" style={{ fontSize: "13px" }} />
+                        <i className="ph ph-eye" style={{ fontSize: "13px" }} />
+                        <span className="text-[10px] font-semibold">Ver detalles</span>
                       </button>
                     </td>
                   </tr>
