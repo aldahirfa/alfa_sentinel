@@ -9,10 +9,13 @@ import TopDetections from "../components/TopDetections";
 import RecentActivityTimeline from "../components/RecentActivityTimeline";
 import SystemStatusPanel from "../components/SystemStatusPanel";
 import QuickActions from "../components/QuickActions";
+import type { Page } from "../components/ModuleMark";
 import type { DashboardOverview } from "../types/dashboard";
 
 interface Props {
   data: DashboardOverview;
+  onNavigate: (page: Page) => void;
+  onPrefetch: (page: Page) => void;
 }
 
 function SectionLabel({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
@@ -27,11 +30,11 @@ function SectionLabel({ eyebrow, title, description }: { eyebrow: string; title:
   );
 }
 
-export default function DashboardPage({ data }: Props) {
+export default function DashboardPage({ data, onNavigate, onPrefetch }: Props) {
   return (
     <main className="soc-page grid grid-cols-12 gap-4 px-[22px] pt-[18px] pb-8 content-start">
       <div className="col-span-12">
-        <QuickActions />
+        <QuickActions onNavigate={onNavigate} onPrefetch={onPrefetch} />
       </div>
 
       <div className="col-span-12 xl:col-span-8">
