@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import AlertsSummaryCards from "../components/AlertsSummaryCards";
 import AlertsFilters from "../components/AlertsFilters";
 import AlertsTable from "../components/AlertsTable";
@@ -71,16 +72,15 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const hasFilters = Boolean(search || severity || status || since || rule);
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
-      {data && <AlertsSummaryCards summary={data.summary} />}
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="alerts"
+        eyebrow="Investigación"
+        title="Priorización y análisis de detecciones"
+        description="Filtra la cola por severidad, estado, período o mecanismo que originó la detección."
+      />
 
-      <div className="px-1 pt-1">
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Investigación</div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Priorización y análisis de detecciones</div>
-        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-          Filtra la cola por severidad, estado, período o mecanismo que originó la detección.
-        </div>
-      </div>
+      {data && <AlertsSummaryCards summary={data.summary} />}
 
       <AlertsFilters
         search={searchInput}
@@ -108,23 +108,8 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
         </div>
       ) : (
         <>
-          <AlertsTable
-            alerts={data?.alerts ?? []}
-            loading={loading}
-            hasFilters={hasFilters}
-            onSelect={setSelectedId}
-            selectedId={selectedId}
-            flashId={flashId}
-          />
-          {data && (
-            <AlertsPagination
-              page={data.page}
-              pageSize={data.page_size}
-              totalPages={data.total_pages}
-              filteredTotal={data.filtered_total}
-              onPageChange={setPage}
-            />
-          )}
+          <AlertsTable alerts={data?.alerts ?? []} loading={loading} hasFilters={hasFilters} onSelect={setSelectedId} selectedId={selectedId} flashId={flashId} />
+          {data && <AlertsPagination page={data.page} pageSize={data.page_size} totalPages={data.total_pages} filteredTotal={data.filtered_total} onPageChange={setPage} />}
         </>
       )}
 
