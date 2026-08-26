@@ -1,37 +1,38 @@
 import { useEffect, useState } from "react";
 import { fetchAlertDrawer } from "../api/client";
-import type { IncidenteDrawerData } from "../types/alerts";
-import { severityPillStyle } from "../lib/severity";
+import type { IncidenteDrawerData, AlertStatus } from "../types/alerts";
+import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
-import type { AlertStatus } from "../types/alerts";
 import EscalateAlertModal from "./EscalateAlertModal";
 
 interface Props {
   alertId: number | null;
   onClose: () => void;
-  // Refresca la lista/resumen de Alertas después de escalar (mismo
-  // patrón que onChanged en IncidentDrawer.tsx).
   onChanged: () => void;
-  // Navega a Incidentes y abre el incidente asociado a esta alerta.
   onViewIncident: (id: number) => void;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
-    <section className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
-      <h3 className="text-[11px] tracking-wider uppercase font-semibold mb-3" style={{ color: "var(--tx-mute)" }}>
-        {title}
-      </h3>
+    <section className="px-5 py-5 border-t" style={{ borderColor: "var(--line-soft)" }}>
+      <div className="flex items-center gap-2 mb-3.5">
+        <span className="w-7 h-7 rounded-lg grid place-items-center" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>
+          <i className={icon} style={{ fontSize: "13px" }} />
+        </span>
+        <h3 className="text-[9.5px] tracking-[.14em] uppercase font-bold m-0" style={{ color: "var(--tx-mute)" }}>
+          {title}
+        </h3>
+      </div>
       {children}
     </section>
   );
 }
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
+function Field({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between text-[12.5px] py-1.5">
-      <span style={{ color: "var(--tx-mute)" }}>{label}</span>
-      <span className="font-medium text-right" style={{ color: "var(--tx)" }}>{value}</span>
+    <div className="grid grid-cols-[135px_minmax(0,1fr)] gap-3 items-start py-2.5 border-b last:border-b-0" style={{ borderColor: "var(--line-soft)" }}>
+      <span className="text-[10px]" style={{ color: "var(--tx-mute)" }}>{label}</span>
+      <span className={`text-[11px] font-medium text-right break-all ${mono ? "mono-data" : ""}`} style={{ color: "var(--tx)" }}>{value}</span>
     </div>
   );
 }
@@ -75,226 +76,216 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
 
   if (!render) return null;
 
+  const severityColor = data?.severity ? SEVERITY_VAR[data.severity] : "var(--brand)";
+
   return (
     <>
       <div
         onClick={onClose}
         className="fixed inset-0 z-40"
-        style={{ background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 200ms ease" }}
+        style={{
+          background: "rgba(2, 8, 18, .68)",
+          backdropFilter: "blur(3px)",
+          opacity: entered ? 1 : 0,
+          transition: "opacity 200ms ease",
+        }}
       />
+
       <aside
-        className="fixed top-0 right-0 h-screen w-full sm:w-[460px] z-50 flex flex-col shadow-2xl"
+        className="fixed top-0 right-0 h-screen w-full sm:w-[520px] z-50 flex flex-col"
         style={{
           background: "var(--surf)",
           borderLeft: "1px solid var(--line)",
+          boxShadow: "var(--shadow-lg)",
           transform: entered ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 220ms ease",
+          transition: "transform 220ms cubic-bezier(.16,1,.3,1)",
         }}
       >
-        {/* Encabezado */}
-        <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
-              Detalles de la alerta
+        <div className="relative px-5 py-5 border-b overflow-hidden" style={{ borderColor: "var(--line-soft)", background: "linear-gradient(135deg, var(--surf2), var(--surf))" }}>
+          <div className="absolute inset-y-0 left-0 w-[3px]" style={{ background: severityColor }} />
+          <div className="absolute -right-16 -top-20 w-52 h-52 rounded-full" style={{ background: data?.severity === "CRÍTICO" ? "var(--crit-soft)" : "var(--brand-soft)", filter: "blur(35px)", opacity: .65 }} />
+
+          <div className="relative z-[1] flex items-start gap-4">
+            <div
+              className="w-11 h-11 rounded-2xl grid place-items-center shrink-0 border"
+              style={{ background: `color-mix(in srgb, ${severityColor} 12%, var(--surf2))`, borderColor: `color-mix(in srgb, ${severityColor} 24%, var(--line-soft))`, color: severityColor }}
+            >
+              <i className={data?.severity === "CRÍTICO" ? "ph-fill ph-warning-octagon" : "ph ph-waveform"} style={{ fontSize: "20px" }} />
             </div>
-            <div className="text-[18px] font-bold mt-1 tracking-tight truncate" style={{ color: "var(--tx)" }}>
-              {data?.title ?? "Cargando..."}
-            </div>
-            {data && (
-              <div className="text-[11.5px] mt-1.5 font-medium" style={{ color: "var(--tx-mute)" }}>
-                {data.code} · {data.hostname}
+
+            <div className="min-w-0 flex-1">
+              <div className="text-[9px] tracking-[.17em] uppercase font-bold" style={{ color: "var(--brand)" }}>
+                Investigación de alerta
               </div>
-            )}
+              <div className="text-[18px] font-bold mt-1 tracking-[-.025em] leading-snug" style={{ color: "var(--tx)" }}>
+                {data?.title ?? "Cargando alerta..."}
+              </div>
+              {data && (
+                <div className="flex items-center gap-2 mt-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+                  <span className="mono-data">{data.code}</span>
+                  <span>·</span>
+                  <span className="flex items-center gap-1"><i className="ph ph-desktop-tower" /> {data.hostname}</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={onClose}
+              aria-label="Cerrar detalle"
+              className="w-9 h-9 shrink-0 rounded-xl border grid place-items-center cursor-pointer transition-premium btn-hover"
+              style={{ borderColor: "var(--line-soft)", background: "var(--surf2)", color: "var(--tx-dim)" }}
+            >
+              <i className="ph ph-x" style={{ fontSize: "15px" }} />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="ml-auto w-8 h-8 shrink-0 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
-            style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
-          >
-            <i className="ph-fill ph-x" style={{ fontSize: "15px" }} />
-          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {error && (
-            <div className="px-5 py-6 text-center text-sm" style={{ color: "var(--crit)" }}>
-              {error}
+            <div className="px-5 py-10 text-center">
+              <div className="w-12 h-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: "var(--crit-soft)", color: "var(--crit)" }}>
+                <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
+              </div>
+              <div className="text-[12px] font-semibold" style={{ color: "var(--crit)" }}>{error}</div>
             </div>
           )}
 
           {!data && !error && (
-            <div className="px-5 py-6 flex flex-col gap-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-4 rounded animate-pulse" style={{ background: "var(--surf3)" }} />
+            <div className="px-5 py-6 flex flex-col gap-3">
+              <div className="h-28 rounded-2xl animate-pulse" style={{ background: "var(--surf2)" }} />
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: "var(--surf2)" }} />
               ))}
             </div>
           )}
 
           {data && (
             <>
-              {/* Estado principal */}
-              <div className="px-5 py-4">
+              <div className="p-5">
                 <div
-                  className="rounded-xl border p-4 shadow-sm"
+                  className="rounded-2xl border p-4 relative overflow-hidden"
                   style={{
-                    background: data.severity === "CRÍTICO" ? "var(--crit-fill)" : "var(--surf2)",
+                    background: data.severity === "CRÍTICO" ? "linear-gradient(135deg, var(--crit-fill), var(--surf2))" : "linear-gradient(135deg, var(--brand-fill), var(--surf2))",
                     borderColor: data.severity === "CRÍTICO" ? "var(--crit-soft)" : "var(--line-soft)",
                   }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Severidad</span>
-                    {data.severity && (
-                      <span
-                        className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
-                        style={severityPillStyle(data.severity)}
-                      >
-                        {data.severity.toUpperCase()}
-                      </span>
-                    )}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[9px] uppercase tracking-[.13em] font-bold" style={{ color: "var(--tx-mute)" }}>Prioridad de análisis</div>
+                      <div className="text-[22px] font-bold mt-1 tracking-[-.04em]" style={{ color: severityColor }}>
+                        {data.risk_score !== null ? data.risk_score.toFixed(1) : "—"}
+                        <span className="text-[9px] font-medium ml-1" style={{ color: "var(--tx-mute)" }}>puntos de riesgo</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-bold tracking-[.08em] px-2.5 py-1 rounded-md" style={severityPillStyle(data.severity)}>
+                      {data.severity.toUpperCase()}
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
-                    <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Estado</div>
-                      <div className="mt-1">
-                        <span
-                          className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full inline-block"
-                          style={{ ...statusPillStyle(data.status as AlertStatus), border: `1px solid ${statusPillStyle(data.status as AlertStatus).color}` }}
-                        >
+                  <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                    <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--surf)", border: "1px solid var(--line-soft)" }}>
+                      <div className="text-[8.5px] uppercase tracking-[.1em]" style={{ color: "var(--tx-mute)" }}>Estado</div>
+                      <div className="mt-1.5">
+                        <span className="inline-flex items-center gap-1.5 text-[9px] font-semibold px-2 py-1 rounded-md" style={{ ...statusPillStyle(data.status as AlertStatus), border: `1px solid ${statusPillStyle(data.status as AlertStatus).color}` }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusPillStyle(data.status as AlertStatus).color }} />
                           {data.status_label}
                         </span>
                       </div>
                     </div>
-                    <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Puntos de riesgo</div>
-                      <div className="mt-1 text-[12px] font-semibold tabular-nums" style={{ color: "var(--tx)" }}>
-                        {data.risk_score !== null ? data.risk_score.toFixed(1) : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Detecciones</div>
-                      <div className="mt-1 text-[12px] font-medium" style={{ color: "var(--tx)" }}>{data.detection_count}</div>
+                    <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--surf)", border: "1px solid var(--line-soft)" }}>
+                      <div className="text-[8.5px] uppercase tracking-[.1em]" style={{ color: "var(--tx-mute)" }}>Señales correlacionadas</div>
+                      <div className="text-[16px] font-bold mt-1 tabular-nums" style={{ color: "var(--tx)" }}>{data.detection_count}</div>
                     </div>
                   </div>
                 </div>
               </div>
 
               {data.description && (
-                <Section title="Descripción">
-                  <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--tx-dim)" }}>{data.description}</p>
+                <Section title="Descripción de la detección" icon="ph ph-text-align-left">
+                  <p className="text-[11px] leading-[1.7] m-0" style={{ color: "var(--tx-dim)" }}>{data.description}</p>
                 </Section>
               )}
 
-              {/* Endpoint */}
-              <Section title="Endpoint afectado">
-                <Field label="Hostname" value={data.hostname} />
-                <Field label="Sistema operativo" value={data.operating_system} />
-                <Field label="Dirección IP" value={data.ip_address} />
-                <Field
-                  label="Conectividad"
-                  value={
-                    <span style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}>
-                      {data.is_online ? "Online" : "Offline"}
-                    </span>
-                  }
-                />
-                {data.is_honeyfile && (
-                  <Field label="Origen" value={<span style={{ color: "var(--warn)" }}>Honeyfile</span>} />
-                )}
+              <Section title="Endpoint afectado" icon="ph ph-desktop-tower">
+                <div className="rounded-xl px-3.5" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
+                  <Field label="Hostname" value={data.hostname} mono />
+                  <Field label="Sistema operativo" value={data.operating_system} />
+                  <Field label="Dirección IP" value={data.ip_address} mono />
+                  <Field label="Conectividad" value={<span className="inline-flex items-center gap-1.5" style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: data.is_online ? "var(--ok)" : "var(--off)" }} />{data.is_online ? "Online" : "Offline"}</span>} />
+                  {data.is_honeyfile && <Field label="Origen" value={<span style={{ color: "var(--warn)" }}>Activación de honeyfile</span>} />}
+                </div>
               </Section>
 
-              {/* Reglas asociadas */}
               {data.rules.length > 0 && (
-                <Section title="Reglas asociadas">
+                <Section title="Señales y reglas asociadas" icon="ph ph-list-checks">
                   <div className="flex flex-col gap-2">
                     {data.rules.map((r, i) => (
-                      <div key={i} className="rounded-[9px] p-2.5 flex items-center justify-between" style={{ background: "var(--surf2)" }}>
-                        <div>
-                          <div className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>{r.rule_name}</div>
-                          <div className="text-[10.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{r.matched_at}</div>
+                      <div key={i} className="rounded-xl p-3 flex items-center gap-3" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
+                        <div className="w-8 h-8 rounded-lg grid place-items-center shrink-0" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>
+                          <i className="ph ph-waveform" style={{ fontSize: "13px" }} />
                         </div>
-                        <div className="text-[12px] font-semibold tabular-nums" style={{ color: "var(--tx-dim)" }}>
-                          +{r.weight_applied.toFixed(1)}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10.5px] font-semibold truncate" style={{ color: "var(--tx)" }}>{r.rule_name}</div>
+                          <div className="text-[9px] mt-1" style={{ color: "var(--tx-mute)" }}>{r.matched_at}</div>
                         </div>
+                        <div className="text-[11px] font-bold tabular-nums" style={{ color: "var(--brand)" }}>+{r.weight_applied.toFixed(1)}</div>
                       </div>
                     ))}
                   </div>
                 </Section>
               )}
 
-              {/* Proceso involucrado (2026-08-18, ver PENDIENTES.md,
-                  "Corrección definitiva en la lógica y presentación de
-                  ALERTAS", sección 5) -- correlación real por ventana
-                  de tiempo, nunca inventado: si el agente no pudo
-                  atribuir el proceso (o el dato simplemente no existe
-                  en la base, como 'ruta'/'usuario' hoy), se muestra
-                  "No disponible" en vez de fabricar un valor. */}
-              <Section title="Proceso involucrado">
-                <Field label="Proceso" value={data.process.process_name ?? "No disponible"} />
-                <Field label="PID" value={data.process.process_id !== null ? data.process.process_id : "No disponible"} />
-                <Field label="Ruta" value={data.process.executable_path ?? "No disponible"} />
-                <Field label="Usuario" value={data.process.username ?? "No disponible"} />
+              <Section title="Proceso involucrado" icon="ph ph-terminal-window">
+                <div className="rounded-xl px-3.5" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
+                  <Field label="Proceso" value={data.process.process_name ?? "No disponible"} mono />
+                  <Field label="PID" value={data.process.process_id !== null ? data.process.process_id : "No disponible"} mono />
+                  <Field label="Ruta" value={data.process.executable_path ?? "No disponible"} mono />
+                  <Field label="Usuario" value={data.process.username ?? "No disponible"} />
+                </div>
               </Section>
 
-              {/* Incidente relacionado -- el sistema tiene su propio
-                  mecanismo automático de escalamiento (motor
-                  heurístico), pero un analista puede decidir que una
-                  alerta amerita tratarse como incidente aunque el
-                  sistema todavía no la haya escalado. Ambos caminos
-                  terminan en el mismo lugar: alerts.incident_id. */}
-              <Section title="Incidente relacionado">
+              <Section title="Gestión del incidente" icon="ph ph-siren">
                 {data.incident_id ? (
-                  <>
-                    <div className="flex items-center justify-between mb-2.5">
-                      <span className="text-[12px]" style={{ color: "var(--tx-mute)" }}>Incidente asociado</span>
-                      <span className="text-[12.5px] font-semibold tabular-nums" style={{ color: "var(--tx)" }}>
-                        INC-{String(data.incident_id).padStart(5, "0")}
-                      </span>
+                  <div className="rounded-2xl p-4" style={{ background: "var(--brand-fill)", border: "1px solid var(--brand-soft)" }}>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-[.12em] font-bold" style={{ color: "var(--tx-mute)" }}>Incidente asociado</div>
+                        <div className="mono-data text-[14px] font-bold mt-1" style={{ color: "var(--tx)" }}>INC-{String(data.incident_id).padStart(5, "0")}</div>
+                      </div>
+                      <i className="ph-fill ph-siren" style={{ fontSize: "22px", color: "var(--brand)" }} />
                     </div>
-                    <button
-                      onClick={() => onViewIncident(data.incident_id!)}
-                      className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12.5px] font-bold cursor-pointer border transition-premium btn-hover shadow-sm"
-                      style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "transparent" }}
-                    >
-                      Ver incidente
-                      <i className="ph-fill ph-arrow-right text-[14px]" />
+                    <button onClick={() => onViewIncident(data.incident_id!)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10.5px] font-semibold cursor-pointer border transition-premium btn-hover" style={{ borderColor: "var(--brand-soft)", color: "#fff", background: "var(--brand)" }}>
+                      Abrir incidente
+                      <i className="ph ph-arrow-up-right" style={{ fontSize: "12px" }} />
                     </button>
-                  </>
+                  </div>
                 ) : (
-                  <>
-                    <p className="text-[12px] mb-2.5" style={{ color: "var(--tx-mute)" }}>
-                      Sin incidente. Esta alerta todavía no forma parte de un caso agrupado.
+                  <div className="rounded-2xl p-4" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
+                    <div className="text-[11px] font-semibold" style={{ color: "var(--tx)" }}>Esta alerta aún no forma parte de un incidente.</div>
+                    <p className="text-[9.5px] leading-relaxed mt-1.5 mb-3" style={{ color: "var(--tx-mute)" }}>
+                      El analista puede escalarla manualmente si la evidencia y el contexto justifican abrir un caso de investigación.
                     </p>
-                    <button
-                      onClick={() => setShowEscalate(true)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-bold cursor-pointer border transition-premium btn-hover shadow-sm"
-                      style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "var(--brand-fill)" }}
-                    >
-                      <i className="ph-fill ph-siren" style={{ fontSize: "15px" }} />
+                    <button onClick={() => setShowEscalate(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10.5px] font-semibold cursor-pointer border transition-premium btn-hover" style={{ borderColor: "var(--brand-soft)", color: "#fff", background: "var(--brand)" }}>
+                      <i className="ph-fill ph-siren" style={{ fontSize: "13px" }} />
                       Escalar a incidente
                     </button>
-                  </>
+                  </div>
                 )}
               </Section>
 
-              {/* Actividad relacionada -- correlación aproximada por
-                  ventana de tiempo, no existe una relación directa
-                  alerta -> evento en la base de datos. */}
               {data.timeline.length > 0 && (
-                <Section title="Actividad relacionada">
-                  <p className="text-[10.5px] mb-2.5" style={{ color: "var(--tx-mute)" }}>
-                    Eventos cercanos en el tiempo a esta alerta (correlación aproximada, no un vínculo directo).
-                  </p>
-                  <div className="flex flex-col gap-0 relative before:absolute before:inset-y-2 before:left-[5px] before:w-px before:bg-[var(--line)]">
+                <Section title="Actividad relacionada" icon="ph ph-clock-counter-clockwise">
+                  <div className="text-[9px] mb-3 leading-relaxed" style={{ color: "var(--tx-mute)" }}>
+                    Eventos cercanos en el tiempo a esta alerta. La correlación es aproximada y no representa una relación directa en la base de datos.
+                  </div>
+                  <div className="flex flex-col relative before:absolute before:inset-y-2 before:left-[6px] before:w-px before:bg-[var(--line)]">
                     {data.timeline.map((item, i) => (
-                      <div key={i} className="flex gap-3.5 relative py-2">
-                        <div className="w-[11px] h-[11px] rounded-full mt-1 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: item.kind === "honeyfile" ? "var(--warn)" : "var(--tx-mute)" }} />
+                      <div key={i} className="flex gap-3.5 relative py-2.5">
+                        <div className="w-[13px] h-[13px] rounded-full mt-0.5 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: item.kind === "honeyfile" ? "var(--warn)" : "var(--brand)" }} />
                         <div className="min-w-0">
-                          <div className="text-[12.5px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.label}</div>
-                          {item.detail && (
-                            <div className="text-[11px] mt-0.5 font-medium truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
-                          )}
-                          <div className="text-[10.5px] mt-1 font-medium" style={{ color: "var(--tx-dim)" }}>{item.at}</div>
+                          <div className="text-[10.5px] font-semibold" style={{ color: "var(--tx)" }}>{item.label}</div>
+                          {item.detail && <div className="text-[9.5px] mt-1 truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>}
+                          <div className="text-[9px] mt-1 mono-data" style={{ color: "var(--tx-dim)" }}>{item.at}</div>
                         </div>
                       </div>
                     ))}
@@ -303,8 +294,10 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
               )}
 
               {data.resolved_at && (
-                <Section title="Resolución">
-                  <Field label="Resuelta el" value={data.resolved_at} />
+                <Section title="Resolución" icon="ph ph-check-circle">
+                  <div className="rounded-xl px-3.5" style={{ background: "var(--ok-soft)", border: "1px solid color-mix(in srgb, var(--ok) 20%, var(--line-soft))" }}>
+                    <Field label="Resuelta el" value={data.resolved_at} mono />
+                  </div>
                 </Section>
               )}
             </>
