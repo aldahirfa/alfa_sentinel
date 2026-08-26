@@ -19,7 +19,6 @@ export default function EndpointsPage() {
   const [risk, setRisk] = useState<Severity | "">("");
   const [osFamily, setOsFamily] = useState("");
   const [page, setPage] = useState(1);
-
   const [data, setData] = useState<EndpointsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +50,7 @@ export default function EndpointsPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [search, status, risk, osFamily, page]);
 
   const hasFilters = Boolean(search || status || risk || osFamily);
@@ -62,17 +59,11 @@ export default function EndpointsPage() {
     <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <EndpointsSummaryCards summary={data.summary} />}
 
-      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
-        <div>
-          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Superficie de protección</div>
-          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Inventario y estado de los agentes</div>
-          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-            Consulta conectividad, riesgo, salud del agente, actividad y alertas asociadas a cada equipo monitoreado.
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
-          Inventario sincronizado
+      <div className="px-1 pt-1">
+        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Superficie de protección</div>
+        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Inventario y estado de los agentes</div>
+        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+          Consulta conectividad, riesgo, salud del agente, actividad y alertas asociadas a cada equipo monitoreado.
         </div>
       </div>
 
