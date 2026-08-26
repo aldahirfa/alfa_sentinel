@@ -226,7 +226,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
       <div className="px-4 py-4 border-t" style={{ borderColor: "#152136" }}>
         <div className="flex gap-3 items-center">
           <div className="w-[58px] h-9 shrink-0 rounded-lg flex items-center justify-center overflow-hidden" style={{ background: "rgba(255,255,255,.025)", border: "1px solid #1a2940" }}>
-            <img src="/static/logo_main_white.png" alt="AGETIC" className="max-w-[50px] max-h-[27px] object-contain" />
+            <img src="/static/logo_agetic.png" alt="AGETIC" className="max-w-[50px] max-h-[27px] object-contain" />
           </div>
           <div className="text-[9.5px] leading-[1.35] text-[#53657e]">
             AGETIC · Estado Plurinacional
