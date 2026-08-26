@@ -40,7 +40,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-function ModuleMark({ page }: { page: Page }) {
+export function ModuleMark({ page, size = 17 }: { page: Page; size?: number }) {
   const common = {
     fill: "none",
     stroke: "currentColor",
@@ -50,7 +50,7 @@ function ModuleMark({ page }: { page: Page }) {
   };
 
   return (
-    <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
       {page === "dashboard" && (
         <>
           <path {...common} d="M4.25 5.25h6.2v5.5h-6.2zM13.55 5.25h6.2v3.35h-6.2zM13.55 11.7h6.2v7.05h-6.2zM4.25 13.7h6.2v5.05h-6.2z" />
@@ -89,9 +89,9 @@ function ModuleMark({ page }: { page: Page }) {
       {page === "reglas" && (
         <>
           <path {...common} d="M5 6h14M5 12h14M5 18h14" />
-          <circle cx="9" cy="6" r="1.65" fill="#0a111e" stroke="currentColor" strokeWidth="1.65" />
-          <circle cx="15" cy="12" r="1.65" fill="#0a111e" stroke="currentColor" strokeWidth="1.65" />
-          <circle cx="11" cy="18" r="1.65" fill="#0a111e" stroke="currentColor" strokeWidth="1.65" />
+          <circle cx="9" cy="6" r="1.65" fill="currentColor" fillOpacity=".08" stroke="currentColor" strokeWidth="1.65" />
+          <circle cx="15" cy="12" r="1.65" fill="currentColor" fillOpacity=".08" stroke="currentColor" strokeWidth="1.65" />
+          <circle cx="11" cy="18" r="1.65" fill="currentColor" fillOpacity=".08" stroke="currentColor" strokeWidth="1.65" />
         </>
       )}
       {page === "respuesta" && (
@@ -111,6 +111,13 @@ function ModuleMark({ page }: { page: Page }) {
           <path {...common} d="M12 3.4 19.1 7.5v8.2L12 19.8l-7.1-4.1V7.5z" />
           <circle {...common} cx="12" cy="11.6" r="2.55" />
           <path {...common} d="M8.1 17.25c.65-1.6 2.05-2.55 3.9-2.55s3.25.95 3.9 2.55" />
+        </>
+      )}
+      {page === "perfil" && (
+        <>
+          <circle {...common} cx="12" cy="8.35" r="3.15" />
+          <path {...common} d="M5.8 19.4c.7-3.55 2.85-5.55 6.2-5.55s5.5 2 6.2 5.55" />
+          <path {...common} d="M4.1 12V6.1A2.1 2.1 0 0 1 6.2 4h1.1M19.9 12V6.1A2.1 2.1 0 0 0 17.8 4h-1.1" />
         </>
       )}
     </svg>
@@ -136,10 +143,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
       </div>
 
       <div className="relative px-[18px] pt-5 pb-5 border-b" style={{ borderColor: "#121f32" }}>
-        <div
-          className="absolute inset-x-4 top-0 h-24 pointer-events-none"
-          style={{ background: "radial-gradient(circle at 18% 10%, rgba(77,141,255,.13), transparent 68%)" }}
-        />
+        <div className="absolute inset-x-4 top-0 h-24 pointer-events-none" style={{ background: "radial-gradient(circle at 18% 10%, rgba(77,141,255,.13), transparent 68%)" }} />
         <div className="relative flex gap-3 items-center">
           <div
             className="w-10 h-10 shrink-0 rounded-xl border flex items-center justify-center overflow-hidden"
@@ -221,10 +225,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
 
       <div className="px-4 py-4 border-t" style={{ borderColor: "#152136" }}>
         <div className="flex gap-3 items-center">
-          <div
-            className="w-[58px] h-9 shrink-0 rounded-lg flex items-center justify-center overflow-hidden"
-            style={{ background: "rgba(255,255,255,.025)", border: "1px solid #1a2940" }}
-          >
+          <div className="w-[58px] h-9 shrink-0 rounded-lg flex items-center justify-center overflow-hidden" style={{ background: "rgba(255,255,255,.025)", border: "1px solid #1a2940" }}>
             <img src="/static/logo_main_white.png" alt="AGETIC" className="max-w-[50px] max-h-[27px] object-contain" />
           </div>
           <div className="text-[9.5px] leading-[1.35] text-[#53657e]">
