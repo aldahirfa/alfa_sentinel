@@ -1,6 +1,8 @@
 """Benchmark reproducible de las APIs usadas al navegar por ALFA-Sentinel.
 
-No modifica datos. Inicia sesión y mide únicamente peticiones GET.
+Después del inicio de sesión mide únicamente peticiones GET y no ejecuta
+mutaciones funcionales. El login sí actualiza ``last_login_at`` como ocurre
+normalmente al iniciar sesión en la consola.
 
 Ejemplos:
     python tests/performance/benchmark_navigation.py --username admin --password "..."
