@@ -30,15 +30,15 @@ function SectionLabel({ eyebrow, title, description }: { eyebrow: string; title:
 export default function DashboardPage({ data }: Props) {
   return (
     <main className="soc-page grid grid-cols-12 gap-4 px-[22px] pt-[18px] pb-8 content-start">
+      <div className="col-span-12">
+        <QuickActions />
+      </div>
+
       <div className="col-span-12 xl:col-span-8">
         <SecurityOverviewHero data={data} />
       </div>
       <div className="col-span-12 xl:col-span-4">
         <RiskDonut data={data.risk_distribution} total={data.summary.endpoints_total} />
-      </div>
-
-      <div className="col-span-12">
-        <QuickActions />
       </div>
 
       <SectionLabel
