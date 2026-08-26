@@ -47,17 +47,11 @@ export default function RulesPage() {
     <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <RulesSummaryCards summary={data.summary} />}
 
-      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
-        <div>
-          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Lógica de detección</div>
-          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Reglas y parámetros del motor heurístico</div>
-          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-            Consulta qué comportamiento evalúa cada regla, su umbral, ventana temporal, peso y actividad reciente.
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
-          Política de detección sincronizada
+      <div className="px-1 pt-1">
+        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Lógica de detección</div>
+        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Reglas y parámetros del motor heurístico</div>
+        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+          Consulta qué comportamiento evalúa cada regla, su umbral, ventana temporal, peso y actividad reciente.
         </div>
       </div>
 
