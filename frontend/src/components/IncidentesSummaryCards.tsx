@@ -42,7 +42,7 @@ export default function IncidentesSummaryCards({ summary }: Props) {
             </div>
           </div>
           <p className="text-[11px] leading-relaxed mt-3 mb-0" style={{ color: "var(--tx-dim)" }}>
-            Consolida detecciones relacionadas en casos de investigación, asignación y respuesta para el equipo Blue Team.
+            Consolida detecciones relacionadas en casos de investigación, asignación y respuesta para el personal responsable de seguridad.
           </p>
           <div className="mt-4 rounded-xl px-3 py-2.5" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
             <div className="flex items-center justify-between text-[9.5px]">
