@@ -70,6 +70,7 @@ const getInitialIncidentesSelection = () => {
 
 export default function App() {
   const [page, setPage] = useState<Page>(getInitialPage);
+  const [mountedPages, setMountedPages] = useState<Set<Page>>(() => new Set([getInitialPage()]));
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [userName, setUserName] = useState("Usuario");
   const [roleLabel, setRoleLabel] = useState("Usuario");
@@ -86,6 +87,15 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  const ensurePageMounted = useCallback((target: Page) => {
+    setMountedPages((current) => {
+      if (current.has(target)) return current;
+      const next = new Set(current);
+      next.add(target);
+      return next;
+    });
+  }, []);
 
   const load = useCallback(() => {
     fetchDashboardOverview()
@@ -133,26 +143,31 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      setPage(getInitialPage());
+      const nextPage = getInitialPage();
+      ensurePageMounted(nextPage);
+      setPage(nextPage);
       setAlertsInitialSelection(getInitialAlertsSelection());
       setIncidentesInitialSelection(getInitialIncidentesSelection());
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [ensurePageMounted]);
 
   function navigateTo(next: Page) {
+    ensurePageMounted(next);
     setAlertsInitialSelection(null);
     setIncidentesInitialSelection(null);
     setPage(next);
   }
 
   function openAlert(id: number) {
+    ensurePageMounted("alerts");
     setAlertsInitialSelection({ id });
     setPage("alerts");
   }
 
   function openIncident(id: number) {
+    ensurePageMounted("incidentes");
     setIncidentesInitialSelection({ kind: "incident", id });
     setPage("incidentes");
   }
@@ -195,6 +210,7 @@ export default function App() {
   }
 
   const meta = PAGE_META[page];
+  const pageVisibility = (target: Page) => page === target ? "contents" : "hidden";
 
   return (
     <GlobalAlertsProvider>
@@ -203,6 +219,7 @@ export default function App() {
           <Sidebar
             page={page}
             onNavigate={navigateTo}
+            onPrefetch={ensurePageMounted}
             alertsActive={data.summary.alerts_active}
             incidentsActive={data.summary.incidents_active}
           />
@@ -224,26 +241,55 @@ export default function App() {
             onOpenProfile={() => navigateTo("perfil")}
           />
 
-          {page === "dashboard" ? (
-            <DashboardPage data={data} />
-          ) : page === "endpoints" ? (
-            <EndpointsPage />
-          ) : page === "alerts" ? (
-            <AlertsPage initialAlertSelection={alertsInitialSelection} onViewIncident={openIncident} />
-          ) : page === "incidentes" ? (
-            <IncidentesPage initialSelection={incidentesInitialSelection} onViewAlert={openAlert} />
-          ) : page === "honeyfiles" ? (
-            <HoneyfilesPage />
-          ) : page === "reglas" ? (
-            <RulesPage />
-          ) : page === "respuesta" ? (
-            <RespuestaPage />
-          ) : page === "reportes" ? (
-            <ReportsPage />
-          ) : page === "administracion" ? (
-            <AdministracionPage isAdmin={isAdmin} />
-          ) : (
-            <PerfilPage roleLabel={roleLabel} />
+          {mountedPages.has("dashboard") && (
+            <div className={pageVisibility("dashboard")} aria-hidden={page !== "dashboard"}>
+              <DashboardPage data={data} onNavigate={navigateTo} onPrefetch={ensurePageMounted} />
+            </div>
+          )}
+          {mountedPages.has("endpoints") && (
+            <div className={pageVisibility("endpoints")} aria-hidden={page !== "endpoints"}>
+              <EndpointsPage />
+            </div>
+          )}
+          {mountedPages.has("alerts") && (
+            <div className={pageVisibility("alerts")} aria-hidden={page !== "alerts"}>
+              <AlertsPage initialAlertSelection={alertsInitialSelection} onViewIncident={openIncident} />
+            </div>
+          )}
+          {mountedPages.has("incidentes") && (
+            <div className={pageVisibility("incidentes")} aria-hidden={page !== "incidentes"}>
+              <IncidentesPage initialSelection={incidentesInitialSelection} onViewAlert={openAlert} />
+            </div>
+          )}
+          {mountedPages.has("honeyfiles") && (
+            <div className={pageVisibility("honeyfiles")} aria-hidden={page !== "honeyfiles"}>
+              <HoneyfilesPage />
+            </div>
+          )}
+          {mountedPages.has("reglas") && (
+            <div className={pageVisibility("reglas")} aria-hidden={page !== "reglas"}>
+              <RulesPage />
+            </div>
+          )}
+          {mountedPages.has("respuesta") && (
+            <div className={pageVisibility("respuesta")} aria-hidden={page !== "respuesta"}>
+              <RespuestaPage />
+            </div>
+          )}
+          {mountedPages.has("reportes") && (
+            <div className={pageVisibility("reportes")} aria-hidden={page !== "reportes"}>
+              <ReportsPage />
+            </div>
+          )}
+          {mountedPages.has("administracion") && (
+            <div className={pageVisibility("administracion")} aria-hidden={page !== "administracion"}>
+              <AdministracionPage isAdmin={isAdmin} />
+            </div>
+          )}
+          {mountedPages.has("perfil") && (
+            <div className={pageVisibility("perfil")} aria-hidden={page !== "perfil"}>
+              <PerfilPage roleLabel={roleLabel} />
+            </div>
           )}
         </div>
 
