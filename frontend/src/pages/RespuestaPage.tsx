@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import RespuestaSummaryCards from "../components/RespuestaSummaryCards";
 import CriticalIncidentsTable from "../components/CriticalIncidentsTable";
 import IsolationsHistoryTable from "../components/IsolationsHistoryTable";
@@ -19,9 +20,7 @@ export default function RespuestaPage() {
         setData(res);
         setError(null);
       })
-      .catch(() => {
-        setError("No se pudo cargar la información de respuesta.");
-      })
+      .catch(() => setError("No se pudo cargar la información de respuesta."))
       .finally(() => setLoading(false));
   }
 
@@ -31,22 +30,15 @@ export default function RespuestaPage() {
   }, [refreshToken]);
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
-      {data && <RespuestaSummaryCards summary={data.summary} />}
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="respuesta"
+        eyebrow="Contención y recuperación"
+        title="Centro de acciones de respuesta"
+        description="Ejecuta y supervisa aislamientos de red asociados a incidentes críticos, con trazabilidad de las acciones aplicadas sobre cada endpoint."
+      />
 
-      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
-        <div>
-          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
-            Contención y recuperación
-          </div>
-          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>
-            Centro de acciones de respuesta
-          </div>
-          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-            Ejecuta y supervisa aislamientos de red asociados a incidentes críticos, con trazabilidad de las acciones aplicadas sobre cada endpoint.
-          </div>
-        </div>
-      </div>
+      {data && <RespuestaSummaryCards summary={data.summary} />}
 
       {error ? (
         <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
@@ -58,16 +50,8 @@ export default function RespuestaPage() {
         </div>
       ) : (
         <>
-          <CriticalIncidentsTable
-            items={data?.critical_incidents ?? []}
-            loading={loading}
-            onIsolated={() => load(true)}
-          />
-          <IsolationsHistoryTable
-            items={data?.isolations ?? []}
-            loading={loading}
-            onReleased={() => load(true)}
-          />
+          <CriticalIncidentsTable items={data?.critical_incidents ?? []} loading={loading} onIsolated={() => load(true)} />
+          <IsolationsHistoryTable items={data?.isolations ?? []} loading={loading} onReleased={() => load(true)} />
         </>
       )}
     </main>

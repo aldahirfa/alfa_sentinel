@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import RulesSummaryCards from "../components/RulesSummaryCards";
 import RuleCard from "../components/RuleCard";
 import { fetchRules } from "../api/client";
@@ -44,16 +45,15 @@ export default function RulesPage() {
   }
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
-      {data && <RulesSummaryCards summary={data.summary} />}
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="reglas"
+        eyebrow="Lógica de detección"
+        title="Reglas y parámetros del motor heurístico"
+        description="Consulta qué comportamiento evalúa cada regla, su umbral, ventana temporal, peso y actividad reciente."
+      />
 
-      <div className="px-1 pt-1">
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Lógica de detección</div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Reglas y parámetros del motor heurístico</div>
-        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-          Consulta qué comportamiento evalúa cada regla, su umbral, ventana temporal, peso y actividad reciente.
-        </div>
-      </div>
+      {data && <RulesSummaryCards summary={data.summary} />}
 
       {error ? (
         <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
@@ -71,9 +71,7 @@ export default function RulesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
-          {(data?.rules ?? []).map((rule) => (
-            <RuleCard key={rule.id} rule={rule} onChanged={handleRuleChanged} />
-          ))}
+          {(data?.rules ?? []).map((rule) => <RuleCard key={rule.id} rule={rule} onChanged={handleRuleChanged} />)}
         </div>
       )}
     </main>
