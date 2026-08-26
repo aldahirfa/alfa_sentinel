@@ -115,8 +115,11 @@ export default function LoginGate({ onSuccess }: Props) {
           </div>
         </div>
 
-        <div className="relative z-10 flex items-center justify-between gap-4 text-[9px] text-[#53677f]">
-          <span>AGETIC · Estado Plurinacional de Bolivia</span>
+        <div className="relative z-10 flex items-center justify-between gap-5 text-[9px] text-[#53677f]">
+          <div className="flex items-center gap-3 min-w-0">
+            <img src="/static/logo_main_white.png" alt="AGETIC" className="w-[76px] max-h-[34px] object-contain opacity-75" />
+            <span className="hidden xl:inline">Estado Plurinacional de Bolivia</span>
+          </div>
           <span className="font-semibold tracking-[.12em] uppercase">Sistema ALFA-Sentinel</span>
         </div>
       </section>
