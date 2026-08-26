@@ -1,41 +1,20 @@
 import { useState } from "react";
-import { User, Lock, Eye } from "lucide-react";
 import { login } from "../api/client";
-
-// Réplica del login real (server/templates/login.html): misma
-// estructura de dos paneles, mismo logo (/static/logo-icon.png, vía
-// el proxy de Vite -- no se duplica el archivo), mismo texto y mismos
-// campos. Convertido a componentes/Tailwind, no reinventado.
 
 interface Props {
   onSuccess: () => void;
 }
 
 const NETWORK_LINES = [
-  [60, 110, 175, 185],
-  [175, 185, 130, 315],
-  [175, 185, 335, 150],
-  [335, 150, 430, 240],
-  [130, 315, 250, 390],
-  [250, 390, 430, 240],
-  [250, 390, 190, 530],
-  [190, 530, 330, 600],
-  [330, 600, 420, 510],
-  [430, 240, 460, 410],
-  [460, 410, 420, 510],
+  [45, 95, 155, 170], [155, 170, 105, 300], [155, 170, 320, 135],
+  [320, 135, 425, 225], [105, 300, 245, 375], [245, 375, 425, 225],
+  [245, 375, 180, 515], [180, 515, 325, 585], [325, 585, 425, 495],
+  [425, 225, 462, 395], [462, 395, 425, 495],
 ];
 
 const NETWORK_NODES = [
-  [60, 110, 3],
-  [175, 185, 4],
-  [335, 150, 3],
-  [130, 315, 3],
-  [430, 240, 4],
-  [250, 390, 4],
-  [190, 530, 3],
-  [460, 410, 3],
-  [420, 510, 4],
-  [330, 600, 3],
+  [45, 95, 3], [155, 170, 4], [320, 135, 3], [105, 300, 3], [425, 225, 4],
+  [245, 375, 4], [180, 515, 3], [462, 395, 3], [425, 495, 4], [325, 585, 3],
 ];
 
 export default function LoginGate({ onSuccess }: Props) {
@@ -61,218 +40,160 @@ export default function LoginGate({ onSuccess }: Props) {
   }
 
   return (
-    <div className="min-h-screen flex text-[#131a30]">
-      {/* Panel izquierdo -- réplica de .brand-panel */}
-      <div
-        className="hidden md:flex flex-[1.2] relative flex-col justify-between px-16 py-14 overflow-hidden text-[#eef1f8]"
-        style={{
-          background:
-            "radial-gradient(circle at 30% 15%, rgba(91,143,224,0.22), transparent 45%), radial-gradient(circle at 80% 85%, rgba(90,60,200,0.28), transparent 50%), linear-gradient(160deg, #060d1f 0%, #0c1a3a 45%, #241a5e 100%)",
-        }}
+    <div className="min-h-screen flex bg-[#070b13] text-[#0f1b2d]">
+      <section
+        className="hidden lg:flex flex-[1.08] relative flex-col justify-between px-14 xl:px-20 py-12 overflow-hidden text-[#f2f6fc] border-r border-[#17243a]"
+        style={{ background: "linear-gradient(145deg, #070b13 0%, #0b1424 48%, #0d1b31 100%)" }}
       >
-        <svg
-          className="absolute inset-0 opacity-40 w-full h-full"
-          viewBox="0 0 500 700"
-          preserveAspectRatio="xMidYMid slice"
-        >
-          <g stroke="#3a4f7d" strokeWidth="1">
-            {NETWORK_LINES.map(([x1, y1, x2, y2], i) => (
-              <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />
-            ))}
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 24% 18%, rgba(77,141,255,.16), transparent 32rem), radial-gradient(circle at 86% 78%, rgba(56,189,248,.08), transparent 28rem)" }} />
+        <div className="absolute inset-0 opacity-[.18] pointer-events-none" style={{ backgroundImage: "linear-gradient(#223149 1px, transparent 1px), linear-gradient(90deg, #223149 1px, transparent 1px)", backgroundSize: "42px 42px", maskImage: "linear-gradient(to bottom, rgba(0,0,0,.5), transparent 90%)" }} />
+
+        <svg className="absolute inset-0 opacity-[.34] w-full h-full pointer-events-none" viewBox="0 0 500 700" preserveAspectRatio="xMidYMid slice">
+          <g stroke="#29405f" strokeWidth="1">
+            {NETWORK_LINES.map(([x1, y1, x2, y2], i) => <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />)}
           </g>
-          <line
-            className="stroke-[#5b8fe0] animate-travel"
-            strokeWidth="1.4"
-            strokeDasharray="6 220"
-            x1={175} y1={185} x2={335} y2={150}
-          />
-          <line
-            className="stroke-[#5b8fe0] animate-travel"
-            strokeWidth="1.4"
-            strokeDasharray="6 220"
-            style={{ animationDelay: "2.2s" }}
-            x1={250} y1={390} x2={430} y2={240}
-          />
-          <g fill="#6a8fe0">
-            {NETWORK_NODES.map(([cx, cy, r], i) => (
-              <circle key={i} cx={cx} cy={cy} r={r} />
-            ))}
+          <g fill="#4d8dff">
+            {NETWORK_NODES.map(([cx, cy, r], i) => <circle key={i} cx={cx} cy={cy} r={r} />)}
           </g>
         </svg>
 
-        <div className="relative z-10 flex items-center gap-2.5">
-          <img src="/static/logo-icon.png" alt="" width={26} className="h-auto" />
-          <span className="text-[15px] font-semibold tracking-wide text-[#cfd9f0]">
-            ALFA-SENTINEL
-          </span>
-        </div>
-
-        <div>
-          <div className="relative z-10 mx-auto w-[220px] h-[220px] flex items-center justify-center">
-            <div className="absolute inset-0 rounded-full border border-[#5b8fe0]/35" />
-            <div className="absolute inset-[14%] rounded-full border border-[#5b8fe0]/35" />
-            <div className="absolute inset-[27%] rounded-full border border-[#5b8fe0]/35" />
-            <div className="absolute inset-0 rounded-full border-[1.5px] border-[#5b8fe0] animate-pulse-ring" />
-            <div
-              className="absolute inset-0 rounded-full border-[1.5px] border-[#5b8fe0] animate-pulse-ring"
-              style={{ animationDelay: "1.6s" }}
-            />
-            <div
-              className="relative z-10 w-[84px] h-[84px] rounded-[22px] flex items-center justify-center border border-[#5b8fe0]/50"
-              style={{
-                background: "linear-gradient(150deg, #16234a, #0c1530)",
-                boxShadow: "0 0 0 1px rgba(91,143,224,0.15), 0 20px 40px -10px rgba(0,0,0,0.6)",
-              }}
-            >
-              <img
-                src="/static/logo-icon.png"
-                alt="ALFA-Sentinel"
-                className="w-[58px] h-auto"
-                style={{ filter: "drop-shadow(0 0 10px rgba(91,143,224,0.5))" }}
-              />
-            </div>
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl border grid place-items-center" style={{ background: "rgba(77,141,255,.09)", borderColor: "rgba(77,141,255,.22)" }}>
+            <img src="/static/logo-icon.png" alt="Sistema ALFA-Sentinel" className="w-[27px] h-auto" />
           </div>
-
-          <div className="relative z-10 text-center mt-7">
-            <p className="text-[1.7rem] font-bold tracking-tight bg-gradient-to-r from-[#eef1f8] to-[#a9c1f0] bg-clip-text text-transparent mb-2.5">
-              ALFA-Sentinel
-            </p>
-            <p className="text-[1.02rem] font-medium text-[#c4cfe8] max-w-[380px] mx-auto mb-3.5 leading-snug">
-              Plataforma de Detección Temprana y Gestión de Seguridad
-            </p>
-            <p className="text-[0.85rem] text-[#8493b8] max-w-[360px] mx-auto leading-relaxed">
-              Monitoreo continuo de endpoints, análisis de comportamiento y
-              detección temprana de actividades potencialmente maliciosas.
-            </p>
+          <div>
+            <div className="text-[14px] font-bold tracking-[.02em]">ALFA-Sentinel</div>
+            <div className="text-[9px] uppercase tracking-[.16em] mt-1 text-[#6f819a]">Consola central de seguridad</div>
           </div>
         </div>
 
-        <div className="relative z-10 flex items-center justify-center gap-2.5 text-[0.7rem] tracking-[0.18em] text-[#6577a3] font-semibold">
-          <span>SECURITY</span>
-          <span className="w-1 h-1 rounded-full bg-[#3d4d78]" />
-          <span>MONITORING</span>
-          <span className="w-1 h-1 rounded-full bg-[#3d4d78]" />
-          <span>RESPONSE</span>
-        </div>
-      </div>
-
-      {/* Panel derecho -- réplica de .form-panel / .form-card */}
-      <div
-        className="flex-1 flex items-center justify-center p-10"
-        style={{
-          background:
-            "radial-gradient(circle at 15% 10%, rgba(48,89,214,0.06), transparent 40%), radial-gradient(circle at 90% 90%, rgba(36,26,94,0.05), transparent 45%), #eef1f8",
-        }}
-      >
-        <div
-          className="relative w-full max-w-[380px] bg-white rounded-[20px] px-10 py-11 border border-white/60"
-          style={{ boxShadow: "0 40px 70px -24px rgba(19,26,48,0.22), 0 14px 28px -18px rgba(19,26,48,0.18)" }}
-        >
-          <div
-            className="absolute top-0 left-10 right-10 h-[3px] rounded-b"
-            style={{ background: "linear-gradient(90deg, #5b8fe0, #3059d6, #241a5e)" }}
-          />
-
-          <div className="flex md:hidden items-center gap-2 mb-7">
-            <img src="/static/logo-icon.png" alt="" width={30} className="h-auto" />
-            <span className="font-bold text-[#131a30]">ALFA-Sentinel</span>
+        <div className="relative z-10 max-w-[570px]">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-[9px] font-bold tracking-[.13em] uppercase" style={{ background: "rgba(77,141,255,.08)", borderColor: "rgba(77,141,255,.18)", color: "#72a7ff" }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-[#36d399]" />
+            Monitoreo y respuesta centralizada
           </div>
 
-          <h2 className="text-[1.55rem] font-bold text-[#131a30] mb-1.5">Bienvenido</h2>
-          <p className="text-[0.9rem] text-[#6b7690] mb-1">Inicia sesión en ALFA-Sentinel</p>
-          <p className="text-[0.83rem] text-[#6b7690] mb-7 leading-relaxed">
-            Accede a la consola de gestión y supervisión de seguridad.
-          </p>
-
-          {error && (
-            <div className="bg-[#fdecec] border border-[#f3c6c6] text-[#c0392b] px-3.5 py-2.5 rounded-md text-[0.8rem] mb-4">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit}>
-            <div className="mb-4">
-              <label className="block text-[0.76rem] font-semibold text-[#3a4560] mb-1.5">
-                Usuario
-              </label>
-              <div className="relative flex items-center">
-                <User size={16} className="absolute left-3.5 text-[#6b7690] pointer-events-none" />
-                <input
-                  type="text"
-                  autoComplete="username"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full py-[0.68rem] pl-10 pr-4 rounded-[9px] border-[1.5px] border-[#e6e9f2] bg-[#fbfcfe] text-[0.92rem] text-[#131a30] outline-none focus:border-[#5b8fe0] focus:bg-white focus:shadow-[0_0_0_4px_rgba(48,89,214,0.1)] transition-colors"
-                />
+          <div className="mt-7 flex items-center gap-6">
+            <div className="relative w-[150px] h-[150px] shrink-0 hidden xl:flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border border-[#29405f]" />
+              <div className="absolute inset-[15%] rounded-full border border-[#223755]" />
+              <div className="absolute inset-[31%] rounded-full border border-[#1c304c]" />
+              <div className="absolute w-px h-full bg-gradient-to-b from-transparent via-[#4d8dff]/40 to-transparent rotate-[38deg]" />
+              <div className="absolute h-px w-full bg-gradient-to-r from-transparent via-[#38bdf8]/30 to-transparent -rotate-[24deg]" />
+              <div className="relative w-[68px] h-[68px] rounded-[19px] border grid place-items-center" style={{ background: "linear-gradient(145deg, #12213a, #0b1424)", borderColor: "rgba(77,141,255,.32)", boxShadow: "0 18px 46px rgba(0,0,0,.4), 0 0 35px rgba(77,141,255,.09)" }}>
+                <img src="/static/logo-icon.png" alt="" className="w-[46px] h-auto" />
               </div>
             </div>
 
-            <div className="mb-1">
-              <label className="block text-[0.76rem] font-semibold text-[#3a4560] mb-1.5">
-                Contraseña
-              </label>
-              <div className="relative flex items-center">
-                <Lock size={16} className="absolute left-3.5 text-[#6b7690] pointer-events-none" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full py-[0.68rem] pl-10 pr-10 rounded-[9px] border-[1.5px] border-[#e6e9f2] bg-[#fbfcfe] text-[0.92rem] text-[#131a30] outline-none focus:border-[#5b8fe0] focus:bg-white focus:shadow-[0_0_0_4px_rgba(48,89,214,0.1)] transition-colors"
-                />
-                <button
-                  type="button"
-                  aria-label="Mostrar contraseña"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 text-[#6b7690]"
-                >
-                  <Eye size={17} />
+            <div>
+              <div className="text-[11px] font-semibold text-[#8ca2bf]">Sistema ALFA-Sentinel</div>
+              <h1 className="m-0 mt-2 text-[32px] xl:text-[38px] leading-[1.06] font-bold tracking-[-.045em] text-[#f5f8fd]">
+                Detección temprana y supervisión de seguridad
+              </h1>
+              <p className="m-0 mt-4 max-w-[520px] text-[12px] xl:text-[13px] leading-[1.75] text-[#8fa0b7]">
+                Centraliza el monitoreo de endpoints, el análisis heurístico, los archivos señuelo y las acciones de respuesta ante actividad potencialmente maliciosa.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mt-8 max-w-[520px]">
+            {[
+              ["ph ph-radar", "Detección", "Monitoreo continuo"],
+              ["ph ph-file-lock", "Engaño", "Archivos señuelo"],
+              ["ph ph-shield-check", "Respuesta", "Contención centralizada"],
+            ].map(([icon, title, detail]) => (
+              <div key={title} className="rounded-xl border p-3.5" style={{ background: "rgba(13,21,35,.72)", borderColor: "#18283f" }}>
+                <i className={icon} style={{ fontSize: "16px", color: "#4d8dff" }} />
+                <div className="text-[10px] font-semibold mt-2 text-[#d7e0ec]">{title}</div>
+                <div className="text-[8.5px] mt-1 text-[#647790]">{detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-between gap-4 text-[9px] text-[#53677f]">
+          <span>AGETIC · Estado Plurinacional de Bolivia</span>
+          <div className="flex items-center gap-2 font-semibold tracking-[.13em] uppercase">
+            <span>Detección</span><span className="w-1 h-1 rounded-full bg-[#29405f]" /><span>Monitoreo</span><span className="w-1 h-1 rounded-full bg-[#29405f]" /><span>Respuesta</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="flex-1 flex items-center justify-center p-5 sm:p-10 relative overflow-hidden" style={{ background: "#f2f6fb" }}>
+        <div className="absolute -top-32 -right-32 w-[420px] h-[420px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, rgba(37,99,235,.10), transparent 68%)" }} />
+        <div className="absolute -bottom-40 -left-40 w-[430px] h-[430px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, rgba(8,124,173,.06), transparent 68%)" }} />
+
+        <div className="relative w-full max-w-[420px] rounded-[24px] border bg-white px-7 sm:px-10 py-9 sm:py-10" style={{ borderColor: "#dfe8f3", boxShadow: "0 34px 76px -30px rgba(23,42,70,.28), 0 10px 28px rgba(23,42,70,.06)" }}>
+          <div className="absolute top-0 left-10 right-10 h-[3px] rounded-b-full" style={{ background: "linear-gradient(90deg, #2563eb, #38bdf8)" }} />
+
+          <div className="lg:hidden flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-xl border grid place-items-center" style={{ background: "#eef4ff", borderColor: "#d8e6ff" }}>
+              <img src="/static/logo-icon.png" alt="Sistema ALFA-Sentinel" className="w-[27px] h-auto" />
+            </div>
+            <div>
+              <div className="text-[13px] font-bold text-[#0f1b2d]">ALFA-Sentinel</div>
+              <div className="text-[9px] mt-1 uppercase tracking-[.12em] text-[#7b8ba0]">Consola central de seguridad</div>
+            </div>
+          </div>
+
+          <div className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[9px] font-semibold mb-4" style={{ background: "#eef4ff", color: "#2563eb" }}>
+            <i className="ph ph-lock-key" />
+            Acceso autorizado
+          </div>
+          <h2 className="m-0 text-[26px] font-bold tracking-[-.035em] text-[#0f1b2d]">Iniciar sesión</h2>
+          <p className="m-0 mt-2 text-[12px] leading-relaxed text-[#6d7d94]">Ingresa tus credenciales para acceder a la consola de gestión y supervisión.</p>
+
+          {error && (
+            <div className="mt-5 rounded-xl border px-3.5 py-3 text-[11px] flex items-start gap-2.5" style={{ background: "#fff2f4", borderColor: "#f5cbd2", color: "#c62f46" }}>
+              <i className="ph-fill ph-warning-circle text-[15px] mt-px" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="mt-7">
+            <div className="mb-4">
+              <label className="block text-[10px] font-semibold text-[#52647c] mb-1.5">Usuario</label>
+              <div className="relative">
+                <i className="ph ph-user absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[#7b8ba0]" />
+                <input type="text" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Nombre de usuario" className="w-full py-3 pl-10 pr-4 rounded-xl border text-[12px] text-[#0f1b2d] outline-none transition-all" style={{ background: "#f7faff", borderColor: "#d6e1ee" }} />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-semibold text-[#52647c] mb-1.5">Contraseña</label>
+              <div className="relative">
+                <i className="ph ph-lock-simple absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[#7b8ba0]" />
+                <input type={showPassword ? "text" : "password"} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Contraseña" className="w-full py-3 pl-10 pr-11 rounded-xl border text-[12px] text-[#0f1b2d] outline-none transition-all" style={{ background: "#f7faff", borderColor: "#d6e1ee" }} />
+                <button type="button" aria-label="Mostrar u ocultar contraseña" onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 border-0 bg-transparent cursor-pointer text-[#7b8ba0]">
+                  <i className={showPassword ? "ph ph-eye-slash" : "ph ph-eye"} style={{ fontSize: "16px" }} />
                 </button>
               </div>
             </div>
 
-            <div className="text-right mt-1 mb-3">
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setShowForgotNote((v) => !v);
-                }}
-                className="text-[0.79rem] font-medium text-[#3059d6] hover:underline"
-              >
-                ¿Olvidaste tu contraseña?
-              </a>
+            <div className="text-right mt-2.5">
+              <button type="button" onClick={() => setShowForgotNote((v) => !v)} className="border-0 bg-transparent cursor-pointer text-[10px] font-semibold text-[#2563eb] p-0">¿Olvidaste tu contraseña?</button>
             </div>
 
             {showForgotNote && (
-              <div className="text-[0.77rem] text-[#6b7690] bg-[#eef2f9] border border-[#e6e9f2] px-3 py-2 rounded-md mb-4">
-                Por seguridad, el restablecimiento de contraseña lo gestiona tu administrador del sistema.
+              <div className="mt-3 rounded-xl border px-3.5 py-3 text-[10px] leading-relaxed" style={{ background: "#f7faff", borderColor: "#dfe8f3", color: "#6d7d94" }}>
+                Por seguridad, el restablecimiento de contraseña es gestionado por el administrador del sistema.
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-[0.82rem] rounded-[10px] text-white text-[0.9rem] font-bold tracking-wide disabled:opacity-60 transition-transform hover:-translate-y-px active:translate-y-px"
-              style={{
-                background: "linear-gradient(120deg, #5b8fe0, #3059d6)",
-                boxShadow: "0 14px 24px -10px rgba(48,89,214,0.55)",
-              }}
-            >
-              {loading ? "INGRESANDO..." : "INICIAR SESIÓN"}
+            <button type="submit" disabled={loading} className="w-full mt-6 py-3 rounded-xl border-0 cursor-pointer text-white text-[11px] font-bold tracking-[.03em] disabled:opacity-60 transition-transform hover:-translate-y-px active:translate-y-0" style={{ background: "linear-gradient(115deg, #2563eb, #2f76f6)", boxShadow: "0 16px 28px -12px rgba(37,99,235,.48)" }}>
+              <span className="inline-flex items-center justify-center gap-2">
+                <i className={loading ? "ph ph-spinner" : "ph ph-sign-in"} style={{ fontSize: "14px" }} />
+                {loading ? "Ingresando..." : "Ingresar a la consola"}
+              </span>
             </button>
           </form>
 
-          <div className="mt-9 text-center">
-            <div className="text-[0.76rem] font-semibold text-[#3a4560]">ALFA-Sentinel v1.0.0</div>
-            <div className="text-[0.71rem] text-[#6b7690] mt-0.5">
-              © 2026 — Plataforma de Gestión de Seguridad
-            </div>
+          <div className="mt-8 pt-5 border-t text-center" style={{ borderColor: "#e7eef6" }}>
+            <div className="text-[9.5px] font-semibold text-[#52647c]">Sistema ALFA-Sentinel · v1.0.0</div>
+            <div className="text-[8.5px] text-[#8b98a9] mt-1">Plataforma de detección temprana y gestión de seguridad</div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
