@@ -79,9 +79,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
           </div>
           <div className="min-w-0">
             <div className="text-[14px] font-bold tracking-[.02em] text-[#f4f7fb]">ALFA-Sentinel</div>
-            <div className="text-[10px] leading-[1.35] mt-1 text-[#6f819a]">
-              Consola central de seguridad
-            </div>
+            <div className="text-[10px] leading-[1.35] mt-1 text-[#6f819a]">Consola central de seguridad</div>
           </div>
         </div>
       </div>
@@ -105,9 +103,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
       <nav className="px-3.5 pt-1 pb-3 flex-1 overflow-auto">
         {NAV_GROUPS.map((group, groupIndex) => (
           <div key={group.label} className={groupIndex === 0 ? "" : "mt-5"}>
-            <div className="px-2.5 mb-2 text-[9px] font-bold tracking-[.16em] text-[#50617a]">
-              {group.label}
-            </div>
+            <div className="px-2.5 mb-2 text-[9px] font-bold tracking-[.16em] text-[#50617a]">{group.label}</div>
             <div className="flex flex-col gap-1">
               {group.items.map((item) => {
                 const active = item.page === page;
@@ -131,10 +127,7 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
                             border: "1px solid rgba(77,141,255,.15)",
                             boxShadow: "inset 3px 0 0 #4d8dff, 0 8px 26px rgba(25,87,194,.07)",
                           }
-                        : {
-                            color: "#8191a8",
-                            border: "1px solid transparent",
-                          }
+                        : { color: "#8191a8", border: "1px solid transparent" }
                     }
                   >
                     <div
@@ -168,12 +161,16 @@ export default function Sidebar({ alertsActive, incidentsActive, page, onNavigat
       </nav>
 
       <div className="px-4 py-4 border-t" style={{ borderColor: "#152136" }}>
-        <div className="flex gap-2.5 items-center">
+        <div className="flex gap-3 items-center">
           <div
-            className="w-8 h-8 shrink-0 rounded-lg grid place-items-center text-[9px] font-bold tracking-wide"
-            style={{ background: "#101a2a", color: "#7f90a8", border: "1px solid #1a2940" }}
+            className="w-[52px] h-8 shrink-0 rounded-lg flex items-center justify-center overflow-hidden"
+            style={{ background: "rgba(255,255,255,.025)", border: "1px solid #1a2940" }}
           >
-            AG
+            <img
+              src="/static/logo_main_white.png"
+              alt="AGETIC"
+              className="max-w-[43px] max-h-[22px] object-contain"
+            />
           </div>
           <div className="text-[9.5px] leading-[1.35] text-[#53657e]">
             AGETIC · Estado Plurinacional
