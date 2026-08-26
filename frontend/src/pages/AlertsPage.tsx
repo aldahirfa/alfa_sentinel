@@ -27,7 +27,6 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [rule, setRule] = useState("");
   const [view, setView] = useState<"activas" | "todos">("activas");
   const [page, setPage] = useState(1);
-
   const [data, setData] = useState<AlertsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +63,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }
 
   useEffect(load, [search, severity, status, since, rule, view, page, refreshToken]);
@@ -77,21 +74,11 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
     <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <AlertsSummaryCards summary={data.summary} />}
 
-      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
-        <div>
-          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
-            Investigación
-          </div>
-          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>
-            Priorización y análisis de detecciones
-          </div>
-          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-            Filtra la cola por severidad, estado, período o mecanismo que originó la detección.
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
-          Actualización en tiempo real
+      <div className="px-1 pt-1">
+        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Investigación</div>
+        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Priorización y análisis de detecciones</div>
+        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+          Filtra la cola por severidad, estado, período o mecanismo que originó la detección.
         </div>
       </div>
 
@@ -112,10 +99,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
       />
 
       {error ? (
-        <div
-          className="soc-panel rounded-2xl p-10 text-center"
-          style={{ color: "var(--crit)" }}
-        >
+        <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
           <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--crit-soft)" }}>
             <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
           </div>
@@ -144,12 +128,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
         </>
       )}
 
-      <AlertDrawer
-        alertId={selectedId}
-        onClose={() => setSelectedId(null)}
-        onChanged={load}
-        onViewIncident={onViewIncident}
-      />
+      <AlertDrawer alertId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} onViewIncident={onViewIncident} />
     </main>
   );
 }
