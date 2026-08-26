@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import ReportsSummaryCards from "../components/ReportsSummaryCards";
 import GenerateReportForm from "../components/GenerateReportForm";
 import ReportsHistoryTable from "../components/ReportsHistoryTable";
@@ -44,7 +45,14 @@ export default function ReportsPage() {
   }, [toast]);
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="reportes"
+        eyebrow="Documentación y evidencia"
+        title="Generación y consulta de informes"
+        description="Consolida información de seguridad, endpoints e incidentes en documentos preparados para revisión y respaldo institucional."
+      />
+
       {toast && (
         <div className="soc-panel rounded-2xl px-4 py-3 flex items-start gap-3" style={{ background: "var(--ok-soft)", borderColor: "color-mix(in srgb, var(--ok) 28%, var(--line-soft))" }}>
           <div className="w-8 h-8 rounded-xl grid place-items-center shrink-0" style={{ background: "var(--ok-soft)", color: "var(--ok)" }}>
@@ -58,14 +66,6 @@ export default function ReportsPage() {
       )}
 
       {data && <ReportsSummaryCards totalReports={data.total_reports} lastGeneratedAt={data.last_generated_at} lastGeneratedBy={data.last_generated_by} />}
-
-      <div className="px-1 pt-1">
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Documentación y evidencia</div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Generación y consulta de informes</div>
-        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-          Consolida información de seguridad, endpoints e incidentes en documentos preparados para revisión y respaldo institucional.
-        </div>
-      </div>
 
       {data && (
         <GenerateReportForm
