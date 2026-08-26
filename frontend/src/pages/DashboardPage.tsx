@@ -17,14 +17,12 @@ interface Props {
 
 function SectionLabel({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
   return (
-    <div className="col-span-12 flex items-end justify-between gap-4 mt-2">
-      <div>
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
-          {eyebrow}
-        </div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>{title}</div>
-        {description && <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>{description}</div>}
+    <div className="col-span-12 mt-2 pb-3 border-b" style={{ borderColor: "var(--line-soft)" }}>
+      <div className="text-[9px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
+        {eyebrow}
       </div>
+      <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>{title}</div>
+      {description && <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>{description}</div>}
     </div>
   );
 }
@@ -52,12 +50,8 @@ export default function DashboardPage({ data }: Props) {
         <ActivityChart />
       </div>
       <div className="col-span-12 xl:col-span-4 flex flex-col gap-4">
-        <div className="flex-1 flex flex-col">
-          <EndpointStatusPanel status={data.endpoint_status} />
-        </div>
-        <div className="flex-1 flex flex-col">
-          <SystemStatusPanel status={data.system_status} />
-        </div>
+        <div className="flex-1 flex flex-col"><EndpointStatusPanel status={data.endpoint_status} /></div>
+        <div className="flex-1 flex flex-col"><SystemStatusPanel status={data.system_status} /></div>
       </div>
 
       <SectionLabel
@@ -65,31 +59,20 @@ export default function DashboardPage({ data }: Props) {
         title="Elementos que requieren revisión"
         description="Endpoints con riesgo, activaciones de archivos señuelo y detecciones que necesitan contexto operacional."
       />
-      <div className="col-span-12 xl:col-span-7">
-        <EndpointsAtRisk endpoints={data.endpoints_at_risk} />
-      </div>
-      <div className="col-span-12 xl:col-span-5">
-        <HoneyfileActivityPanel data={data.honeyfile_activity} />
-      </div>
+      <div className="col-span-12 xl:col-span-7"><EndpointsAtRisk endpoints={data.endpoints_at_risk} /></div>
+      <div className="col-span-12 xl:col-span-5"><HoneyfileActivityPanel data={data.honeyfile_activity} /></div>
 
-      <div className="col-span-12">
-        <RecentAlertsTable alerts={data.recent_alerts} />
-      </div>
+      <div className="col-span-12"><RecentAlertsTable alerts={data.recent_alerts} /></div>
 
       <SectionLabel
         eyebrow="Contexto operativo"
         title="Patrones de detección y actividad reciente"
         description="Señales dominantes y secuencia temporal de eventos observados por el Sistema ALFA-Sentinel."
       />
-      <div className="col-span-12 xl:col-span-7">
-        <TopDetections data={data.top_detections} />
-      </div>
-      <div className="col-span-12 xl:col-span-5">
-        <RecentActivityTimeline items={data.recent_activity} />
-      </div>
+      <div className="col-span-12 xl:col-span-7"><TopDetections data={data.top_detections} /></div>
+      <div className="col-span-12 xl:col-span-5"><RecentActivityTimeline items={data.recent_activity} /></div>
 
-      <div className="col-span-12 flex items-center justify-end gap-2 text-[9.5px] pt-2" style={{ color: "var(--tx-mute)" }}>
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)" }} />
+      <div className="col-span-12 flex items-center justify-end text-[9.5px] pt-2" style={{ color: "var(--tx-mute)" }}>
         Última actualización: {data.generated_at} · actualización automática cada 20 s
       </div>
     </main>
