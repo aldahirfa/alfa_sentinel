@@ -29,9 +29,7 @@ export default function ReportsPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }
 
   useEffect(() => {
@@ -46,24 +44,34 @@ export default function ReportsPage() {
   }, [toast]);
 
   return (
-    <main className="flex flex-col gap-3.5 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {toast && (
-        <div
-          className="rounded-[10px] border px-4 py-3 text-[12.5px] flex items-start gap-2"
-          style={{ background: "var(--ok-soft)", borderColor: "var(--ok)", color: "var(--ok)" }}
-        >
-          <i className="ph-fill ph-check-circle" style={{ fontSize: "16px", marginTop: "1px" }} />
-          {toast}
+        <div className="soc-panel rounded-2xl px-4 py-3 flex items-start gap-3" style={{ background: "var(--ok-soft)", borderColor: "color-mix(in srgb, var(--ok) 28%, var(--line-soft))" }}>
+          <div className="w-8 h-8 rounded-xl grid place-items-center shrink-0" style={{ background: "var(--ok-soft)", color: "var(--ok)" }}>
+            <i className="ph-fill ph-check-circle" style={{ fontSize: "16px" }} />
+          </div>
+          <div>
+            <div className="text-[10.5px] font-semibold" style={{ color: "var(--ok)" }}>Informe generado correctamente</div>
+            <div className="text-[10px] mt-1" style={{ color: "var(--tx-dim)" }}>{toast}</div>
+          </div>
         </div>
       )}
 
-      {data && (
-        <ReportsSummaryCards
-          totalReports={data.total_reports}
-          lastGeneratedAt={data.last_generated_at}
-          lastGeneratedBy={data.last_generated_by}
-        />
-      )}
+      {data && <ReportsSummaryCards totalReports={data.total_reports} lastGeneratedAt={data.last_generated_at} lastGeneratedBy={data.last_generated_by} />}
+
+      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
+        <div>
+          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Documentación y evidencia</div>
+          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Generación y consulta de informes</div>
+          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+            Consolida información de seguridad, endpoints e incidentes en documentos preparados para revisión y respaldo institucional.
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
+          Repositorio disponible
+        </div>
+      </div>
 
       {data && (
         <GenerateReportForm
@@ -79,11 +87,12 @@ export default function ReportsPage() {
       )}
 
       {error ? (
-        <div
-          className="rounded-[10px] border p-8 text-center text-sm"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", color: "var(--crit)" }}
-        >
-          {error}
+        <div className="soc-panel rounded-2xl p-10 text-center" style={{ color: "var(--crit)" }}>
+          <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--crit-soft)" }}>
+            <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
+          </div>
+          <div className="text-[12px] font-semibold">No se pudo cargar el archivo documental</div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
         <>
