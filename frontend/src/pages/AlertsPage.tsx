@@ -14,13 +14,7 @@ const PAGE_SIZE = 15;
 const DEBOUNCE_MS = 300;
 
 interface Props {
-  // Selección de alerta a abrir de entrada (viene de la campana de
-  // notificaciones en Topbar). Se envuelve en un objeto nuevo en cada
-  // click (ver App.tsx) para que el efecto se dispare también cuando
-  // se hace click dos veces seguidas sobre la misma alerta.
   initialAlertSelection?: { id: number } | null;
-  // Navega a Incidentes y abre el incidente indicado -- usado por
-  // AlertDrawer cuando la alerta ya está asociada a un incidente.
   onViewIncident: (id: number) => void;
 }
 
@@ -31,10 +25,6 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [status, setStatus] = useState<AlertStatus | "">("");
   const [since, setSince] = useState<"24h" | "7d" | "30d" | "">("");
   const [rule, setRule] = useState("");
-  // Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
-  // problema G): por defecto solo lo que requiere atención (activas) --
-  // Cerradas/Falso positivo quedan afuera hasta que el analista elige
-  // "Todos" a propósito. No se borra nada de la base, es solo un filtro.
   const [view, setView] = useState<"activas" | "todos">("activas");
   const [page, setPage] = useState(1);
 
@@ -43,26 +33,17 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const flashId = useRowFlash(selectedId);
-  // Sección 7/19/21 de "ALFA_SENTINEL — CORRECCIÓN DE TIEMPO REAL..."
-  // (2026-08-17, ver PENDIENTES.md): esta pantalla NO arranca su propio
-  // poll -- reacciona a la MISMA señal que ya consume la capa de
-  // alertas flotantes (un solo /alerts/open cada 3s, montado una vez en
-  // App.tsx). Cuando el proveedor global detecta una alerta nueva o
-  // cambiada, 'refreshToken' cambia y esto dispara un refetch normal
-  // (respetando filtros/página actuales), sin recargar toda la app.
   const { refreshToken } = useGlobalAlertsContext();
 
   useEffect(() => {
     if (initialAlertSelection != null) setSelectedId(initialAlertSelection.id);
   }, [initialAlertSelection]);
 
-  // Debounce del buscador -- no dispara un pedido por cada tecla.
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput), DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [searchInput]);
 
-  // Cualquier cambio de filtro vuelve a la página 1.
   useEffect(() => {
     setPage(1);
   }, [search, severity, status, since, rule, view]);
@@ -93,8 +74,26 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const hasFilters = Boolean(search || severity || status || since || rule);
 
   return (
-    <main className="flex flex-col gap-3.5 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       {data && <AlertsSummaryCards summary={data.summary} />}
+
+      <div className="flex items-end justify-between gap-4 flex-wrap px-1 pt-1">
+        <div>
+          <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>
+            Investigación
+          </div>
+          <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>
+            Priorización y análisis de detecciones
+          </div>
+          <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
+            Filtra la cola por severidad, estado, período o mecanismo que originó la detección.
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)", boxShadow: "0 0 0 3px var(--ok-soft)" }} />
+          Actualización en tiempo real
+        </div>
+      </div>
 
       <AlertsFilters
         search={searchInput}
@@ -114,10 +113,14 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
 
       {error ? (
         <div
-          className="rounded-[10px] border p-8 text-center text-sm"
-          style={{ background: "var(--surf)", borderColor: "var(--line)", color: "var(--crit)" }}
+          className="soc-panel rounded-2xl p-10 text-center"
+          style={{ color: "var(--crit)" }}
         >
-          {error}
+          <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--crit-soft)" }}>
+            <i className="ph ph-warning-circle" style={{ fontSize: "22px" }} />
+          </div>
+          <div className="text-[12px] font-semibold">No se pudo cargar la cola de alertas</div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
         <>
