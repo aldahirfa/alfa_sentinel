@@ -40,7 +40,7 @@ export default function HoneyfilesTable({ honeyfiles, loading, hasFilters, onSel
             <th className="pb-2 pr-3 font-semibold">Tipo</th>
             <th className="pb-2 pr-3 font-semibold">Estado</th>
             <th className="pb-2 pr-3 font-semibold">Últ. chequeo</th>
-            <th className="pb-2 font-semibold" />
+            <th className="pb-2 font-semibold text-right">Acción</th>
           </tr>
         </thead>
         <tbody>
@@ -99,14 +99,15 @@ export default function HoneyfilesTable({ honeyfiles, loading, hasFilters, onSel
                   <td className="py-2.5 pr-3" style={{ color: "var(--tx-mute)" }}>
                     {hf.last_checked_at ?? "—"}
                   </td>
-                  <td className="py-2.5">
+                  <td className="py-2.5 text-right">
                     <button
                       onClick={() => onSelect(hf.id)}
-                      className="flex items-center gap-1 text-[11.5px] font-medium border-0 bg-transparent cursor-pointer whitespace-nowrap"
-                      style={{ color: "var(--brand)" }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover whitespace-nowrap"
+                      style={{ background: "var(--brand-fill)", borderColor: "var(--brand-soft)", color: "var(--brand)" }}
+                      title="Ver detalles del honeyfile"
                     >
-                      Detalles
-                      <i className="ph ph-arrow-right text-[12px]" />
+                      <i className="ph ph-eye" style={{ fontSize: "13px" }} />
+                      <span className="text-[10px] font-semibold">Ver detalles</span>
                     </button>
                   </td>
                 </tr>
