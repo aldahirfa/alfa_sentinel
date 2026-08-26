@@ -40,17 +40,8 @@ export default function Topbar({
       }}
     >
       <div className="min-w-0 flex-1 py-3.5">
-        <div className="flex items-center gap-2.5 mb-1">
-          <span
-            className="text-[9px] font-bold tracking-[.16em] uppercase"
-            style={{ color: "var(--brand)" }}
-          >
-            Consola central
-          </span>
-          <span className="w-1 h-1 rounded-full" style={{ background: "var(--line)" }} />
-          <span className="text-[9px] font-semibold tracking-[.12em] uppercase" style={{ color: "var(--tx-mute)" }}>
-            Blue Team
-          </span>
+        <div className="text-[9px] font-bold tracking-[.16em] uppercase mb-1" style={{ color: "var(--brand)" }}>
+          Consola central de seguridad
         </div>
         <div className="flex items-baseline gap-3 min-w-0">
           <h1 className="text-[19px] font-bold m-0 tracking-[-.025em] truncate" style={{ color: "var(--tx)" }}>
