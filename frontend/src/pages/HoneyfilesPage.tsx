@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import HoneyfilesSummaryCards from "../components/HoneyfilesSummaryCards";
 import HoneyfilesFilters from "../components/HoneyfilesFilters";
 import HoneyfilesTable from "../components/HoneyfilesTable";
@@ -61,7 +62,14 @@ export default function HoneyfilesPage() {
   const hasFilters = Boolean(search || status || os);
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="honeyfiles"
+        eyebrow="Tecnología de engaño"
+        title="Cobertura y actividad de archivos señuelo"
+        description="Gestiona los señuelos desplegados, su integridad y cualquier activación detectada en los endpoints."
+      />
+
       {toast && (
         <div className="soc-panel rounded-2xl px-4 py-3 flex items-start gap-3" style={{ background: "var(--ok-soft)", borderColor: "color-mix(in srgb, var(--ok) 28%, var(--line-soft))" }}>
           <div className="w-8 h-8 rounded-xl grid place-items-center shrink-0" style={{ background: "var(--ok-soft)", color: "var(--ok)" }}>
@@ -75,14 +83,6 @@ export default function HoneyfilesPage() {
       )}
 
       {data && <HoneyfilesSummaryCards summary={data.summary} />}
-
-      <div className="px-1 pt-1">
-        <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Tecnología de engaño</div>
-        <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>Cobertura y actividad de archivos señuelo</div>
-        <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-mute)" }}>
-          Gestiona los señuelos desplegados, su integridad y cualquier activación detectada en los endpoints.
-        </div>
-      </div>
 
       <HoneyfilesFilters
         search={searchInput}
@@ -104,14 +104,7 @@ export default function HoneyfilesPage() {
           <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
-        <HoneyfilesTable
-          honeyfiles={data?.honeyfiles ?? []}
-          loading={loading}
-          hasFilters={hasFilters}
-          onSelect={setSelectedId}
-          selectedId={selectedId}
-          flashId={flashId}
-        />
+        <HoneyfilesTable honeyfiles={data?.honeyfiles ?? []} loading={loading} hasFilters={hasFilters} onSelect={setSelectedId} selectedId={selectedId} flashId={flashId} />
       )}
 
       <HoneyfileDrawer honeyfileId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} />
