@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModuleIntro from "../components/ModuleIntro";
 import AdminTabs from "../components/AdminTabs";
 import type { AdminTab } from "../components/AdminTabs";
 import UsersPanel from "../components/UsersPanel";
@@ -46,27 +47,23 @@ export default function AdministracionPage({ isAdmin }: Props) {
   const meta = TAB_META[tab];
 
   return (
-    <main className="soc-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
-      <section className="soc-panel-strong rounded-[22px] p-5 relative overflow-hidden">
-        <div className="absolute -right-16 -top-24 w-[280px] h-[280px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, var(--brand-glow), transparent 70%)", opacity: .45 }} />
-        <div className="relative z-[1] flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="text-[9.5px] font-bold tracking-[.16em] uppercase" style={{ color: "var(--brand)" }}>Gestión del sistema</div>
-            <div className="text-[20px] font-bold mt-1.5 tracking-[-.025em]" style={{ color: "var(--tx)" }}>Administración central</div>
-            <div className="text-[10.5px] mt-2 max-w-[700px] leading-relaxed" style={{ color: "var(--tx-dim)" }}>
-              Gestiona accesos, enrolamiento de agentes, parámetros operativos y trazabilidad administrativa desde un único espacio.
-            </div>
-          </div>
+    <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
+      <ModuleIntro
+        page="administracion"
+        eyebrow="Gestión del sistema"
+        title="Administración central"
+        description="Gestiona accesos, enrolamiento de agentes, parámetros operativos y trazabilidad administrativa desde un único espacio."
+        trailing={(
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl border text-[9.5px]" style={{ background: isAdmin ? "var(--brand-fill)" : "var(--surf2)", borderColor: isAdmin ? "var(--brand-soft)" : "var(--line-soft)", color: isAdmin ? "var(--brand)" : "var(--tx-mute)" }}>
             <i className={isAdmin ? "ph ph-shield-check" : "ph ph-eye"} />
             {isAdmin ? "Permisos administrativos" : "Acceso de solo lectura"}
           </div>
-        </div>
-      </section>
+        )}
+      />
 
       <AdminTabs tab={tab} onChange={setTab} />
 
-      <div className="px-1 pt-1">
+      <div className="module-subsection px-1 pt-1">
         <div className="text-[9px] font-bold tracking-[.14em] uppercase" style={{ color: "var(--brand)" }}>{meta.eyebrow}</div>
         <div className="text-[14px] font-semibold mt-1" style={{ color: "var(--tx)" }}>{meta.title}</div>
         <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{meta.description}</div>
