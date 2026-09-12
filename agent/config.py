@@ -28,9 +28,10 @@ ISOLATION_STATUS_URL = f"{SERVER_URL}/agent/isolation-status"
 
 ISOLATION_STATUS_REPORT_URL = f"{SERVER_URL}/agent/isolation-status/report"
 
-# PENDIENTE: reemplaza esto con el token que te devuelva
-# POST /enrollment-tokens (ver instrucciones). Es de un solo uso y
-# expira a los 15 minutos.
-ENROLLMENT_TOKEN = "F-zVtQWzRwExPhT9kNpxlg8aSQsu2nbmShJ_Q1JWSi0"
+# El código de enrolamiento NO se guarda en el repositorio. La consola
+# central genera uno temporal con formato XXXX-XXXX, válido 15 minutos
+# y de un solo uso. main.py lo recibe con --enroll y lo asigna acá solo
+# durante esa ejecución.
+ENROLLMENT_TOKEN = ""
 
 CREDENTIAL_FILE = "agent_credential.json"
