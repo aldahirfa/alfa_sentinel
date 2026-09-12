@@ -15,7 +15,7 @@ interface Props {
 
 const TAB_META: Record<AdminTab, { eyebrow: string; title: string; description: string }> = {
   usuarios: { eyebrow: "Control de acceso", title: "Usuarios y roles", description: "Administra cuentas, permisos y estado de acceso a la consola central." },
-  agentes: { eyebrow: "Enrolamiento", title: "Alta de nuevos agentes", description: "Genera credenciales temporales para registrar endpoints nuevos de forma controlada." },
+  agentes: { eyebrow: "Enrolamiento", title: "Alta de nuevos agentes", description: "Genera códigos temporales de un solo uso para registrar endpoints nuevos de forma controlada." },
   configuracion: { eyebrow: "Parámetros del sistema", title: "Configuración operacional", description: "Ajusta valores que afectan la interpretación del estado de los agentes y la consola." },
   auditoria: { eyebrow: "Trazabilidad", title: "Registro de actividad", description: "Consulta acciones administrativas y eventos relevantes realizados dentro del sistema." },
 };
