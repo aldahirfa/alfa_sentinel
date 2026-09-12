@@ -4,7 +4,7 @@
 # agente; no hay todavía un mecanismo automático de versionado.
 AGENT_VERSION = "1.0.0"
 
-SERVER_URL = "http://127.0.0.1:8000"
+SERVER_URL = "http://192.168.81.1:8000"
 
 ENROLLMENT_URL = f"{SERVER_URL}/enrollment"
 
