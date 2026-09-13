@@ -1,14 +1,10 @@
-import { useState } from "react";
 import type { CombinedItem } from "../types/incidentes";
 import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
 import { statusBucketPillStyle } from "../lib/incidentStatus";
 import { rowSelectionStyle } from "../lib/rowSelection";
-import { isolateIncident } from "../api/client";
 import {
-  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
-  ISOLATE_LABEL_COMPACT, ISOLATED_LABEL_COMPACT, PENDING_LABEL_COMPACT, SENDING_LABEL,
-  ISOLATE_TOOLTIP, confirmIsolate,
-  ISOLATE_BUTTON_CLASS_COMPACT, ISOLATE_BUTTON_STYLE_COMPACT,
+  ISOLATED_ICON_CLASS, PENDING_ICON_CLASS,
+  ISOLATED_LABEL_COMPACT, PENDING_LABEL_COMPACT,
 } from "../lib/isolationUi";
 
 interface Props {
@@ -18,7 +14,6 @@ interface Props {
   onSelect: (item: CombinedItem) => void;
   selectedKey: string | null;
   flashKey: string | null;
-  onIsolated: () => void;
 }
 
 function accentOf(item: CombinedItem): string {
@@ -40,25 +35,7 @@ function SkeletonRow() {
   );
 }
 
-export default function IncidentesTable({ items, loading, hasFilters, onSelect, selectedKey, flashKey, onIsolated }: Props) {
-  const [isolatingId, setIsolatingId] = useState<number | null>(null);
-  const [rowError, setRowError] = useState<{ id: number; message: string } | null>(null);
-
-  async function handleIsolate(e: React.MouseEvent, incidentId: number, hostname?: string | null) {
-    e.stopPropagation();
-    if (!confirmIsolate(hostname)) return;
-    setIsolatingId(incidentId);
-    setRowError(null);
-    try {
-      await isolateIncident(incidentId);
-      onIsolated();
-    } catch (err) {
-      setRowError({ id: incidentId, message: err instanceof Error ? err.message : "No se pudo enviar la orden." });
-    } finally {
-      setIsolatingId(null);
-    }
-  }
-
+export default function IncidentesTable({ items, loading, hasFilters, onSelect, selectedKey, flashKey }: Props) {
   return (
     <section className="soc-panel rounded-2xl overflow-hidden">
       <div className="px-5 py-4 flex items-center gap-3 border-b" style={{ borderColor: "var(--line-soft)", background: "linear-gradient(90deg, var(--surf), var(--surf2))" }}>
@@ -168,27 +145,29 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                         <div className="flex items-center gap-2 justify-end">
                           {item.kind === "incident" && (
                             item.isolation_status === "REQUESTED" || item.isolation_status === "RELEASE_REQUESTED" ? (
-                              <span className="flex items-center gap-1.5 text-[9.5px] font-bold px-2 py-1 whitespace-nowrap" style={{ color: "var(--warn)" }}><i className={`${PENDING_ICON_CLASS} text-[12px]`} />{PENDING_LABEL_COMPACT}</span>
+                              <span className="flex items-center gap-1.5 text-[9.5px] font-bold px-2 py-1 whitespace-nowrap" style={{ color: "var(--warn)" }}>
+                                <i className={`${PENDING_ICON_CLASS} text-[12px]`} />{PENDING_LABEL_COMPACT}
+                              </span>
                             ) : item.isolation_status === "EXECUTED" ? (
-                              <span className="flex items-center gap-1.5 text-[9.5px] font-bold px-2 py-1 whitespace-nowrap" style={{ color: "var(--crit)" }}><i className={`${ISOLATED_ICON_CLASS} text-[12px]`} />{ISOLATED_LABEL_COMPACT}</span>
+                              <span className="flex items-center gap-1.5 text-[9.5px] font-bold px-2 py-1 whitespace-nowrap" style={{ color: "var(--crit)" }}>
+                                <i className={`${ISOLATED_ICON_CLASS} text-[12px]`} />{ISOLATED_LABEL_COMPACT}
+                              </span>
                             ) : (
-                              <button disabled={isolatingId === item.id} onClick={(e) => handleIsolate(e, item.id, item.hostname)} title={ISOLATE_TOOLTIP} className={ISOLATE_BUTTON_CLASS_COMPACT} style={ISOLATE_BUTTON_STYLE_COMPACT}>
-                                <i className={isolatingId === item.id ? `${SPINNER_ICON_CLASS} text-[12px]` : `${ISOLATE_ICON_CLASS} text-[12px]`} />
-                                {isolatingId === item.id ? SENDING_LABEL : ISOLATE_LABEL_COMPACT}
-                              </button>
+                              <span className="flex items-center gap-1.5 text-[9.5px] font-semibold px-2 py-1 whitespace-nowrap" style={{ color: "var(--tx-mute)" }}>
+                                <i className="ph ph-shield" style={{ fontSize: "12px" }} />Sin aislar
+                              </span>
                             )
                           )}
                           <button
                             onClick={(e) => { e.stopPropagation(); onSelect(item); }}
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover whitespace-nowrap"
                             style={{ background: "var(--brand-fill)", borderColor: "var(--brand-soft)", color: "var(--brand)" }}
-                            title="Ver detalles del caso"
+                            title="Revisar el caso y gestionar la respuesta contextual"
                           >
                             <i className="ph ph-eye" style={{ fontSize: "13px" }} />
                             <span className="text-[10px] font-semibold">Ver detalles</span>
                           </button>
                         </div>
-                        {rowError?.id === item.id && <div className="text-[9px] max-w-[190px] text-right" style={{ color: "var(--crit)" }}>{rowError.message}</div>}
                       </div>
                     </td>
                   </tr>
