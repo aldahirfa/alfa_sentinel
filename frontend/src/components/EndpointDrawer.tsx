@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchEndpointDrawer, isolateIncident, releaseIsolation } from "../api/client";
+import { fetchEndpointDrawer } from "../api/client";
 import type { EndpointDrawerData } from "../types/endpoints";
 import { severityPillStyle } from "../lib/severity";
 import {
@@ -10,11 +10,6 @@ import {
 } from "../lib/endpointStatus";
 import type { ConnStatus } from "../types/endpoints";
 import AgentRulesModal from "./AgentRulesModal";
-import {
-  ISOLATE_ICON_CLASS, RELEASE_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
-  ISOLATE_LABEL_FULL, RELEASE_LABEL_FULL, PENDING_LABEL_FULL, SENDING_LABEL,
-  ISOLATE_TOOLTIP, RELEASE_TOOLTIP, confirmIsolate,
-} from "../lib/isolationUi";
 
 interface Props {
   endpointId: number | null;
@@ -52,55 +47,12 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
   const [data, setData] = useState<EndpointDrawerData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
-  const [isolating, setIsolating] = useState(false);
-  const [isolateError, setIsolateError] = useState<string | null>(null);
-  const [isolateRequested, setIsolateRequested] = useState(false);
-  const [releasing, setReleasing] = useState(false);
-  const [releaseError, setReleaseError] = useState<string | null>(null);
-  const [releaseRequested, setReleaseRequested] = useState(false);
-
-  async function handleIsolate() {
-    if (!data?.active_incident_id || isolating) return;
-    if (!confirmIsolate(data.hostname)) return;
-    setIsolating(true);
-    setIsolateError(null);
-    try {
-      await isolateIncident(data.active_incident_id);
-      setIsolateRequested(true);
-    } catch (err) {
-      setIsolateError(err instanceof Error ? err.message : "No se pudo enviar la orden de aislamiento.");
-    } finally {
-      setIsolating(false);
-    }
-  }
-
-  // Mismo backend/máquina de estados que "Liberar" en
-  // IsolationsHistoryTable.tsx/CriticalIncidentsTable.tsx -- una sola
-  // implementación (sección 13 de "ALFA_SENTINEL — CORRECCIÓN DE
-  // TIEMPO REAL...", 2026-08-17, ver PENDIENTES.md).
-  async function handleRelease() {
-    if (!data?.isolation_id || releasing) return;
-    setReleasing(true);
-    setReleaseError(null);
-    try {
-      await releaseIsolation(data.isolation_id);
-      setReleaseRequested(true);
-    } catch (err) {
-      setReleaseError(err instanceof Error ? err.message : "No se pudo enviar la orden de liberación.");
-    } finally {
-      setReleasing(false);
-    }
-  }
 
   useEffect(() => {
     if (endpointId !== null) {
       setRender(true);
       setData(null);
       setError(null);
-      setIsolateError(null);
-      setIsolateRequested(false);
-      setReleaseError(null);
-      setReleaseRequested(false);
       fetchEndpointDrawer(endpointId)
         .then(setData)
         .catch(() => setError("No se pudo cargar la información de este endpoint."));
@@ -126,11 +78,6 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
 
   const connStatus = data ? connStatusOf(data) : null;
 
-  // Timeline mínima, solo con eventos que realmente tenemos para este
-  // endpoint (no existe un log unificado de actividad por endpoint
-  // todavía -- ver PENDIENTES.md). Orden aproximado: lo más reciente
-  // primero, el registro del endpoint siempre al final porque es,
-  // por definición, el evento más viejo.
   type TimelineItem = { icon: string; color: string; label: string; detail: string; time: string };
   const timeline: TimelineItem[] = [];
   if (data) {
@@ -177,12 +124,11 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
           transition: "transform 220ms ease",
         }}
       >
-        {/* Encabezado */}
         <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
           {data && (
-            <i 
-              className={data.operating_system.toLowerCase().includes("win") ? "ph-fill ph-windows-logo mt-1" : data.operating_system.toLowerCase().includes("linux") ? "ph-fill ph-linux-logo mt-1" : "ph-fill ph-desktop mt-1"} 
-              style={{ fontSize: "28px", color: "var(--tx-dim)" }} 
+            <i
+              className={data.operating_system.toLowerCase().includes("win") ? "ph-fill ph-windows-logo mt-1" : data.operating_system.toLowerCase().includes("linux") ? "ph-fill ph-linux-logo mt-1" : "ph-fill ph-desktop mt-1"}
+              style={{ fontSize: "28px", color: "var(--tx-dim)" }}
             />
           )}
           <div className="min-w-0 flex-1">
@@ -209,9 +155,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
 
         <div className="flex-1 overflow-y-auto">
           {error && (
-            <div className="px-5 py-6 text-center text-sm" style={{ color: "var(--crit)" }}>
-              {error}
-            </div>
+            <div className="px-5 py-6 text-center text-sm" style={{ color: "var(--crit)" }}>{error}</div>
           )}
 
           {!data && !error && (
@@ -224,7 +168,6 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
 
           {data && connStatus && (
             <>
-              {/* Estado principal */}
               <div className="px-5 py-4">
                 <div
                   className="rounded-xl border p-4 shadow-sm"
@@ -235,10 +178,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold" style={{ color: "var(--tx-mute)" }}>Nivel de riesgo</span>
-                    <span
-                      className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
-                      style={severityPillStyle(data.risk_bucket)}
-                    >
+                    <span className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full" style={severityPillStyle(data.risk_bucket)}>
                       {data.risk_bucket.toUpperCase()}
                     </span>
                   </div>
@@ -266,7 +206,6 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 </div>
               </div>
 
-              {/* Información del endpoint */}
               <Section title="Información del endpoint">
                 <Field label="Hostname" value={data.hostname} />
                 <Field label="Sistema operativo" value={`${data.operating_system} ${data.os_version}`.trim()} />
@@ -277,15 +216,10 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 <Field label="Último heartbeat" value={data.last_seen_at} />
               </Section>
 
-              {/* Estado de seguridad */}
               <Section title="Estado de seguridad">
                 <Field
                   label="Alertas activas"
-                  value={
-                    <span style={{ color: data.alerts_active > 0 ? "var(--warn)" : "var(--tx)" }}>
-                      {data.alerts_active}
-                    </span>
-                  }
+                  value={<span style={{ color: data.alerts_active > 0 ? "var(--warn)" : "var(--tx)" }}>{data.alerts_active}</span>}
                 />
                 <Field
                   label="Incidentes asociados"
@@ -309,7 +243,6 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 )}
               </Section>
 
-              {/* Honeyfiles */}
               <Section title="Honeyfiles">
                 {data.honeyfiles_total === 0 ? (
                   <p className="text-[12px]" style={{ color: "var(--tx-mute)" }}>
@@ -320,13 +253,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                     <Field label="Honeyfiles desplegados" value={data.honeyfiles_total} />
                     <Field
                       label="Estado"
-                      value={
-                        data.honeyfiles_violated_file ? (
-                          <span style={{ color: "var(--crit)" }}>Violada</span>
-                        ) : (
-                          <span style={{ color: "var(--ok)" }}>Intactas</span>
-                        )
-                      }
+                      value={data.honeyfiles_violated_file ? <span style={{ color: "var(--crit)" }}>Violada</span> : <span style={{ color: "var(--ok)" }}>Intactas</span>}
                     />
                     {data.honeyfiles_violated_file && (
                       <div className="mt-1.5 text-[11.5px]" style={{ color: "var(--tx-dim)" }}>
@@ -337,7 +264,6 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 )}
               </Section>
 
-              {/* Actividad reciente */}
               {timeline.length > 0 && (
                 <Section title="Actividad reciente">
                   <div className="flex flex-col gap-0 relative before:absolute before:inset-y-2 before:left-[5px] before:w-px before:bg-[var(--line)]">
@@ -346,9 +272,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                         <div className="w-[11px] h-[11px] rounded-full mt-1 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: item.color }} />
                         <div className="min-w-0">
                           <div className="text-[12.5px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.label}</div>
-                          {item.detail && (
-                            <div className="text-[11px] mt-0.5 font-medium truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
-                          )}
+                          {item.detail && <div className="text-[11px] mt-0.5 font-medium truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>}
                           <div className="text-[10.5px] mt-1 font-medium" style={{ color: "var(--tx-dim)" }}>{item.time}</div>
                         </div>
                       </div>
@@ -357,23 +281,17 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 </Section>
               )}
 
-              {/* Alertas */}
               <Section title="Alertas">
-                  <a
-                    href={`/detecciones?agent_id=${data.id}`}
-                    className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12.5px] font-bold no-underline border transition-premium btn-hover shadow-sm"
-                    style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "transparent" }}
-                  >
-                    Ver alertas de este endpoint
-                    <i className="ph-fill ph-arrow-right text-[14px]" />
-                  </a>
+                <a
+                  href={`/detecciones?agent_id=${data.id}`}
+                  className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12.5px] font-bold no-underline border transition-premium btn-hover shadow-sm"
+                  style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "transparent" }}
+                >
+                  Ver alertas de este endpoint
+                  <i className="ph-fill ph-arrow-right text-[14px]" />
+                </a>
               </Section>
 
-              {/* Configuración de reglas por endpoint (2026-08-16, ver
-                  PENDIENTES.md) -- override puntual sobre 'agent_rule',
-                  reusa GET/PATCH/DELETE /api/agents/{agent_id}/rules.
-                  data.id acá ES el agent_id: /api/endpoints/{agent_id}/drawer
-                  devuelve agents.id, no endpoints.id (ver server/main.py). */}
               <Section title="Configuración de reglas">
                 <button
                   onClick={() => setRulesModalOpen(true)}
@@ -385,88 +303,59 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                 </button>
               </Section>
 
-              {/* Acción de aislamiento -- disparo MANUAL real (2026-08-17,
-                  ver PENDIENTES.md, "Aislamiento de host -- modo
-                  development, laboratorio y producción"): usa el mismo
-                  mecanismo de backend/agente que el automático (POST
-                  /incidents/{id}/isolate). host_isolations.incident_id
-                  es NOT NULL -- sin un incidente activo real para este
-                  endpoint no hay a qué asociar la orden, así que el
-                  botón queda deshabilitado con un motivo honesto en vez
-                  de inventar un incidente. */}
-              {!data.is_isolated && (
-                <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
-                  {isolateRequested ? (
+              <Section title="Contención del endpoint">
+                {data.is_isolated ? (
+                  <>
                     <div
                       className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
-                      style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
-                    >
-                      <i className={PENDING_ICON_CLASS} style={{ fontSize: "15px" }} />
-                      {PENDING_LABEL_FULL}
-                    </div>
-                  ) : (
-                    <button
-                      disabled={!data.active_incident_id || isolating}
-                      onClick={handleIsolate}
-                      title={
-                        data.active_incident_id
-                          ? ISOLATE_TOOLTIP
-                          : "No hay un incidente activo asociado a este endpoint -- el aislamiento se asocia siempre a un incidente real."
-                      }
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
                       style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
                     >
-                      <i className={isolating ? SPINNER_ICON_CLASS : ISOLATE_ICON_CLASS} style={{ fontSize: "15px" }} />
-                      {isolating ? SENDING_LABEL : ISOLATE_LABEL_FULL}
-                    </button>
-                  )}
-                  {isolateError && (
-                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--crit)" }}>{isolateError}</p>
-                  )}
-                  {!data.active_incident_id && !isolateRequested && (
+                      <i className="ph-fill ph-shield-check" style={{ fontSize: "15px" }} />
+                      Endpoint aislado
+                    </div>
                     <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
-                      No hay un incidente activo para este endpoint -- el aislamiento automático sí se ejecuta
-                      cuando el motor heurístico determina que corresponde.
+                      Endpoints muestra el estado. La gestión y reversión de la contención se realiza desde Acciones de respuesta.
                     </p>
-                  )}
-                </div>
-              )}
-
-              {/* Acción de liberación -- mismo backend/máquina de estados
-                  que "Liberar" en IsolationsHistoryTable.tsx y
-                  CriticalIncidentsTable.tsx (POST /host-isolations/{id}/
-                  release), una sola implementación en todo el sistema
-                  (sección 13 de "ALFA_SENTINEL — CORRECCIÓN DE TIEMPO
-                  REAL...", 2026-08-17, ver PENDIENTES.md). Amarillo,
-                  nunca rojo (sección 11) -- Liberar es lo opuesto de
-                  Aislar, no una acción de riesgo. */}
-              {data.is_isolated && (
-                <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
-                  {releaseRequested ? (
+                    <a
+                      href="/respuesta#historial-aislamientos"
+                      className="mt-2.5 flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12px] font-semibold no-underline border transition-premium btn-hover"
+                      style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "var(--brand-fill)" }}
+                    >
+                      Ver acción de respuesta
+                      <i className="ph ph-arrow-right" style={{ fontSize: "13px" }} />
+                    </a>
+                  </>
+                ) : data.active_incident_id ? (
+                  <>
                     <div
                       className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
-                      style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                      style={{ border: "1px solid var(--line)", color: "var(--tx-dim)", background: "var(--surf2)" }}
                     >
-                      <i className="ph-fill ph-hourglass-medium" style={{ fontSize: "15px" }} />
-                      Orden de liberación enviada -- esperando confirmación del agente
+                      <i className="ph ph-shield" style={{ fontSize: "15px" }} />
+                      Endpoint no aislado
                     </div>
-                  ) : (
-                    <button
-                      disabled={!data.isolation_id || releasing}
-                      onClick={handleRelease}
-                      title={data.isolation_id ? RELEASE_TOOLTIP : "No se encontró la orden de aislamiento asociada a este endpoint."}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
-                      style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
+                      Hay un incidente activo. La decisión contextual de aislamiento se realiza desde el incidente asociado.
+                    </p>
+                    <a
+                      href={`/incidentes/${data.active_incident_id}`}
+                      className="mt-2.5 flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12px] font-semibold no-underline border transition-premium btn-hover"
+                      style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "var(--brand-fill)" }}
                     >
-                      <i className={releasing ? SPINNER_ICON_CLASS : RELEASE_ICON_CLASS} style={{ fontSize: "15px" }} />
-                      {releasing ? SENDING_LABEL : RELEASE_LABEL_FULL}
-                    </button>
-                  )}
-                  {releaseError && (
-                    <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--crit)" }}>{releaseError}</p>
-                  )}
-                </div>
-              )}
+                      Ver incidente asociado
+                      <i className="ph ph-arrow-right" style={{ fontSize: "13px" }} />
+                    </a>
+                  </>
+                ) : (
+                  <div
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
+                    style={{ border: "1px solid var(--line)", color: "var(--tx-mute)", background: "var(--surf2)" }}
+                  >
+                    <i className="ph ph-shield" style={{ fontSize: "15px" }} />
+                    Sin contención activa
+                  </div>
+                )}
+              </Section>
             </>
           )}
         </div>

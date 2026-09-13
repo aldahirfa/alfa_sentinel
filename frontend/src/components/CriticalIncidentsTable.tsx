@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { CriticalIncidentItem } from "../types/respuesta";
 import { severityPillStyle } from "../lib/severity";
-import { isolateIncident, releaseIsolation } from "../api/client";
+import { isolateIncident } from "../api/client";
 import {
-  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, RELEASE_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
-  ISOLATE_LABEL_COMPACT, ISOLATED_LABEL_COMPACT, RELEASE_LABEL_COMPACT, PENDING_LABEL_COMPACT, SENDING_LABEL,
-  ISOLATE_TOOLTIP, RELEASE_TOOLTIP, confirmIsolate,
+  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, PENDING_ICON_CLASS, SPINNER_ICON_CLASS,
+  ISOLATE_LABEL_COMPACT, ISOLATED_LABEL_COMPACT, PENDING_LABEL_COMPACT, SENDING_LABEL,
+  ISOLATE_TOOLTIP, confirmIsolate,
   ISOLATE_BUTTON_CLASS_COMPACT, ISOLATE_BUTTON_STYLE_COMPACT,
 } from "../lib/isolationUi";
 
@@ -17,7 +17,6 @@ interface Props {
 
 export default function CriticalIncidentsTable({ items, loading, onIsolated }: Props) {
   const [isolatingId, setIsolatingId] = useState<number | null>(null);
-  const [releasingId, setReleasingId] = useState<number | null>(null);
   const [rowError, setRowError] = useState<{ id: number; message: string } | null>(null);
 
   async function handleIsolate(incidentId: number, hostname?: string | null) {
@@ -31,19 +30,6 @@ export default function CriticalIncidentsTable({ items, loading, onIsolated }: P
       setRowError({ id: incidentId, message: err instanceof Error ? err.message : "No se pudo enviar la orden." });
     } finally {
       setIsolatingId(null);
-    }
-  }
-
-  async function handleRelease(isolationId: number, rowKey: number) {
-    setReleasingId(rowKey);
-    setRowError(null);
-    try {
-      await releaseIsolation(isolationId);
-      onIsolated();
-    } catch (err) {
-      setRowError({ id: rowKey, message: err instanceof Error ? err.message : "No se pudo enviar la orden de liberación." });
-    } finally {
-      setReleasingId(null);
     }
   }
 
@@ -74,7 +60,7 @@ export default function CriticalIncidentsTable({ items, loading, onIsolated }: P
               <th className="px-3 py-3 font-semibold">Estado</th>
               <th className="px-3 py-3 font-semibold">Responsable</th>
               <th className="px-3 py-3 font-semibold">Abierto</th>
-              <th className="px-3 py-3 font-semibold">Aislamiento</th>
+              <th className="px-3 py-3 font-semibold">Contención</th>
               <th className="px-4 py-3 font-semibold text-right">Acción</th>
             </tr>
           </thead>
@@ -123,18 +109,14 @@ export default function CriticalIncidentsTable({ items, loading, onIsolated }: P
                     ) : item.isolation_status === "EXECUTED" ? (
                       <div className="flex items-center gap-2.5">
                         <span className="text-[10px] font-semibold whitespace-nowrap" style={{ color: "var(--crit)" }}><i className={`${ISOLATED_ICON_CLASS} mr-1`} />{ISOLATED_LABEL_COMPACT}</span>
-                        {item.isolation_id && (
-                          <button
-                            disabled={releasingId === item.id}
-                            onClick={(e) => { e.stopPropagation(); handleRelease(item.isolation_id!, item.id); }}
-                            title={RELEASE_TOOLTIP}
-                            className="flex items-center gap-1.5 text-[10px] font-semibold whitespace-nowrap cursor-pointer border-0 bg-transparent disabled:opacity-50 transition-premium btn-hover"
-                            style={{ color: "var(--warn)" }}
-                          >
-                            <i className={releasingId === item.id ? SPINNER_ICON_CLASS : RELEASE_ICON_CLASS} />
-                            {releasingId === item.id ? SENDING_LABEL : RELEASE_LABEL_COMPACT}
-                          </button>
-                        )}
+                        <a
+                          href="#historial-aislamientos"
+                          className="text-[10px] font-semibold no-underline whitespace-nowrap transition-premium btn-hover"
+                          style={{ color: "var(--brand)" }}
+                          title="La liberación se gestiona desde el historial de contención."
+                        >
+                          Gestionar
+                        </a>
                       </div>
                     ) : (
                       <button disabled={isolatingId === item.id} onClick={(e) => { e.stopPropagation(); handleIsolate(item.id, item.hostname); }} title={ISOLATE_TOOLTIP} className={ISOLATE_BUTTON_CLASS_COMPACT} style={ISOLATE_BUTTON_STYLE_COMPACT}>

@@ -33,9 +33,9 @@ export default function RespuestaPage() {
     <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       <ModuleIntro
         page="respuesta"
-        eyebrow="Contención y recuperación"
+        eyebrow="Contención operativa"
         title="Centro de acciones de respuesta"
-        description="Ejecuta y supervisa aislamientos de red asociados a incidentes críticos, con trazabilidad de las acciones aplicadas sobre cada endpoint."
+        description="Centraliza las acciones permitidas sobre endpoints y conserva la trazabilidad de cada solicitud, ejecución y reversión asociada a un incidente."
       />
 
       {data && <RespuestaSummaryCards summary={data.summary} />}
