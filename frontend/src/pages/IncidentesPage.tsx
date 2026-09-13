@@ -112,7 +112,7 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
         </div>
       ) : (
         <>
-          <IncidentesTable items={data?.items ?? []} loading={loading} hasFilters={hasFilters} onSelect={(item: CombinedItem) => setSelected({ kind: item.kind, id: item.id })} onIsolated={load} selectedKey={selectedKey} flashKey={flashKey} />
+          <IncidentesTable items={data?.items ?? []} loading={loading} hasFilters={hasFilters} onSelect={(item: CombinedItem) => setSelected({ kind: item.kind, id: item.id })} selectedKey={selectedKey} flashKey={flashKey} />
           {data && <IncidentesPagination page={data.page} pageSize={data.page_size} totalPages={data.total_pages} filteredTotal={data.filtered_total} onPageChange={setPage} />}
         </>
       )}
