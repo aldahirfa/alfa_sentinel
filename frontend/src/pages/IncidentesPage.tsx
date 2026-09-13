@@ -78,9 +78,9 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
     <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       <ModuleIntro
         page="incidentes"
-        eyebrow="Investigación y respuesta"
+        eyebrow="Investigación y decisión"
         title="Gestión centralizada de casos"
-        description="Prioriza incidentes, asigna responsables y ejecuta acciones de contención sobre los endpoints afectados."
+        description="Prioriza incidentes, asigna responsables y, cuando corresponde, solicita el aislamiento del endpoint afectado desde el contexto del caso."
       />
 
       {data && <IncidentesSummaryCards summary={data.summary} />}
