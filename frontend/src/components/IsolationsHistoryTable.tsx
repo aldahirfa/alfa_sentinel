@@ -27,7 +27,7 @@ export default function IsolationsHistoryTable({ items, loading, onReleased }: P
   }
 
   return (
-    <section className="soc-panel rounded-2xl overflow-hidden">
+    <section id="historial-aislamientos" className="soc-panel rounded-2xl overflow-hidden scroll-mt-24">
       <div className="px-5 py-4 flex items-center gap-3 border-b" style={{ borderColor: "var(--line-soft)", background: "linear-gradient(90deg, var(--surf), var(--surf2))" }}>
         <div className="w-9 h-9 rounded-xl grid place-items-center" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>
           <i className="ph ph-clock-counter-clockwise" style={{ fontSize: "17px" }} />
