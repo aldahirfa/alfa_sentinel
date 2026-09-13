@@ -5,7 +5,6 @@ import {
   escalateAlertToIncident,
   fetchIncidenteDrawer,
   isolateIncident,
-  releaseIsolation,
   updateIncidentStatus,
 } from "../api/client";
 import type { IncidenteDrawerData } from "../types/alerts";
@@ -15,9 +14,9 @@ import { statusPillStyle } from "../lib/alertStatus";
 import type { AlertStatus } from "../types/alerts";
 import { INCIDENT_CLASSIFICATION_LABEL, INCIDENT_STATUS_LABEL } from "../lib/incidentStatus";
 import {
-  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, RELEASE_ICON_CLASS, PENDING_ICON_CLASS,
-  ISOLATE_LABEL_FULL, ISOLATED_LABEL_FULL, RELEASE_LABEL_FULL, PENDING_LABEL_FULL,
-  ISOLATE_TOOLTIP, RELEASE_TOOLTIP, confirmIsolate,
+  ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, PENDING_ICON_CLASS,
+  ISOLATE_LABEL_FULL, ISOLATED_LABEL_FULL, PENDING_LABEL_FULL,
+  ISOLATE_TOOLTIP, confirmIsolate,
 } from "../lib/isolationUi";
 
 interface Props {
@@ -25,7 +24,6 @@ interface Props {
   assignableUsers: AssignableUser[];
   onClose: () => void;
   onChanged: () => void;
-  // Navega a Alertas y abre la alerta de origen de este incidente.
   onViewAlert: (id: number) => void;
 }
 
@@ -128,7 +126,6 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
           transition: "transform 220ms ease",
         }}
       >
-        {/* Encabezado */}
         <div className="px-5 py-4 border-b flex items-start gap-4" style={{ borderColor: "var(--line-soft)" }}>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] tracking-wider uppercase font-semibold" style={{ color: "var(--tx-mute)" }}>
@@ -175,7 +172,6 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 </div>
               )}
 
-              {/* Estado principal */}
               <div className="px-5 py-4">
                 <div
                   className="rounded-xl border p-4 shadow-sm"
@@ -187,10 +183,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium" style={{ color: "var(--tx-mute)" }}>Severidad</span>
                     {data.severity && (
-                      <span
-                        className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full"
-                        style={severityPillStyle(data.severity)}
-                      >
+                      <span className="text-[11px] font-bold tracking-wide px-2.5 py-0.5 rounded-full" style={severityPillStyle(data.severity)}>
                         {data.severity.toUpperCase()}
                       </span>
                     )}
@@ -208,9 +201,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                             className="text-[10.5px] font-medium px-1.5 py-0.5 rounded outline-none cursor-pointer"
                             style={selectStyle}
                           >
-                            {Object.entries(INCIDENT_STATUS_LABEL).map(([k, v]) => (
-                              <option key={k} value={k}>{v}</option>
-                            ))}
+                            {Object.entries(INCIDENT_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                           </select>
                         ) : (
                           <span
@@ -242,31 +233,17 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 </Section>
               )}
 
-              {/* Endpoint */}
               <Section title="Endpoint afectado">
                 <Field label="Hostname" value={data.hostname} />
                 <Field label="Sistema operativo" value={data.operating_system} />
                 <Field label="Dirección IP" value={data.ip_address} />
                 <Field
                   label="Conectividad"
-                  value={
-                    <span style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}>
-                      {data.is_online ? "Online" : "Offline"}
-                    </span>
-                  }
+                  value={<span style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}>{data.is_online ? "Online" : "Offline"}</span>}
                 />
-                {data.is_honeyfile && (
-                  <Field label="Origen" value={<span style={{ color: "var(--warn)" }}>Honeyfile</span>} />
-                )}
+                {data.is_honeyfile && <Field label="Origen" value={<span style={{ color: "var(--warn)" }}>Honeyfile</span>} />}
               </Section>
 
-              {/* Reglas asociadas -- para un incidente agrupado son la
-                  unión de las reglas de todas las alertas que lo
-                  componen (2026-08-18, ver PENDIENTES.md, "Corrección
-                  definitiva en la lógica y presentación de ALERTAS" --
-                  antes esta lista quedaba vacía para kind === 'incident').
-                  Orden de relevancia real, no cronológico ni accidental
-                  -- ver sort_contributing_rules() en el servidor. */}
               {data.rules.length > 0 && (
                 <Section title="Reglas asociadas">
                   <div className="flex flex-col gap-2">
@@ -276,19 +253,13 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                           <div className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>{r.rule_name}</div>
                           <div className="text-[10.5px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{r.matched_at}</div>
                         </div>
-                        <div className="text-[12px] font-semibold tabular-nums" style={{ color: "var(--tx-dim)" }}>
-                          +{r.weight_applied.toFixed(1)}
-                        </div>
+                        <div className="text-[12px] font-semibold tabular-nums" style={{ color: "var(--tx-dim)" }}>+{r.weight_applied.toFixed(1)}</div>
                       </div>
                     ))}
                   </div>
                 </Section>
               )}
 
-              {/* Proceso involucrado (2026-08-18, ver PENDIENTES.md,
-                  "Corrección definitiva en la lógica y presentación de
-                  ALERTAS", sección 5) -- correlación real por ventana
-                  de tiempo, nunca inventado. */}
               <Section title="Proceso involucrado">
                 <Field label="Proceso" value={data.process.process_name ?? "No disponible"} />
                 <Field label="PID" value={data.process.process_id !== null ? data.process.process_id : "No disponible"} />
@@ -296,7 +267,6 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 <Field label="Usuario" value={data.process.username ?? "No disponible"} />
               </Section>
 
-              {/* Gestión del caso -- solo para incidentes agrupados */}
               {selected.kind === "incident" && (
                 <Section title="Gestión del caso">
                   <div className="flex items-center justify-between text-[12.5px] py-1.5">
@@ -304,16 +274,12 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                     <select
                       value={data.assigned_to ?? ""}
                       disabled={saving}
-                      onChange={(e) =>
-                        runAction(() => assignIncident(selected.id, e.target.value ? Number(e.target.value) : null))
-                      }
+                      onChange={(e) => runAction(() => assignIncident(selected.id, e.target.value ? Number(e.target.value) : null))}
                       className="text-[12px] font-medium px-2 py-1 rounded outline-none cursor-pointer max-w-[190px]"
                       style={selectStyle}
                     >
                       <option value="">Sin asignar</option>
-                      {assignableUsers.map((u) => (
-                        <option key={u.id} value={u.id}>{u.full_name}</option>
-                      ))}
+                      {assignableUsers.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
                     </select>
                   </div>
                   <div className="flex items-center justify-between text-[12.5px] py-1.5">
@@ -326,39 +292,24 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       style={selectStyle}
                     >
                       <option value="" disabled>Sin clasificar</option>
-                      {Object.entries(INCIDENT_CLASSIFICATION_LABEL).map(([k, v]) => (
-                        <option key={k} value={k}>{v}</option>
-                      ))}
+                      {Object.entries(INCIDENT_CLASSIFICATION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
                   </div>
                 </Section>
               )}
 
-              {/* Alerta de origen -- la primera alerta (por fecha) que
-                  quedó vinculada a este incidente, sea porque el motor
-                  automático lo generó o porque un analista la escaló
-                  a mano desde Alertas. Permite volver a esa alerta sin
-                  duplicar toda su información acá. */}
               {selected.kind === "incident" && data.origin_alert && (
                 <Section title="Alerta de origen">
                   <div className="rounded-[9px] p-2.5 flex flex-col gap-1.5" style={{ background: "var(--surf2)" }}>
                     <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>
-                        {data.origin_alert.code}
-                      </span>
+                      <span className="text-[12px] font-medium" style={{ color: "var(--tx)" }}>{data.origin_alert.code}</span>
                       {data.origin_alert.severity && (
-                        <span
-                          className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
-                          style={severityPillStyle(data.origin_alert.severity)}
-                        >
+                        <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full" style={severityPillStyle(data.origin_alert.severity)}>
                           {data.origin_alert.severity.toUpperCase()}
                         </span>
                       )}
                     </div>
-                    <Field
-                      label="Puntos de riesgo"
-                      value={data.origin_alert.risk_score !== null ? data.origin_alert.risk_score.toFixed(1) : "—"}
-                    />
+                    <Field label="Puntos de riesgo" value={data.origin_alert.risk_score !== null ? data.origin_alert.risk_score.toFixed(1) : "—"} />
                     <Field label="Endpoint" value={data.hostname} />
                   </div>
                   <button
@@ -372,7 +323,6 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 </Section>
               )}
 
-              {/* Escalar a incidente -- solo para una alerta suelta sin incidente todavía */}
               {selected.kind === "alert" && (
                 <Section title="Incidente relacionado">
                   {data.incident_id ? (
@@ -403,9 +353,6 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 </Section>
               )}
 
-              {/* Actividad relacionada -- correlación aproximada por
-                  ventana de tiempo, no existe una relación directa
-                  alerta/incidente -> evento en la base de datos. */}
               {data.timeline.length > 0 && (
                 <Section title="Actividad relacionada">
                   <p className="text-[10.5px] mb-2.5" style={{ color: "var(--tx-mute)" }}>
@@ -417,9 +364,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                         <div className="w-[11px] h-[11px] rounded-full mt-1 z-10 shrink-0 ring-4 ring-[var(--surf)]" style={{ background: item.kind === "honeyfile" ? "var(--warn)" : "var(--tx-mute)" }} />
                         <div className="min-w-0">
                           <div className="text-[12.5px] font-bold tracking-tight" style={{ color: "var(--tx)" }}>{item.label}</div>
-                          {item.detail && (
-                            <div className="text-[11px] mt-0.5 truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>
-                          )}
+                          {item.detail && <div className="text-[11px] mt-0.5 truncate" style={{ color: "var(--tx-mute)" }}>{item.detail}</div>}
                           <div className="text-[10.5px] mt-1" style={{ color: "var(--tx-dim)" }}>{item.at}</div>
                         </div>
                       </div>
@@ -434,13 +379,6 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 </Section>
               )}
 
-              {/* Acción de aislamiento -- disparo MANUAL real (2026-08-17,
-                  ver PENDIENTES.md, "Aislamiento de host -- modo
-                  development, laboratorio y producción"): usa el mismo
-                  mecanismo de backend/agente que el automático (POST
-                  /incidents/{id}/isolate), reutilizando runAction() --
-                  la misma función que ya usan el resto de las acciones
-                  de este drawer (asignar, clasificar, cambiar estado). */}
               {data.isolation_status === "REQUESTED" || data.isolation_status === "RELEASE_REQUESTED" ? (
                 <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
                   <div
@@ -450,32 +388,35 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                     <i className={PENDING_ICON_CLASS} style={{ fontSize: "15px" }} />
                     {PENDING_LABEL_FULL}
                   </div>
+                  <a
+                    href="/respuesta#historial-aislamientos"
+                    className="mt-2.5 flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12px] font-semibold no-underline border transition-premium btn-hover"
+                    style={{ borderColor: "var(--line)", color: "var(--brand)", background: "var(--surf2)" }}
+                  >
+                    Ver en Acciones de respuesta
+                    <i className="ph ph-arrow-right" style={{ fontSize: "13px" }} />
+                  </a>
                 </div>
               ) : data.isolation_status === "EXECUTED" ? (
-                // Liberar reusa runAction() -- mismo backend/máquina de
-                // estados que "Liberar" en IsolationsHistoryTable.tsx,
-                // CriticalIncidentsTable.tsx y EndpointDrawer.tsx (POST
-                // /host-isolations/{id}/release), una sola implementación
-                // en todo el sistema (sección 13, 2026-08-17, ver
-                // PENDIENTES.md). Amarillo, nunca rojo (sección 11).
                 <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
                   <div
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold mb-2.5"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold"
                     style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
                   >
                     <i className={ISOLATED_ICON_CLASS} style={{ fontSize: "15px" }} />
                     {ISOLATED_LABEL_FULL}
                   </div>
-                  <button
-                    disabled={saving || !data.isolation_id}
-                    onClick={() => runAction(() => releaseIsolation(data.isolation_id!))}
-                    title={data.isolation_id ? RELEASE_TOOLTIP : "No se encontró la orden de aislamiento asociada."}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
-                    style={{ border: "1px solid var(--warn)", color: "var(--warn)", background: "var(--warn-soft)" }}
+                  <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
+                    El endpoint ya está contenido. La reversión se gestiona desde Acciones de respuesta para mantener una única trazabilidad operativa.
+                  </p>
+                  <a
+                    href="/respuesta#historial-aislamientos"
+                    className="mt-2.5 flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-[12px] font-semibold no-underline border transition-premium btn-hover"
+                    style={{ borderColor: "var(--brand)", color: "var(--brand)", background: "var(--brand-fill)" }}
                   >
-                    <i className={RELEASE_ICON_CLASS} style={{ fontSize: "15px" }} />
-                    {RELEASE_LABEL_FULL}
-                  </button>
+                    Ver acción de respuesta
+                    <i className="ph ph-arrow-right" style={{ fontSize: "13px" }} />
+                  </a>
                 </div>
               ) : (
                 <div className="px-5 py-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
@@ -485,11 +426,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       if (!confirmIsolate(data.hostname)) return;
                       runAction(() => isolateIncident(data.isolatable_incident_id!));
                     }}
-                    title={
-                      data.isolatable_incident_id
-                        ? ISOLATE_TOOLTIP
-                        : "Esta alerta todavía no forma parte de un incidente -- el aislamiento se asocia siempre a un incidente real."
-                    }
+                    title={data.isolatable_incident_id ? ISOLATE_TOOLTIP : "Esta alerta todavía no forma parte de un incidente -- el aislamiento se asocia siempre a un incidente real."}
                     className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-premium btn-hover shadow-sm"
                     style={{ border: "1px solid var(--crit)", color: "var(--crit)", background: "var(--crit-soft)" }}
                   >
@@ -498,7 +435,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                   </button>
                   {!data.isolatable_incident_id && (
                     <p className="text-[10.5px] mt-2 text-center" style={{ color: "var(--tx-mute)" }}>
-                      Esta alerta todavía no forma parte de un incidente -- escalala primero (arriba) para poder aislar.
+                      Esta alerta todavía no forma parte de un incidente -- escálala primero para poder solicitar el aislamiento.
                     </p>
                   )}
                 </div>
