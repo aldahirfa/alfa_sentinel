@@ -1,41 +1,52 @@
 import { useEffect, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import RespuestaSummaryCards from "../components/RespuestaSummaryCards";
-import CriticalIncidentsTable from "../components/CriticalIncidentsTable";
-import IsolationsHistoryTable from "../components/IsolationsHistoryTable";
-import { fetchRespuesta } from "../api/client";
-import type { RespuestaResponse } from "../types/respuesta";
+import ResponseEndpointsTable from "../components/ResponseEndpointsTable";
+import ResponseEndpointDetailPage from "./ResponseEndpointDetailPage";
+import { fetchResponseEndpoints } from "../api/responseClient";
+import type { ResponseEndpointsResponse } from "../types/respuesta";
 import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
 
-export default function RespuestaPage() {
-  const [data, setData] = useState<RespuestaResponse | null>(null);
+interface Props {
+  endpointId: number | null;
+  onOpenEndpoint: (agentId: number) => void;
+  onBack: () => void;
+  onViewIncident: (id: number) => void;
+}
+
+export default function RespuestaPage({ endpointId, onOpenEndpoint, onBack, onViewIncident }: Props) {
+  const [data, setData] = useState<ResponseEndpointsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { refreshToken } = useGlobalAlertsContext();
 
   function load(silent = false) {
     if (!silent) setLoading(true);
-    return fetchRespuesta()
+    return fetchResponseEndpoints()
       .then((res) => {
         setData(res);
         setError(null);
       })
-      .catch(() => setError("No se pudo cargar la información de respuesta."))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar la información de respuesta."))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    load(true);
+    if (endpointId === null) load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshToken]);
+  }, [refreshToken, endpointId]);
+
+  if (endpointId !== null) {
+    return <ResponseEndpointDetailPage agentId={endpointId} onBack={onBack} onViewIncident={onViewIncident} />;
+  }
 
   return (
     <main className="soc-page module-page flex flex-col gap-4 px-[22px] pt-[18px] pb-8">
       <ModuleIntro
         page="respuesta"
         eyebrow="Contención operativa"
-        title="Centro de acciones de respuesta"
-        description="Centraliza las acciones permitidas sobre endpoints y conserva la trazabilidad de cada solicitud, ejecución y reversión asociada a un incidente."
+        title="Acciones de respuesta por endpoint"
+        description="Administra aislamiento y liberación sobre los endpoints registrados. Cada equipo aparece una sola vez; su historial e incidentes asociados se consultan desde Ver detalles."
       />
 
       {data && <RespuestaSummaryCards summary={data.summary} />}
@@ -49,10 +60,12 @@ export default function RespuestaPage() {
           <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
-        <>
-          <CriticalIncidentsTable items={data?.critical_incidents ?? []} loading={loading} onIsolated={() => load(true)} />
-          <IsolationsHistoryTable items={data?.isolations ?? []} loading={loading} onReleased={() => load(true)} />
-        </>
+        <ResponseEndpointsTable
+          items={data?.endpoints ?? []}
+          loading={loading}
+          onChanged={() => load(true)}
+          onOpenDetail={onOpenEndpoint}
+        />
       )}
     </main>
   );
