@@ -10,12 +10,30 @@ import {
   RELEASE_TOOLTIP,
   confirmIsolate,
 } from "../lib/isolationUi";
+import {
+  CONN_STATUS_LABEL,
+  CONN_STATUS_VAR,
+  connStatusPillStyle,
+} from "../lib/endpointStatus";
 
 interface Props {
   items: ResponseEndpointItem[];
   loading: boolean;
   onChanged: () => void;
   onOpenDetail: (agentId: number) => void;
+}
+
+function osIcon(os: string): string {
+  const value = os.toLowerCase();
+  if (value.includes("win")) return "ph-fill ph-windows-logo";
+  if (value.includes("linux") || value.includes("ubuntu") || value.includes("debian")) return "ph-fill ph-linux-logo";
+  return "ph-fill ph-desktop";
+}
+
+function endpointAccent(item: ResponseEndpointItem): string {
+  if (item.isolation_status === "EXECUTED" || item.isolation_status === "ISOLATION_FAILED") return "var(--crit)";
+  if (item.isolation_status === "REQUESTED" || item.isolation_status === "RELEASE_REQUESTED") return "var(--warn)";
+  return "var(--brand)";
 }
 
 function latestActionLabel(item: ResponseEndpointItem) {
@@ -105,12 +123,11 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[11px] min-w-[980px]">
+        <table className="w-full border-collapse text-[11px] min-w-[900px]">
           <thead style={{ background: "color-mix(in srgb, var(--surf2) 88%, transparent)" }}>
             <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
               <th className="px-4 py-3 font-semibold">Endpoint</th>
-              <th className="px-3 py-3 font-semibold">Sistema operativo</th>
-              <th className="px-3 py-3 font-semibold">Agente</th>
+              <th className="px-3 py-3 font-semibold">Conectividad</th>
               <th className="px-3 py-3 font-semibold">Última acción</th>
               <th className="px-3 py-3 font-semibold">Trazabilidad</th>
               <th className="px-4 py-3 font-semibold text-right">Acciones</th>
@@ -120,14 +137,14 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="border-t" style={{ borderColor: "var(--line-soft)" }}>
-                  {Array.from({ length: 6 }).map((_, j) => (
-                    <td key={j} className="px-3 py-3.5"><div className="h-3 rounded animate-pulse" style={{ background: "var(--surf3)", width: "65%" }} /></td>
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <td key={j} className="px-3 py-3.5"><div className="h-3 rounded animate-pulse" style={{ background: "var(--surf3)", width: j === 0 ? "76%" : "60%" }} /></td>
                   ))}
                 </tr>
               ))
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-14 text-center" style={{ color: "var(--tx-mute)" }}>
+                <td colSpan={5} className="py-14 text-center" style={{ color: "var(--tx-mute)" }}>
                   <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--surf3)", color: "var(--tx-dim)" }}>
                     <i className="ph ph-desktop" style={{ fontSize: "22px" }} />
                   </div>
@@ -139,32 +156,45 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
                 const busy = workingId === item.agent_id;
                 const pending = item.isolation_status === "REQUESTED" || item.isolation_status === "RELEASE_REQUESTED";
                 const isolated = item.isolation_status === "EXECUTED";
+                const accent = endpointAccent(item);
+                const connectivity = item.agent_status === "ONLINE" ? "ONLINE" : "OFFLINE";
 
                 return (
-                  <tr key={item.agent_id} className="border-t transition-premium" style={{ borderColor: "var(--line-soft)" }}>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl grid place-items-center" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>
-                          <i className="ph ph-desktop-tower" style={{ fontSize: "14px" }} />
+                  <tr
+                    key={item.agent_id}
+                    className="border-t transition-premium"
+                    style={{ borderColor: "var(--line-soft)", boxShadow: `inset 3px 0 0 ${accent}` }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surf2)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <td className="px-4 py-3.5 min-w-[300px]">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
+                          style={{ background: `color-mix(in srgb, ${accent} 11%, var(--surf2))`, color: accent }}
+                        >
+                          <i className={osIcon(item.operating_system)} style={{ fontSize: "16px" }} />
                         </div>
-                        <div>
-                          <div className="text-[11.5px] font-bold" style={{ color: "var(--tx)" }}>{item.hostname}</div>
-                          <div className="mono-data text-[9px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{item.ip_address}</div>
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate" style={{ color: "var(--tx)" }}>{item.hostname}</div>
+                          <div className="flex items-center gap-2 mt-1 text-[9px]" style={{ color: "var(--tx-mute)" }}>
+                            <span>{item.operating_system}{item.os_version ? ` ${item.os_version}` : ""}</span>
+                            <span>·</span>
+                            <span className="mono-data">{item.ip_address}</span>
+                          </div>
                         </div>
                       </div>
                     </td>
 
                     <td className="px-3 py-3.5">
-                      <div className="font-medium" style={{ color: "var(--tx-dim)" }}>{item.operating_system}</div>
-                      {item.os_version && <div className="text-[9px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{item.os_version}</div>}
-                    </td>
-
-                    <td className="px-3 py-3.5">
-                      <div className="flex items-center gap-1.5 font-semibold" style={{ color: item.agent_status === "ONLINE" ? "var(--ok)" : "var(--tx-mute)" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: item.agent_status === "ONLINE" ? "var(--ok)" : "var(--off)" }} />
-                        {item.agent_status === "ONLINE" ? "Activo" : "Sin conexión"}
-                      </div>
-                      <div className="text-[9px] mt-1" style={{ color: "var(--tx-mute)" }}>{item.last_seen_at ?? "Sin heartbeat"}</div>
+                      <span
+                        className="inline-flex items-center gap-1.5 text-[9px] font-semibold px-2 py-1 rounded-md"
+                        style={{ ...connStatusPillStyle(connectivity), border: `1px solid ${connStatusPillStyle(connectivity).color}` }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: CONN_STATUS_VAR[connectivity] }} />
+                        {CONN_STATUS_LABEL[connectivity]}
+                      </span>
+                      <div className="text-[9px] mt-1.5" style={{ color: "var(--tx-mute)" }}>{item.last_seen_at ?? "Sin heartbeat"}</div>
                     </td>
 
                     <td className="px-3 py-3.5 max-w-[250px]" style={{ color: "var(--tx-dim)" }}>
