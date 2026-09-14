@@ -84,7 +84,7 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
 
   async function handleRelease(item: ResponseEndpointItem) {
     if (!item.isolation_id) return;
-    if (!window.confirm(`¿Desaislar "${item.hostname}"?\n\nSe restaurará su conectividad de red cuando el agente confirme la orden.`)) return;
+    if (!window.confirm(`¿Liberar "${item.hostname}"?\n\nSe restaurará su conectividad de red cuando el agente confirme la orden.`)) return;
     setWorkingId(item.agent_id);
     setRowError(null);
     try {
@@ -222,7 +222,7 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
                             style={{ color: "var(--warn)", background: "var(--warn-fill)", borderColor: "var(--warn-soft)" }}
                           >
                             <i className={busy ? SPINNER_ICON_CLASS : RELEASE_ICON_CLASS} style={{ fontSize: "13px" }} />
-                            <span className="text-[10px] font-semibold">{busy ? "Enviando..." : "Desaislar"}</span>
+                            <span className="text-[10px] font-semibold">{busy ? "Enviando..." : "Liberar"}</span>
                           </button>
                         ) : (
                           <button
