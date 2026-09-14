@@ -25,6 +25,13 @@ function isolationTone(status: string) {
   return { color: "var(--tx-dim)", bg: "var(--surf3)" };
 }
 
+function osIcon(os: string): string {
+  const value = os.toLowerCase();
+  if (value.includes("win")) return "ph-fill ph-windows-logo";
+  if (value.includes("linux") || value.includes("ubuntu") || value.includes("debian")) return "ph-fill ph-linux-logo";
+  return "ph-fill ph-desktop";
+}
+
 export default function ResponseEndpointDetailPage({ agentId, onBack, onViewIncident }: Props) {
   const [data, setData] = useState<ResponseEndpointDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +64,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
       <ModuleIntro
         page="respuesta"
         eyebrow="Trazabilidad por endpoint"
-        title={data?.endpoint.hostname ?? "Detalle de contención"}
+        title="Detalle de respuesta"
         description="Consulta los incidentes y el historial de aislamiento asociados a este endpoint sin mezclar registros de otros equipos."
       />
 
@@ -71,55 +78,43 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
         </div>
       ) : loading || !data ? (
         <div className="soc-panel rounded-2xl p-6 flex flex-col gap-3">
-          {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-4 rounded animate-pulse" style={{ background: "var(--surf3)", width: i === 0 ? "55%" : "100%" }} />)}
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-4 rounded animate-pulse" style={{ background: "var(--surf3)", width: i === 0 ? "55%" : "100%" }} />)}
         </div>
       ) : (
         <>
-          <section className="soc-panel-strong rounded-[20px] p-5 relative overflow-hidden">
-            <div className="absolute -right-14 -top-16 w-56 h-56 rounded-full pointer-events-none" style={{ background: containment.bg, filter: "blur(38px)", opacity: .38 }} />
-            <div className="relative z-[1] grid grid-cols-1 xl:grid-cols-[1.2fr_.8fr] gap-5">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl grid place-items-center" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>
-                    <i className="ph ph-desktop-tower" style={{ fontSize: "19px" }} />
-                  </div>
-                  <div>
-                    <div className="text-[16px] font-bold" style={{ color: "var(--tx)" }}>{data.endpoint.hostname}</div>
-                    <div className="mono-data text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{data.endpoint.ip_address}</div>
-                  </div>
+          <section className="soc-panel rounded-2xl overflow-hidden">
+            <div className="px-5 py-4 flex flex-col md:flex-row md:items-center gap-4" style={{ background: "linear-gradient(90deg, var(--surf), var(--surf2))" }}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl grid place-items-center shrink-0" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>
+                  <i className={osIcon(data.endpoint.operating_system)} style={{ fontSize: "18px" }} />
                 </div>
 
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
-                  <div className="rounded-xl px-3 py-3" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-                    <div className="text-[8.5px] uppercase tracking-[.1em] font-bold" style={{ color: "var(--tx-mute)" }}>Sistema operativo</div>
-                    <div className="text-[11px] font-semibold mt-1.5" style={{ color: "var(--tx)" }}>{data.endpoint.operating_system}</div>
-                    <div className="text-[9px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{data.endpoint.os_version || "—"}</div>
+                <div className="min-w-0">
+                  <div className="text-[14px] font-semibold truncate" style={{ color: "var(--tx)" }}>{data.endpoint.hostname}</div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[9.5px]" style={{ color: "var(--tx-mute)" }}>
+                    <span>{data.endpoint.operating_system}{data.endpoint.os_version ? ` ${data.endpoint.os_version}` : ""}</span>
+                    <span>·</span>
+                    <span className="mono-data">{data.endpoint.ip_address}</span>
                   </div>
-                  <div className="rounded-xl px-3 py-3" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-                    <div className="text-[8.5px] uppercase tracking-[.1em] font-bold" style={{ color: "var(--tx-mute)" }}>Agente</div>
-                    <div className="text-[11px] font-semibold mt-1.5" style={{ color: data.endpoint.agent_status === "ONLINE" ? "var(--ok)" : "var(--tx-dim)" }}>{data.endpoint.agent_status === "ONLINE" ? "Activo" : "Sin conexión"}</div>
-                    <div className="text-[9px] mt-0.5" style={{ color: "var(--tx-mute)" }}>v{data.endpoint.agent_version ?? "—"}</div>
-                  </div>
-                  <div className="rounded-xl px-3 py-3" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-                    <div className="text-[8.5px] uppercase tracking-[.1em] font-bold" style={{ color: "var(--tx-mute)" }}>Incidentes</div>
-                    <div className="text-[20px] font-bold mt-1 tabular-nums" style={{ color: "var(--tx)" }}>{data.summary.incidents_total}</div>
-                  </div>
-                  <div className="rounded-xl px-3 py-3" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-                    <div className="text-[8.5px] uppercase tracking-[.1em] font-bold" style={{ color: "var(--tx-mute)" }}>Acciones registradas</div>
-                    <div className="text-[20px] font-bold mt-1 tabular-nums" style={{ color: "var(--tx)" }}>{data.summary.isolations_total}</div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-[9px]" style={{ color: "var(--tx-mute)" }}>
+                    <span>Agente v{data.endpoint.agent_version ?? "—"}</span>
+                    <span>·</span>
+                    <span>{data.endpoint.agent_status === "ONLINE" ? "Online" : "Offline"}</span>
+                    <span>·</span>
+                    <span>Última conexión: {data.endpoint.last_seen_at ?? "No disponible"}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-2xl border p-4 flex flex-col justify-center" style={{ background: containment.bg, borderColor: containment.color }}>
-                <div className="text-[9px] uppercase tracking-[.14em] font-bold" style={{ color: "var(--tx-mute)" }}>Estado actual de contención</div>
-                <div className="flex items-center gap-2 mt-3 text-[17px] font-bold" style={{ color: containment.color }}>
-                  <i className={containment.icon} />
+              <div className="md:ml-auto flex md:flex-col items-start md:items-end gap-2 md:gap-1.5 shrink-0">
+                <div className="text-[8.5px] uppercase tracking-[.13em] font-bold" style={{ color: "var(--tx-mute)" }}>Estado de contención</div>
+                <span
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9.5px] font-bold whitespace-nowrap"
+                  style={{ color: containment.color, background: containment.bg, border: `1px solid color-mix(in srgb, ${containment.color} 35%, transparent)` }}
+                >
+                  <i className={containment.icon} style={{ fontSize: "12px" }} />
                   {containment.label}
-                </div>
-                <div className="text-[10px] mt-3 leading-relaxed" style={{ color: "var(--tx-dim)" }}>
-                  Último heartbeat: {data.endpoint.last_seen_at ?? "No disponible"}
-                </div>
+                </span>
               </div>
             </div>
           </section>
