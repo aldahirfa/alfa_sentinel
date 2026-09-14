@@ -1,7 +1,7 @@
-import type { RespuestaSummary } from "../types/respuesta";
+import type { ResponseEndpointSummary } from "../types/respuesta";
 
 interface Props {
-  summary: RespuestaSummary;
+  summary: ResponseEndpointSummary;
 }
 
 function Metric({ label, value, icon, tone = "brand", detail }: { label: string; value: number; icon: string; tone?: "brand" | "crit" | "warn" | "ok"; detail: string }) {
@@ -26,11 +26,10 @@ function Metric({ label, value, icon, tone = "brand", detail }: { label: string;
 }
 
 export default function RespuestaSummaryCards({ summary }: Props) {
-  const requiresAttention = summary.isolated_now > 0 || summary.critical_incidents_open > 0;
+  const requiresAttention = summary.isolated_now > 0 || summary.pending_now > 0;
 
   return (
     <section className="soc-panel-strong rounded-[20px] p-5 relative overflow-hidden">
-      <div className="blue-team-grid absolute inset-0 pointer-events-none" />
       <div className="absolute -right-16 -top-20 w-64 h-64 rounded-full pointer-events-none" style={{ background: requiresAttention ? "var(--crit-soft)" : "var(--brand-soft)", filter: "blur(38px)", opacity: .42 }} />
 
       <div className="relative z-[1] flex flex-col xl:flex-row gap-5 xl:items-center">
@@ -41,30 +40,20 @@ export default function RespuestaSummaryCards({ summary }: Props) {
             </div>
             <div>
               <div className="text-[9px] uppercase tracking-[.17em] font-bold" style={{ color: requiresAttention ? "var(--crit)" : "var(--brand)" }}>Estado de contención</div>
-              <div className="text-[15px] font-semibold mt-0.5" style={{ color: "var(--tx)" }}>{requiresAttention ? "Respuesta activa en curso" : "Sin contenciones activas"}</div>
+              <div className="text-[15px] font-semibold mt-0.5" style={{ color: "var(--tx)" }}>{requiresAttention ? "Contenciones activas o pendientes" : "Sin contenciones activas"}</div>
             </div>
           </div>
 
           <p className="text-[11px] leading-relaxed mt-3 mb-0" style={{ color: "var(--tx-dim)" }}>
-            Seguimiento de aislamientos ejecutados y casos críticos que pueden requerir intervención del personal responsable.
+            Una sola vista por endpoint para controlar aislamiento y liberación sin duplicar visualmente cada acción histórica.
           </p>
-
-          <div className="grid grid-cols-2 gap-2 mt-4">
-            <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-              <div className="text-[8.5px] uppercase tracking-[.1em] font-bold" style={{ color: "var(--tx-mute)" }}>Aislados ahora</div>
-              <div className="text-[18px] font-bold mt-1 tabular-nums" style={{ color: summary.isolated_now > 0 ? "var(--crit)" : "var(--tx)" }}>{summary.isolated_now}</div>
-            </div>
-            <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-              <div className="text-[8.5px] uppercase tracking-[.1em] font-bold" style={{ color: "var(--tx-mute)" }}>Críticos abiertos</div>
-              <div className="text-[18px] font-bold mt-1 tabular-nums" style={{ color: summary.critical_incidents_open > 0 ? "var(--crit)" : "var(--tx)" }}>{summary.critical_incidents_open}</div>
-            </div>
-          </div>
         </div>
 
-        <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Metric label="Hosts aislados" value={summary.isolated_now} icon="ph ph-plugs" tone={summary.isolated_now > 0 ? "crit" : "brand"} detail="Contención vigente" />
-          <Metric label="Histórico" value={summary.total_isolations} icon="ph ph-clock-counter-clockwise" tone="brand" detail="Aislamientos registrados" />
-          <Metric label="Incidentes críticos" value={summary.critical_incidents_open} icon="ph-fill ph-siren" tone={summary.critical_incidents_open > 0 ? "crit" : "ok"} detail="Abiertos actualmente" />
+        <div className="flex-1 grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <Metric label="Endpoints" value={summary.total_endpoints} icon="ph ph-desktop-tower" tone="brand" detail="Agentes registrados" />
+          <Metric label="Aislados" value={summary.isolated_now} icon="ph ph-plugs" tone={summary.isolated_now > 0 ? "crit" : "ok"} detail="Contención vigente" />
+          <Metric label="Pendientes" value={summary.pending_now} icon="ph ph-hourglass-medium" tone={summary.pending_now > 0 ? "warn" : "ok"} detail="Esperando confirmación" />
+          <Metric label="Con historial" value={summary.with_history} icon="ph ph-clock-counter-clockwise" tone="brand" detail="Endpoints con trazabilidad" />
         </div>
       </div>
     </section>
