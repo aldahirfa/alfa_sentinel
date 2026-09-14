@@ -191,7 +191,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                     <th className="px-3 py-3 font-semibold">Solicitado por</th>
                     <th className="px-3 py-3 font-semibold">Ejecutado</th>
                     <th className="px-3 py-3 font-semibold">Liberado</th>
-                    <th className="px-3 py-3 font-semibold">Resultado</th>
+                    <th className="px-3 py-3 font-semibold">Incidente asociado</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -206,7 +206,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                         <td className="px-3 py-3.5" style={{ color: item.requested_by_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>{item.requested_by_name ?? "Automático (motor heurístico)"}</td>
                         <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.executed_at ?? "—"}</td>
                         <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.released_at ?? "—"}</td>
-                        <td className="px-3 py-3.5 max-w-[360px]" style={{ color: "var(--tx-mute)" }} title={item.result ?? undefined}>{item.result ?? item.reason ?? "—"}</td>
+                        <td className="px-3 py-3.5 mono-data font-semibold" style={{ color: "var(--tx-dim)" }}>INC-{String(item.incident_id).padStart(5, "0")}</td>
                       </tr>
                     );
                   })}
