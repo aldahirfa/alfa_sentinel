@@ -188,7 +188,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-[11px] min-w-[1180px]">
+              <table className="w-full border-collapse text-[11px] min-w-[980px]">
                 <thead style={{ background: "color-mix(in srgb, var(--surf2) 88%, transparent)" }}>
                   <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
                     <th className="px-4 py-3 font-semibold">Estado</th>
@@ -197,12 +197,11 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                     <th className="px-3 py-3 font-semibold">Ejecutado</th>
                     <th className="px-3 py-3 font-semibold">Liberado</th>
                     <th className="px-3 py-3 font-semibold">Resultado</th>
-                    <th className="px-4 py-3 font-semibold text-right">Incidente asociado</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.isolations.length === 0 ? (
-                    <tr><td colSpan={7} className="py-12 text-center" style={{ color: "var(--tx-mute)" }}>Este endpoint todavía no tiene acciones de contención registradas.</td></tr>
+                    <tr><td colSpan={6} className="py-12 text-center" style={{ color: "var(--tx-mute)" }}>Este endpoint todavía no tiene acciones de contención registradas.</td></tr>
                   ) : data.isolations.map((item) => {
                     const tone = isolationTone(item.status);
                     return (
@@ -212,12 +211,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                         <td className="px-3 py-3.5" style={{ color: item.requested_by_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>{item.requested_by_name ?? "Automático (motor heurístico)"}</td>
                         <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.executed_at ?? "—"}</td>
                         <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.released_at ?? "—"}</td>
-                        <td className="px-3 py-3.5 max-w-[280px]" style={{ color: "var(--tx-mute)" }} title={item.result ?? undefined}>{item.result ?? item.reason ?? "—"}</td>
-                        <td className="px-4 py-3.5 text-right">
-                          <button onClick={() => onViewIncident(item.incident_id)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover" style={{ color: "var(--brand)", background: "var(--brand-fill)", borderColor: "var(--brand-soft)" }}>
-                            <span className="text-[10px] font-semibold">INC-{String(item.incident_id).padStart(5, "0")}</span><i className="ph ph-arrow-right" />
-                          </button>
-                        </td>
+                        <td className="px-3 py-3.5 max-w-[360px]" style={{ color: "var(--tx-mute)" }} title={item.result ?? undefined}>{item.result ?? item.reason ?? "—"}</td>
                       </tr>
                     );
                   })}
