@@ -18,22 +18,6 @@ interface Props {
   onOpenDetail: (agentId: number) => void;
 }
 
-function statusPresentation(status: string | null) {
-  if (status === "EXECUTED") {
-    return { label: "Aislado", color: "var(--crit)", bg: "var(--crit-soft)", icon: "ph-fill ph-plugs" };
-  }
-  if (status === "REQUESTED") {
-    return { label: "Aislamiento pendiente", color: "var(--warn)", bg: "var(--warn-soft)", icon: PENDING_ICON_CLASS };
-  }
-  if (status === "RELEASE_REQUESTED") {
-    return { label: "Liberación pendiente", color: "var(--warn)", bg: "var(--warn-soft)", icon: PENDING_ICON_CLASS };
-  }
-  if (status === "ISOLATION_FAILED") {
-    return { label: "Aislamiento fallido", color: "var(--crit)", bg: "var(--crit-soft)", icon: "ph-fill ph-warning-circle" };
-  }
-  return { label: "No aislado", color: "var(--ok)", bg: "var(--ok-soft)", icon: "ph-fill ph-check-circle" };
-}
-
 function latestActionLabel(item: ResponseEndpointItem) {
   if (!item.latest_action_at) return "Sin acciones registradas";
   if (item.isolation_status === "EXECUTED") return `Aislado · ${item.latest_action_at}`;
@@ -43,6 +27,9 @@ function latestActionLabel(item: ResponseEndpointItem) {
   if (item.isolation_status === "ISOLATION_FAILED") return `Aislamiento fallido · ${item.latest_action_at}`;
   return item.latest_action_at;
 }
+
+const actionButtonClass =
+  "inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover whitespace-nowrap disabled:opacity-45 disabled:cursor-not-allowed";
 
 export default function ResponseEndpointsTable({ items, loading, onChanged, onOpenDetail }: Props) {
   const [search, setSearch] = useState("");
@@ -118,13 +105,12 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[11px] min-w-[1120px]">
+        <table className="w-full border-collapse text-[11px] min-w-[980px]">
           <thead style={{ background: "color-mix(in srgb, var(--surf2) 88%, transparent)" }}>
             <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
               <th className="px-4 py-3 font-semibold">Endpoint</th>
               <th className="px-3 py-3 font-semibold">Sistema operativo</th>
               <th className="px-3 py-3 font-semibold">Agente</th>
-              <th className="px-3 py-3 font-semibold">Contención</th>
               <th className="px-3 py-3 font-semibold">Última acción</th>
               <th className="px-3 py-3 font-semibold">Trazabilidad</th>
               <th className="px-4 py-3 font-semibold text-right">Acciones</th>
@@ -134,14 +120,14 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="border-t" style={{ borderColor: "var(--line-soft)" }}>
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 6 }).map((_, j) => (
                     <td key={j} className="px-3 py-3.5"><div className="h-3 rounded animate-pulse" style={{ background: "var(--surf3)", width: "65%" }} /></td>
                   ))}
                 </tr>
               ))
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-14 text-center" style={{ color: "var(--tx-mute)" }}>
+                <td colSpan={6} className="py-14 text-center" style={{ color: "var(--tx-mute)" }}>
                   <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: "var(--surf3)", color: "var(--tx-dim)" }}>
                     <i className="ph ph-desktop" style={{ fontSize: "22px" }} />
                   </div>
@@ -150,10 +136,10 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
               </tr>
             ) : (
               filtered.map((item) => {
-                const state = statusPresentation(item.isolation_status);
                 const busy = workingId === item.agent_id;
                 const pending = item.isolation_status === "REQUESTED" || item.isolation_status === "RELEASE_REQUESTED";
                 const isolated = item.isolation_status === "EXECUTED";
+
                 return (
                   <tr key={item.agent_id} className="border-t transition-premium" style={{ borderColor: "var(--line-soft)" }}>
                     <td className="px-4 py-3.5">
@@ -167,10 +153,12 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
                         </div>
                       </div>
                     </td>
+
                     <td className="px-3 py-3.5">
                       <div className="font-medium" style={{ color: "var(--tx-dim)" }}>{item.operating_system}</div>
                       {item.os_version && <div className="text-[9px] mt-0.5" style={{ color: "var(--tx-mute)" }}>{item.os_version}</div>}
                     </td>
+
                     <td className="px-3 py-3.5">
                       <div className="flex items-center gap-1.5 font-semibold" style={{ color: item.agent_status === "ONLINE" ? "var(--ok)" : "var(--tx-mute)" }}>
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: item.agent_status === "ONLINE" ? "var(--ok)" : "var(--off)" }} />
@@ -178,59 +166,63 @@ export default function ResponseEndpointsTable({ items, loading, onChanged, onOp
                       </div>
                       <div className="text-[9px] mt-1" style={{ color: "var(--tx-mute)" }}>{item.last_seen_at ?? "Sin heartbeat"}</div>
                     </td>
-                    <td className="px-3 py-3.5">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9.5px] font-bold whitespace-nowrap" style={{ background: state.bg, color: state.color }}>
-                        <i className={state.icon} />
-                        {state.label}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3.5 max-w-[240px]" style={{ color: "var(--tx-dim)" }}>
+
+                    <td className="px-3 py-3.5 max-w-[250px]" style={{ color: "var(--tx-dim)" }}>
                       <div className="text-[10px]">{latestActionLabel(item)}</div>
                     </td>
+
                     <td className="px-3 py-3.5">
                       <div className="text-[10px] font-medium" style={{ color: "var(--tx-dim)" }}>{item.incident_count} incidente{item.incident_count === 1 ? "" : "s"}</div>
                       <div className="text-[9px] mt-1" style={{ color: "var(--tx-mute)" }}>{item.isolation_count} acción{item.isolation_count === 1 ? "" : "es"} registrada{item.isolation_count === 1 ? "" : "s"}</div>
                     </td>
+
                     <td className="px-4 py-3.5">
                       <div className="flex justify-end items-center gap-2">
                         {pending ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-[10px] font-semibold" style={{ background: "var(--warn-soft)", color: "var(--warn)" }}>
-                            <i className={PENDING_ICON_CLASS} /> En curso
+                          <span className="inline-flex items-center gap-1.5 px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{ color: "var(--warn)" }}>
+                            <i className={PENDING_ICON_CLASS} style={{ fontSize: "13px" }} />
+                            En curso
                           </span>
                         ) : isolated ? (
                           <button
                             disabled={busy || !item.isolation_id}
                             onClick={() => handleRelease(item)}
                             title={RELEASE_TOOLTIP}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-bold cursor-pointer disabled:opacity-50 transition-premium btn-hover"
-                            style={{ color: "var(--warn)", background: "var(--warn-soft)", borderColor: "var(--warn)" }}
+                            className={actionButtonClass}
+                            style={{ color: "var(--warn)", background: "var(--warn-fill)", borderColor: "var(--warn-soft)" }}
                           >
-                            <i className={busy ? SPINNER_ICON_CLASS : RELEASE_ICON_CLASS} />
-                            {busy ? "Enviando..." : "Desaislar"}
+                            <i className={busy ? SPINNER_ICON_CLASS : RELEASE_ICON_CLASS} style={{ fontSize: "13px" }} />
+                            <span className="text-[10px] font-semibold">{busy ? "Enviando..." : "Desaislar"}</span>
                           </button>
                         ) : (
                           <button
                             disabled={busy || !item.active_incident_id}
                             onClick={() => handleIsolate(item)}
                             title={item.active_incident_id ? ISOLATE_TOOLTIP : "No hay un incidente activo asociado a este endpoint."}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-bold cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed transition-premium btn-hover"
-                            style={{ color: "var(--crit)", background: "var(--crit-soft)", borderColor: "var(--crit)" }}
+                            className={actionButtonClass}
+                            style={{ color: "var(--crit)", background: "var(--crit-fill)", borderColor: "var(--crit-soft)" }}
                           >
-                            <i className={busy ? SPINNER_ICON_CLASS : ISOLATE_ICON_CLASS} />
-                            {busy ? "Enviando..." : "Aislar"}
+                            <i className={busy ? SPINNER_ICON_CLASS : ISOLATE_ICON_CLASS} style={{ fontSize: "13px" }} />
+                            <span className="text-[10px] font-semibold">{busy ? "Enviando..." : "Aislar"}</span>
                           </button>
                         )}
 
                         <button
                           onClick={() => onOpenDetail(item.agent_id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover"
+                          className={actionButtonClass}
                           style={{ color: "var(--brand)", background: "var(--brand-fill)", borderColor: "var(--brand-soft)" }}
+                          title="Ver incidentes e historial de respuesta del endpoint"
                         >
-                          <i className="ph ph-eye" style={{ fontSize: "12px" }} />
+                          <i className="ph ph-eye" style={{ fontSize: "13px" }} />
                           <span className="text-[10px] font-semibold">Ver detalles</span>
                         </button>
                       </div>
-                      {rowError?.id === item.agent_id && <div className="text-[9px] mt-1.5 max-w-[280px] ml-auto text-right" style={{ color: "var(--crit)" }}>{rowError.message}</div>}
+
+                      {rowError?.id === item.agent_id && (
+                        <div className="text-[9px] mt-1.5 max-w-[280px] ml-auto text-right" style={{ color: "var(--crit)" }}>
+                          {rowError.message}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
