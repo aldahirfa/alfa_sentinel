@@ -1,6 +1,7 @@
 import httpx
 
 import config
+import transport
 # Se usa "import config" (no "from config import X") a propósito: si
 # main.py recibe --server y pisa config.SERVER_URL/config.EVENTS_URL/etc
 # en tiempo de ejecución (ver parse_args() en main.py), estas funciones
@@ -23,6 +24,24 @@ def _warn_if_error(response, action):
             print(f"  detalle: {response.text}")
 
 
+def _report_connection_error(error):
+    """Distingue un fallo de red de un certificado rechazado: lo segundo
+    puede ser un ataque (alguien suplantando al servidor) o una CA mal
+    copiada, y no debe confundirse con 'el servidor está caído'."""
+
+    text = str(error)
+    if isinstance(error, transport.InsecureServerURLError):
+        print(f"⚠ {text}")
+    elif "CERTIFICATE_VERIFY_FAILED" in text or "certificate" in text.lower():
+        print("⚠ El servidor presentó un certificado TLS NO confiable. Conexión cancelada.")
+        print("  Posible suplantación del servidor, o agent/certs/ca.crt no corresponde")
+        print("  a la CA del servidor / la IP no está en su certificado.")
+        print(f"  detalle: {text}")
+    else:
+        print("No se pudo conectar con el servidor:")
+        print(error)
+
+
 def enroll_agent(system_info):
     data = {
         "token": config.ENROLLMENT_TOKEN,
@@ -30,27 +49,25 @@ def enroll_agent(system_info):
     }
 
     try:
-        response = httpx.post(config.ENROLLMENT_URL, json=data, timeout=10)
+        response = transport.post(config.ENROLLMENT_URL, json=data, timeout=10)
         _warn_if_error(response, "hacer enrollment")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def authenticate_agent(credential):
     try:
-        response = httpx.get(
+        response = transport.get(
             config.AUTHENTICATION_URL,
             headers={"X-Agent-Credential": credential},
             timeout=10
         )
         _warn_if_error(response, "autenticar al agente")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
@@ -63,7 +80,7 @@ def send_heartbeat(credential, system_info=None):
     """
 
     try:
-        response = httpx.post(
+        response = transport.post(
             config.HEARTBEAT_URL,
             json=system_info or {},
             headers={"X-Agent-Credential": credential},
@@ -71,15 +88,14 @@ def send_heartbeat(credential, system_info=None):
         )
         _warn_if_error(response, "enviar el heartbeat")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def send_event(credential, event_data):
     try:
-        response = httpx.post(
+        response = transport.post(
             config.EVENTS_URL,
             json=event_data,
             headers={"X-Agent-Credential": credential},
@@ -87,30 +103,28 @@ def send_event(credential, event_data):
         )
         _warn_if_error(response, "enviar un evento")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def get_honeyfile_policy(credential):
     try:
-        response = httpx.get(
+        response = transport.get(
             config.HONEYFILE_POLICY_URL,
             headers={"X-Agent-Credential": credential},
             timeout=10
         )
         _warn_if_error(response, "pedir la política de honeyfiles")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def report_honeyfile_policy(credential, results):
     try:
-        response = httpx.post(
+        response = transport.post(
             config.HONEYFILE_POLICY_REPORT_URL,
             json={"results": results},
             headers={"X-Agent-Credential": credential},
@@ -118,45 +132,42 @@ def report_honeyfile_policy(credential, results):
         )
         _warn_if_error(response, "reportar honeyfiles creados")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def get_rule_policy(credential):
     try:
-        response = httpx.get(
+        response = transport.get(
             config.RULE_POLICY_URL,
             headers={"X-Agent-Credential": credential},
             timeout=10
         )
         _warn_if_error(response, "pedir la política de reglas")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def get_isolation_status(credential):
     try:
-        response = httpx.get(
+        response = transport.get(
             config.ISOLATION_STATUS_URL,
             headers={"X-Agent-Credential": credential},
             timeout=10
         )
         _warn_if_error(response, "pedir el estado de aislamiento")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def report_isolation_status(credential, isolation_id, status, result):
     try:
-        response = httpx.post(
+        response = transport.post(
             config.ISOLATION_STATUS_REPORT_URL,
             json={
                 "isolation_id": isolation_id,
@@ -168,15 +179,14 @@ def report_isolation_status(credential, isolation_id, status, result):
         )
         _warn_if_error(response, "reportar el resultado de un aislamiento")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None
 
 
 def send_alert(credential, alert_data):
     try:
-        response = httpx.post(
+        response = transport.post(
             config.ALERTS_URL,
             json=alert_data,
             headers={"X-Agent-Credential": credential},
@@ -184,7 +194,6 @@ def send_alert(credential, alert_data):
         )
         _warn_if_error(response, "enviar una alerta")
         return response
-    except httpx.RequestError as error:
-        print("No se pudo conectar con el servidor:")
-        print(error)
+    except (httpx.RequestError, transport.InsecureServerURLError) as error:
+        _report_connection_error(error)
         return None

@@ -4,7 +4,13 @@
 # agente; no hay todavía un mecanismo automático de versionado.
 AGENT_VERSION = "1.0.0"
 
-SERVER_URL = "http://192.168.81.1:8000"
+# HTTPS obligatorio (ver agent/transport.py y server/TLS_README.md).
+SERVER_URL = "https://192.168.81.1:8000"
+
+# CA propia de ALFA-Sentinel -- la única en la que confía el agente.
+# Relativa a la carpeta del agente; se puede cambiar con --ca o con la
+# variable de entorno ALFA_SENTINEL_CA_FILE.
+CA_CERT_FILE = "certs/ca.crt"
 
 ENROLLMENT_URL = f"{SERVER_URL}/enrollment"
 

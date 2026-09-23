@@ -41,7 +41,35 @@ app = FastAPI()
 # cambia, todas las sesiones abiertas se invalidan de golpe.
 SESSION_SECRET = os.getenv("SESSION_SECRET", "cambia-esto-en-produccion")
 
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+# ALFA_TLS_ENABLED lo pone server/run_server.py cuando arranca con
+# certificado (HTTPS). Con TLS activo la cookie de sesión se marca
+# Secure -- el navegador nunca la manda por HTTP en claro -- y se
+# agrega HSTS. Si alguien arranca con 'uvicorn asgi:app' a mano (las
+# pruebas lo hacen), queda en 0 y todo funciona como antes.
+TLS_ENABLED = os.getenv("ALFA_TLS_ENABLED", "0") == "1"
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    https_only=TLS_ENABLED,
+    same_site="strict" if TLS_ENABLED else "lax",
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Cabeceras de seguridad en todas las respuestas (API y /static)."""
+
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if not request.url.path.startswith("/static/"):
+        # Datos de incidentes/alertas: que no queden en caché del navegador.
+        response.headers.setdefault("Cache-Control", "no-store")
+    if TLS_ENABLED:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
 
 # CORS solo para el nuevo frontend React (Vite corre en otro puerto,
 # distinto origen aunque sea el mismo host). allow_credentials=True es
@@ -50,7 +78,7 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 # porque allow_credentials=True no funciona junto con un wildcard.
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173"
+    "https://localhost:5173,https://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
 
 app.add_middleware(

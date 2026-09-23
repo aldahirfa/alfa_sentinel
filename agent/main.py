@@ -2,6 +2,7 @@ import argparse
 
 import config
 import paths as agent_paths
+import transport
 
 from process_monitor import get_running_processes
 from file_monitor import start_file_monitor
@@ -18,7 +19,8 @@ from system_info import get_system_info
 def parse_args():
     parser = argparse.ArgumentParser(description="Agente ALFA-Sentinel")
     parser.add_argument("--enroll", dest="token", default=None, help="Token de enrollment de un solo uso")
-    parser.add_argument("--server", dest="server_url", default=None, help="URL base del servidor (ej. http://127.0.0.1:8000)")
+    parser.add_argument("--server", dest="server_url", default=None, help="URL base del servidor (ej. https://192.168.81.1:8000)")
+    parser.add_argument("--ca", dest="ca_file", default=None, help="Ruta a ca.crt de ALFA-Sentinel (por defecto agent/certs/ca.crt)")
     return parser.parse_args()
 
 
@@ -37,6 +39,10 @@ def apply_cli_overrides(args):
         config.ISOLATION_STATUS_REPORT_URL = f"{config.SERVER_URL}/agent/isolation-status/report"
         print(f"Servidor (--server): {config.SERVER_URL}")
 
+    if args.ca_file:
+        config.CA_CERT_FILE = args.ca_file
+        print(f"CA de confianza (--ca): {transport.ca_file_path()}")
+
     if args.token:
         config.ENROLLMENT_TOKEN = args.token
         print("Token de enrollment (--enroll): tomado de la línea de comandos.")
@@ -47,6 +53,18 @@ if __name__ == "__main__":
 
     cli_args = parse_args()
     apply_cli_overrides(cli_args)
+
+    # Antes de mandar nada (ni el token de enrollment ni la credencial):
+    # confirmar que el canal hacia el servidor es HTTPS con la CA propia.
+    try:
+        transport_mode = transport.validate_server_url()
+    except transport.InsecureServerURLError as error:
+        print(f"⚠ {error}")
+        raise SystemExit(1)
+    if transport_mode == "https":
+        print(f"Canal seguro: HTTPS con CA propia ({transport.ca_file_path()})")
+    else:
+        print("⚠ Canal SIN cifrar hacia 127.0.0.1 (solo pruebas locales).")
 
     system_info = get_system_info()
 

@@ -6,3 +6,4 @@ bcrypt
 itsdangerous
 reportlab
 openpyxl
+cryptography

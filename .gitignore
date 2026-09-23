@@ -16,3 +16,7 @@ agent/test_files/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Certificados TLS (claves privadas de la CA y del servidor) -- NUNCA subir
+server/certs/
+agent/certs/
