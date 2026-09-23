@@ -12,11 +12,27 @@ import secrets
 from pydantic import BaseModel
 from fastapi import Depends, Header, HTTPException
 
-from main import app, get_connection, require_role, resolve_agent_id
+from main import app, get_connection, get_current_user, require_role, resolve_agent_id
 
 
 ENROLLMENT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 ENROLLMENT_CODE_LENGTH = 8
+
+RESPONSE_ISOLATION_LABELS = {
+    "REQUESTED": "Aislamiento pendiente",
+    "EXECUTED": "Aislado",
+    "ISOLATION_FAILED": "Aislamiento fallido",
+    "RELEASE_REQUESTED": "Liberación pendiente",
+    "RELEASED": "Liberado",
+    "RECOMMENDED": "Recomendado",
+}
+
+RESPONSE_INCIDENT_LABELS = {
+    "OPEN": "Abierto",
+    "IN_PROGRESS": "En investigación",
+    "CONTAINED": "Contenido",
+    "CLOSED": "Cerrado",
+}
 
 
 class HeartbeatUpdate(BaseModel):
@@ -86,8 +102,6 @@ def create_enrollment_code(user: dict = Depends(require_role("admin"))):
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            # La probabilidad de colisión es mínima, pero se comprueba antes
-            # de insertar para mantener token_hash UNIQUE sin depender del azar.
             for _ in range(10):
                 raw_code, display_code = _new_enrollment_code()
                 token_hash = hashlib.sha256(raw_code.encode()).hexdigest()
@@ -114,7 +128,6 @@ def create_enrollment_code(user: dict = Depends(require_role("admin"))):
 
         return {
             "message": "Código de enrolamiento creado",
-            # Se conserva 'token' por compatibilidad con el frontend actual.
             "token": display_code,
             "code": display_code,
             "token_id": token_id,
@@ -174,8 +187,6 @@ def enroll_agent(enrollment: EnrollmentRequest):
             )
             agent_id = cursor.fetchone()[0]
 
-            # Esta credencial sí permanece larga y aleatoria: ya no la escribe
-            # una persona, la recibe el agente y la guarda automáticamente.
             credential = secrets.token_urlsafe(32)
             credential_hash = hashlib.sha256(credential.encode()).hexdigest()
 
@@ -261,3 +272,233 @@ def agent_heartbeat(
             }
     finally:
         connection.close()
+
+
+@app.get("/api/respuesta/endpoints")
+def response_endpoints(user: dict = Depends(get_current_user)):
+    """Vista operativa de contención agrupada por endpoint/agente.
+
+    Devuelve una sola fila por agente registrado. El historial de
+    host_isolations no se repite en esta lista: únicamente se expone el
+    último estado para decidir qué control mostrar. La trazabilidad
+    completa vive en /api/respuesta/endpoints/{agent_id}.
+    """
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    agents.id,
+                    endpoints.hostname,
+                    endpoints.os,
+                    endpoints.os_version,
+                    endpoints.ip_address,
+                    agents.status,
+                    agents.last_seen_at,
+                    latest_iso.id,
+                    latest_iso.status,
+                    latest_iso.requested_at,
+                    active_incident.id,
+                    COALESCE(incident_stats.total, 0),
+                    COALESCE(isolation_stats.total, 0)
+                FROM agents
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                LEFT JOIN LATERAL (
+                    SELECT hi.id, hi.status, hi.requested_at
+                    FROM host_isolations hi
+                    WHERE hi.agent_id = agents.id
+                    ORDER BY hi.requested_at DESC, hi.id DESC
+                    LIMIT 1
+                ) AS latest_iso ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT i.id
+                    FROM incidents i
+                    WHERE i.agent_id = agents.id
+                      AND i.status != 'CLOSED'
+                    ORDER BY i.opened_at DESC, i.id DESC
+                    LIMIT 1
+                ) AS active_incident ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS total
+                    FROM incidents i
+                    WHERE i.agent_id = agents.id
+                ) AS incident_stats ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS total
+                    FROM host_isolations hi
+                    WHERE hi.agent_id = agents.id
+                ) AS isolation_stats ON TRUE
+                ORDER BY endpoints.hostname ASC, agents.id ASC;
+                """
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    endpoints_data = []
+    for row in rows:
+        isolation_status = row[8]
+        endpoints_data.append({
+            "agent_id": row[0],
+            "hostname": row[1],
+            "operating_system": row[2] or "Desconocido",
+            "os_version": row[3] or "",
+            "ip_address": str(row[4]) if row[4] else "—",
+            "agent_status": row[5],
+            "last_seen_at": row[6].strftime("%d/%m/%Y %H:%M:%S") if row[6] else None,
+            "isolation_id": row[7],
+            "isolation_status": isolation_status,
+            "isolation_status_label": RESPONSE_ISOLATION_LABELS.get(isolation_status, "Sin aislamiento") if isolation_status else "Sin aislamiento",
+            "latest_action_at": row[9].strftime("%d/%m/%Y %H:%M:%S") if row[9] else None,
+            "active_incident_id": row[10],
+            "incident_count": row[11],
+            "isolation_count": row[12],
+        })
+
+    pending_statuses = {"REQUESTED", "RELEASE_REQUESTED"}
+    return {
+        "summary": {
+            "total_endpoints": len(endpoints_data),
+            "isolated_now": sum(1 for item in endpoints_data if item["isolation_status"] == "EXECUTED"),
+            "pending_now": sum(1 for item in endpoints_data if item["isolation_status"] in pending_statuses),
+            "with_history": sum(1 for item in endpoints_data if item["isolation_count"] > 0),
+        },
+        "endpoints": endpoints_data,
+    }
+
+
+@app.get("/api/respuesta/endpoints/{agent_id}")
+def response_endpoint_detail(agent_id: int, user: dict = Depends(get_current_user)):
+    """Detalle completo de contención para un endpoint registrado."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
+                       endpoints.ip_address, agents.status, agents.last_seen_at,
+                       agents.agent_version
+                FROM agents
+                JOIN endpoints ON endpoints.id = agents.endpoint_id
+                WHERE agents.id = %s;
+                """,
+                (agent_id,),
+            )
+            endpoint_row = cursor.fetchone()
+            if endpoint_row is None:
+                raise HTTPException(status_code=404, detail="Endpoint no encontrado")
+
+            cursor.execute(
+                """
+                SELECT hi.id, hi.status, hi.reason, hi.requested_at,
+                       hi.executed_at, hi.released_at, hi.result,
+                       users.full_name, hi.incident_id
+                FROM host_isolations hi
+                LEFT JOIN users ON users.id = hi.requested_by
+                WHERE hi.agent_id = %s
+                ORDER BY hi.requested_at DESC, hi.id DESC;
+                """,
+                (agent_id,),
+            )
+            isolation_rows = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
+                    i.id,
+                    i.title,
+                    i.status,
+                    i.opened_at,
+                    i.closed_at,
+                    assigned_user.full_name,
+                    (
+                        SELECT sl.name
+                        FROM alerts a
+                        JOIN severity_levels sl ON sl.id = a.severity_id
+                        WHERE a.incident_id = i.id
+                        ORDER BY sl.min_score DESC
+                        LIMIT 1
+                    ) AS severity,
+                    (
+                        SELECT COALESCE(MAX(a.risk_score), 0)
+                        FROM alerts a
+                        WHERE a.incident_id = i.id
+                    ) AS risk_score,
+                    (
+                        SELECT COUNT(*)
+                        FROM alerts a
+                        WHERE a.incident_id = i.id
+                    ) AS detection_count
+                FROM incidents i
+                LEFT JOIN users AS assigned_user ON assigned_user.id = i.assigned_to
+                WHERE i.agent_id = %s
+                ORDER BY i.opened_at DESC, i.id DESC;
+                """,
+                (agent_id,),
+            )
+            incident_rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    isolations = [
+        {
+            "id": row[0],
+            "status": row[1],
+            "status_label": RESPONSE_ISOLATION_LABELS.get(row[1], row[1]),
+            "reason": row[2],
+            "requested_at": row[3].strftime("%d/%m/%Y %H:%M:%S") if row[3] else None,
+            "executed_at": row[4].strftime("%d/%m/%Y %H:%M:%S") if row[4] else None,
+            "released_at": row[5].strftime("%d/%m/%Y %H:%M:%S") if row[5] else None,
+            "result": row[6],
+            "requested_by_name": row[7],
+            "incident_id": row[8],
+        }
+        for row in isolation_rows
+    ]
+
+    incidents = [
+        {
+            "id": row[0],
+            "code": f"INC-{row[0]:05d}",
+            "title": row[1],
+            "status": row[2],
+            "status_label": RESPONSE_INCIDENT_LABELS.get(row[2], row[2]),
+            "opened_at": row[3].strftime("%d/%m/%Y %H:%M:%S") if row[3] else None,
+            "closed_at": row[4].strftime("%d/%m/%Y %H:%M:%S") if row[4] else None,
+            "assigned_to_name": row[5],
+            "severity": row[6],
+            "risk_score": float(row[7] or 0),
+            "detection_count": row[8],
+        }
+        for row in incident_rows
+    ]
+
+    latest = isolations[0] if isolations else None
+    active_incident = next((item for item in incidents if item["status"] != "CLOSED"), None)
+
+    return {
+        "endpoint": {
+            "agent_id": endpoint_row[0],
+            "hostname": endpoint_row[1],
+            "operating_system": endpoint_row[2] or "Desconocido",
+            "os_version": endpoint_row[3] or "",
+            "ip_address": str(endpoint_row[4]) if endpoint_row[4] else "—",
+            "agent_status": endpoint_row[5],
+            "last_seen_at": endpoint_row[6].strftime("%d/%m/%Y %H:%M:%S") if endpoint_row[6] else None,
+            "agent_version": endpoint_row[7],
+            "isolation_id": latest["id"] if latest else None,
+            "isolation_status": latest["status"] if latest else None,
+            "isolation_status_label": latest["status_label"] if latest else "Sin aislamiento",
+            "active_incident_id": active_incident["id"] if active_incident else None,
+        },
+        "summary": {
+            "incidents_total": len(incidents),
+            "isolations_total": len(isolations),
+            "isolated_now": bool(latest and latest["status"] == "EXECUTED"),
+        },
+        "incidents": incidents,
+        "isolations": isolations,
+    }

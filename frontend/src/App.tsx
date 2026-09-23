@@ -31,7 +31,7 @@ const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
   incidentes: { title: "Incidentes", subtitle: "Centro de investigación y respuesta" },
   honeyfiles: { title: "Honeyfiles", subtitle: "Archivos señuelo desplegados y su estado" },
   reglas: { title: "Reglas heurísticas", subtitle: "Qué detecta el sistema y con qué peso" },
-  respuesta: { title: "Acciones de respuesta", subtitle: "Contención de endpoints ante una amenaza" },
+  respuesta: { title: "Acciones de respuesta", subtitle: "Control de aislamiento y liberación por endpoint" },
   reportes: { title: "Reportes", subtitle: "Informes de seguridad, endpoints e incidentes" },
   administracion: { title: "Administración", subtitle: "Usuarios, agentes, configuración y auditoría" },
   perfil: { title: "Mi perfil", subtitle: "Información de tu cuenta en el Sistema ALFA-Sentinel" },
@@ -68,6 +68,11 @@ const getInitialIncidentesSelection = () => {
   return null;
 };
 
+const getInitialRespuestaEndpoint = (): number | null => {
+  const match = window.location.pathname.match(/\/respuesta\/endpoint\/(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+};
+
 export default function App() {
   const [page, setPage] = useState<Page>(getInitialPage);
   const [mountedPages, setMountedPages] = useState<Set<Page>>(() => new Set([getInitialPage()]));
@@ -78,6 +83,7 @@ export default function App() {
   const [needsLogin, setNeedsLogin] = useState(false);
   const [alertsInitialSelection, setAlertsInitialSelection] = useState<{ id: number } | null>(getInitialAlertsSelection);
   const [incidentesInitialSelection, setIncidentesInitialSelection] = useState<{ kind: ItemKind; id: number } | null>(getInitialIncidentesSelection);
+  const [respuestaEndpointId, setRespuestaEndpointId] = useState<number | null>(getInitialRespuestaEndpoint);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -134,12 +140,14 @@ export default function App() {
         newUrl = `/incidentes/${incidentesInitialSelection.id}`;
       } else if (page === "alerts" && alertsInitialSelection) {
         newUrl = `/alertas/${alertsInitialSelection.id}`;
+      } else if (page === "respuesta" && respuestaEndpointId !== null) {
+        newUrl = `/respuesta/endpoint/${respuestaEndpointId}`;
       }
     }
     if (window.location.pathname !== newUrl && !window.location.pathname.endsWith(".html")) {
       window.history.pushState(null, "", newUrl);
     }
-  }, [page, incidentesInitialSelection, alertsInitialSelection]);
+  }, [page, incidentesInitialSelection, alertsInitialSelection, respuestaEndpointId]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -148,6 +156,7 @@ export default function App() {
       setPage(nextPage);
       setAlertsInitialSelection(getInitialAlertsSelection());
       setIncidentesInitialSelection(getInitialIncidentesSelection());
+      setRespuestaEndpointId(getInitialRespuestaEndpoint());
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -157,19 +166,37 @@ export default function App() {
     ensurePageMounted(next);
     setAlertsInitialSelection(null);
     setIncidentesInitialSelection(null);
+    setRespuestaEndpointId(null);
     setPage(next);
   }
 
   function openAlert(id: number) {
     ensurePageMounted("alerts");
     setAlertsInitialSelection({ id });
+    setIncidentesInitialSelection(null);
+    setRespuestaEndpointId(null);
     setPage("alerts");
   }
 
   function openIncident(id: number) {
     ensurePageMounted("incidentes");
     setIncidentesInitialSelection({ kind: "incident", id });
+    setAlertsInitialSelection(null);
+    setRespuestaEndpointId(null);
     setPage("incidentes");
+  }
+
+  function openResponseEndpoint(agentId: number) {
+    ensurePageMounted("respuesta");
+    setAlertsInitialSelection(null);
+    setIncidentesInitialSelection(null);
+    setRespuestaEndpointId(agentId);
+    setPage("respuesta");
+  }
+
+  function closeResponseEndpoint() {
+    setRespuestaEndpointId(null);
+    setPage("respuesta");
   }
 
   const wrapperStyle = { background: "var(--bg)", color: "var(--tx)" };
@@ -273,7 +300,12 @@ export default function App() {
           )}
           {mountedPages.has("respuesta") && (
             <div className={pageVisibility("respuesta")} aria-hidden={page !== "respuesta"}>
-              <RespuestaPage />
+              <RespuestaPage
+                endpointId={respuestaEndpointId}
+                onOpenEndpoint={openResponseEndpoint}
+                onBack={closeResponseEndpoint}
+                onViewIncident={openIncident}
+              />
             </div>
           )}
           {mountedPages.has("reportes") && (
