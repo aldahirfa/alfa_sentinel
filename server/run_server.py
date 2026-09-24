@@ -20,6 +20,7 @@ acepta http:// si el servidor es 127.0.0.1/localhost.
 """
 
 import argparse
+import logging
 import os
 import ssl
 import sys
@@ -34,8 +35,27 @@ def _resolve(path):
     return path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
 
 
+class _IgnoreClientResetFilter(logging.Filter):
+    """Oculta un falso error de asyncio en Windows.
+
+    Cuando el cliente (el proxy de Vite, un navegador o un agente) cierra
+    de golpe una conexión keep-alive, el ProactorEventLoop de Windows
+    intenta hacer shutdown() de un socket que ya está cerrado y registra
+    'ConnectionResetError: [WinError 10054]' con traceback completo. La
+    petición ya se respondió bien (200 OK): no es un fallo del servidor.
+    Solo se descarta ESE caso; cualquier otro error de asyncio se muestra.
+    """
+
+    def filter(self, record):
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, ConnectionResetError) and "_call_connection_lost" in record.getMessage():
+            return False
+        return True
+
+
 def main():
     load_dotenv(os.path.join(BASE_DIR, ".env"))
+    logging.getLogger("asyncio").addFilter(_IgnoreClientResetFilter())
 
     parser = argparse.ArgumentParser(description="Servidor ALFA-Sentinel (HTTPS)")
     parser.add_argument("--host", default=os.getenv("SERVER_HOST", "0.0.0.0"))
