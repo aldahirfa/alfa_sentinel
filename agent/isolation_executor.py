@@ -645,3 +645,28 @@ def execute_release(isolation_type):
         return False, f"[execution_mode={_mode_label(mode)}] Liberación de red no implementada para este SO: {system}"
 
     return ok, f"[execution_mode={_mode_label(mode)}, simulation=FALSE] {detail}"
+
+
+def release_if_isolated():
+    """Para el desinstalador: levanta el aislamiento SOLO si hay uno
+    activo en el firewall (reglas o cadenas de ALFA-Sentinel). Si el
+    equipo no está aislado no toca nada, para no alterar la configuración
+    del firewall del usuario. Devuelve un mensaje para mostrar."""
+
+    system = platform.system()
+    if system == "Linux":
+        isolated = any(_iptables_rule_exists([parent, "-j", chain]) for chain, parent in LINUX_CHAINS)
+        legacy = False
+        host = _server_endpoint()[0]
+        if host:
+            legacy = any(_iptables_rule_exists(rule) for rule in _linux_legacy_rules(host))
+        if not (isolated or legacy):
+            return "El equipo no estaba aislado."
+        return _release_linux(host)[1]
+    if system == "Windows":
+        isolated = os.path.exists(ISOLATION_STATE_FILE) or any(
+            _win_rule_exists(name) for name in WIN_RULES + (WIN_LEGACY_RULE_ALLOW_IN,))
+        if not isolated:
+            return "El equipo no estaba aislado."
+        return _release_windows()[1]
+    return "Sistema operativo no soportado."

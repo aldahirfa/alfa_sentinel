@@ -9,7 +9,11 @@ def save_credential(credential):
         "credential": credential
     }
 
-    with open(CREDENTIAL_FILE, "w") as file:
+    # Solo el dueño (root / Administrador, que es quien corre el agente)
+    # puede leerla. En Windows el instalador además restringe el acceso
+    # con permisos del sistema de archivos.
+    fd = os.open(CREDENTIAL_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as file:
         json.dump(data, file)
 
 

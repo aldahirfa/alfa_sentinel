@@ -1,4 +1,9 @@
 import argparse
+import os
+import signal
+import sys
+import threading
+import time
 
 import config
 import paths as agent_paths
@@ -21,7 +26,37 @@ def parse_args():
     parser.add_argument("--enroll", dest="token", default=None, help="Token de enrollment de un solo uso")
     parser.add_argument("--server", dest="server_url", default=None, help="URL base del servidor (ej. https://192.168.81.1:8000)")
     parser.add_argument("--ca", dest="ca_file", default=None, help="Ruta a ca.crt de ALFA-Sentinel (por defecto agent/certs/ca.crt)")
+    parser.add_argument("--service", action="store_true", help="Modo servicio: sin consola, registro en logs/agente.log, se detiene con la señal del sistema")
     return parser.parse_args()
+
+
+LOG_MAX_BYTES = 10 * 1024 * 1024
+
+
+def redirect_output_to_log():
+    """Como servicio no hay consola: todo lo que el agente imprime va a
+    logs/agente.log (se rota al superar 10 MB, se conserva uno anterior)."""
+
+    log_dir = os.path.join(config.AGENT_DIR, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "agente.log")
+    if os.path.exists(log_file) and os.path.getsize(log_file) > LOG_MAX_BYTES:
+        os.replace(log_file, log_file + ".1")
+    stream = open(log_file, "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = stream
+    print(f"\n===== Agente iniciado como servicio: {time.strftime('%Y-%m-%d %H:%M:%S')} =====")
+
+
+def wait_until_stopped():
+    """Como servicio: espera hasta que el sistema pida detenerlo
+    (systemctl stop, fin de la tarea en Windows, apagado del equipo)."""
+
+    stop = threading.Event()
+    for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGINT", None), getattr(signal, "SIGBREAK", None)):
+        if sig is not None:
+            signal.signal(sig, lambda *_: stop.set())
+    while not stop.wait(1):
+        pass
 
 
 def apply_cli_overrides(args):
@@ -49,9 +84,10 @@ def apply_cli_overrides(args):
 
 
 if __name__ == "__main__":
-    print("Agente iniciado")
-
     cli_args = parse_args()
+    if cli_args.service:
+        redirect_output_to_log()
+    print("Agente iniciado")
     apply_cli_overrides(cli_args)
 
     # Antes de mandar nada (ni el token de enrollment ni la credencial):
@@ -197,7 +233,10 @@ if __name__ == "__main__":
         isolation_sync = IsolationSyncThread(existing_credential).start()
 
         try:
-            input("Presiona ENTER para detener el monitor...")
+            if cli_args.service:
+                wait_until_stopped()
+            else:
+                input("Presiona ENTER para detener el monitor...")
         finally:
             isolation_sync.stop()
             honeyfile_sync.stop()
@@ -214,15 +253,20 @@ if __name__ == "__main__":
 
         response = enroll_agent(system_info)
 
-        if response is not None:
-            print("Respuesta del servidor:")
-            print(response.json())
+        # Código de salida para el instalador: 0 = registrado, 1 = no.
+        if response is None:
+            print("No se pudo contactar al servidor para registrar el agente.")
+            raise SystemExit(1)
 
-            if response.status_code == 200:
-                data = response.json()
-                credential = data["credential"]
-                save_credential(credential)
-                print("Agente registrado correctamente.")
-                print("Credencial almacenada localmente.")
-            else:
-                print("El servidor rechazó el enrollment.")
+        if response.status_code == 200:
+            credential = response.json()["credential"]
+            save_credential(credential)
+            print("Agente registrado correctamente.")
+            print("Credencial almacenada localmente.")
+        else:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = response.text
+            print(f"El servidor rechazó el registro: {detail}")
+            raise SystemExit(1)

@@ -1,0 +1,4 @@
+# Scripts de instalación: cada uno con los saltos de línea de su sistema.
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

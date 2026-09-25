@@ -4,8 +4,31 @@
 # agente; no hay todavía un mecanismo automático de versionado.
 AGENT_VERSION = "1.0.0"
 
+import json
+import os
+
+AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Configuración del equipo, escrita por el instalador (instalar.sh /
+# instalar.ps1) junto al agente. Un servicio del sistema no recibe
+# argumentos ni variables de entorno de quien lo instaló, así que todo lo
+# que antes se pasaba a mano (--server, ALFA_SENTINEL_ENV, HOME) queda acá.
+#   {"server_url": "...", "env_mode": "production", "protected_user": "..."}
+# Las variables de entorno y los argumentos siguen teniendo prioridad.
+LOCAL_CONFIG_FILE = os.path.join(AGENT_DIR, "agent_config.json")
+try:
+    with open(LOCAL_CONFIG_FILE, encoding="utf-8") as _f:
+        LOCAL_CONFIG = json.load(_f)
+except (OSError, ValueError):
+    LOCAL_CONFIG = {}
+
+if LOCAL_CONFIG.get("env_mode"):
+    os.environ.setdefault("ALFA_SENTINEL_ENV", LOCAL_CONFIG["env_mode"])
+if LOCAL_CONFIG.get("protected_user"):
+    os.environ.setdefault("ALFA_SENTINEL_USER", LOCAL_CONFIG["protected_user"])
+
 # HTTPS obligatorio (ver agent/transport.py y server/TLS_README.md).
-SERVER_URL = "https://192.168.81.1:8000"
+SERVER_URL = (LOCAL_CONFIG.get("server_url") or "https://192.168.81.1:8000").rstrip("/")
 
 # CA propia de ALFA-Sentinel -- la única en la que confía el agente.
 # Relativa a la carpeta del agente; se puede cambiar con --ca o con la
@@ -40,4 +63,6 @@ ISOLATION_STATUS_REPORT_URL = f"{SERVER_URL}/agent/isolation-status/report"
 # durante esa ejecución.
 ENROLLMENT_TOKEN = ""
 
-CREDENTIAL_FILE = "agent_credential.json"
+# Junto al agente, no en la carpeta desde donde se lanza (un servicio
+# arranca en otra carpeta de trabajo).
+CREDENTIAL_FILE = os.path.join(AGENT_DIR, "agent_credential.json")

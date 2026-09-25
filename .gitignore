@@ -23,3 +23,6 @@ agent/certs/
 
 # Estado del firewall guardado durante un aislamiento (se restaura al liberar)
 agent/isolation_state.json
+
+# Registro del agente cuando corre como servicio
+agent/logs/
