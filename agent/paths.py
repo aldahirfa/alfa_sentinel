@@ -20,6 +20,7 @@ import os
 import platform
 
 from file_ownership import make_dirs_owned
+import user_folders
 
 
 # Las 4 rutas lógicas que puede usar una plantilla de honeyfile
@@ -133,10 +134,18 @@ def _user_home():
     un nombre de usuario hardcodeado (sección 12/13 de la
     especificación de honeyfiles: "NO usar C:\\Users\\ALDAHIR FA\\...
     como ruta de producción", "no hardcodear /home/aldahir/").
-    os.path.expanduser('~') ya resuelve esto de forma nativa por SO: en
-    Windows lee %USERPROFILE%, en Linux/macOS $HOME."""
+    Ya NO es os.path.expanduser('~'): con sudo o como servicio esa sería
+    la carpeta de root/SYSTEM. Ver agent/user_folders.py."""
 
-    return os.path.expanduser("~")
+    return user_folders.user_home()
+
+
+def _user_folder(logical_key):
+    """Ubicación REAL de la carpeta en este equipo (p. ej. ~/Escritorio
+    en un Ubuntu en español, o el escritorio dentro de OneDrive en
+    Windows), no el nombre en inglés supuesto. Ver agent/user_folders.py."""
+
+    return user_folders.user_folder(logical_key)
 
 
 def _ensure_dir(directory):
@@ -172,7 +181,7 @@ def resolve_logical_path(raw_path):
     key = (raw_path or "").strip().upper()
 
     if key in LOGICAL_PATHS:
-        base = _DEV_HONEYFILES_DIR if get_env_mode() != "production" else os.path.join(_user_home(), _subfolder_for(key))
+        base = _DEV_HONEYFILES_DIR if get_env_mode() != "production" else _user_folder(key)
         return _ensure_dir(os.path.join(base, ALFA_ARCHIVOS_FOLDER_NAME))
 
     # Formato legado (pre-2026-08-17): ruta libre con placeholders.
@@ -217,7 +226,7 @@ def get_monitored_roots():
 
     for key in sorted(GLOBAL_MONITORED_LOGICAL_KEYS):
         if production:
-            add(os.path.join(_user_home(), _subfolder_for(key)))
+            add(_user_folder(key))
         else:
             add(os.path.join(_DEV_ENDPOINT_ROOT, _subfolder_for(key)))
 
