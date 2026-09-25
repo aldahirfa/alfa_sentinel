@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchHoneyfileDetail, toggleHoneyfileStatus } from "../api/client";
+import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
 import type { HoneyfileDetail } from "../types/honeyfiles";
 import { fileTypeIcon, honeyfileStatusPillStyle, HONEYFILE_STATUS_LABEL } from "../lib/honeyfileStatus";
 
@@ -174,7 +175,7 @@ export default function HoneyfileDrawer({ honeyfileId, onClose, onChanged }: Pro
                       <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Agente</div>
                       <div className="flex items-center gap-1.5 mt-1 text-[12px] font-medium" style={{ color: "var(--tx)" }}>
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: data.is_online ? "var(--ok)" : "var(--off)" }} />
-                        {data.is_online ? "Online" : "Offline"}
+                        {CONN_STATUS_LABEL[data.is_online ? "ONLINE" : "OFFLINE"]}
                       </div>
                     </div>
                   </div>

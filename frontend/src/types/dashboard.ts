@@ -1,3 +1,4 @@
+import type { ConnStatus } from "./endpoints";
 // Tipos alineados 1:1 con lo que devuelven server/main.py::api_dashboard_overview
 // y api_dashboard_activity_series. Si el contrato del backend cambia,
 // este archivo es el primer lugar a actualizar.
@@ -27,7 +28,8 @@ export interface RiskDistributionItem {
 export interface EndpointAtRisk {
   hostname: string;
   os: string;
-  status: string;
+  // Regla única de estado del servidor (ver lib/endpointStatus.ts).
+  status: ConnStatus;
   last_seen_ago: string;
   severity: Severity;
   alerts_count: number;

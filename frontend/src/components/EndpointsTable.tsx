@@ -1,8 +1,6 @@
 import type { EndpointListItem } from "../types/endpoints";
 import { severityPillStyle } from "../lib/severity";
 import {
-  AGENT_HEALTH_LABEL,
-  AGENT_HEALTH_VAR,
   CONN_STATUS_LABEL,
   CONN_STATUS_VAR,
   connStatusPillStyle,
@@ -63,9 +61,8 @@ export default function EndpointsTable({ endpoints, loading, hasFilters, onSelec
           <thead style={{ background: "color-mix(in srgb, var(--surf2) 88%, transparent)" }}>
             <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
               <th className="px-4 py-3 font-semibold">Endpoint</th>
-              <th className="px-3 py-3 font-semibold">Conectividad</th>
+              <th className="px-3 py-3 font-semibold">Estado</th>
               <th className="px-3 py-3 font-semibold">Riesgo</th>
-              <th className="px-3 py-3 font-semibold">Agente</th>
               <th className="px-3 py-3 font-semibold">Última conexión</th>
               <th className="px-3 py-3 font-semibold">Alertas</th>
               <th className="px-3 py-3 font-semibold">Actividad</th>
@@ -77,7 +74,7 @@ export default function EndpointsTable({ endpoints, loading, hasFilters, onSelec
               Array.from({ length: 7 }).map((_, i) => <SkeletonRow key={i} />)
             ) : endpoints.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-14" style={{ color: "var(--tx-mute)" }}>
+                <td colSpan={7} className="text-center py-14" style={{ color: "var(--tx-mute)" }}>
                   <div className="w-12 h-12 rounded-2xl mx-auto grid place-items-center mb-3" style={{ background: hasFilters ? "var(--brand-soft)" : "var(--ok-soft)", color: hasFilters ? "var(--brand)" : "var(--ok)" }}>
                     <i className={hasFilters ? "ph ph-magnifying-glass" : "ph ph-desktop-tower"} style={{ fontSize: "22px" }} />
                   </div>
@@ -126,13 +123,6 @@ export default function EndpointsTable({ endpoints, loading, hasFilters, onSelec
 
                     <td className="px-3 py-3.5">
                       <span className="text-[9px] font-bold tracking-[.08em] px-2 py-1 rounded-md" style={severityPillStyle(ep.risk)}>{ep.risk.toUpperCase()}</span>
-                    </td>
-
-                    <td className="px-3 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full" style={{ background: AGENT_HEALTH_VAR[ep.agent_health], boxShadow: `0 0 0 3px color-mix(in srgb, ${AGENT_HEALTH_VAR[ep.agent_health]} 14%, transparent)` }} />
-                        <span className="text-[10px] font-medium" style={{ color: "var(--tx-dim)" }}>{AGENT_HEALTH_LABEL[ep.agent_health]}</span>
-                      </div>
                     </td>
 
                     <td className="px-3 py-3.5">

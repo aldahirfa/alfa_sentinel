@@ -3,6 +3,7 @@ import { fetchAlertDrawer } from "../api/client";
 import type { IncidenteDrawerData, AlertStatus } from "../types/alerts";
 import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
+import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
 import EscalateAlertModal from "./EscalateAlertModal";
 
 interface Props {
@@ -177,9 +178,11 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                         <span className="text-[9px] font-medium ml-1" style={{ color: "var(--tx-mute)" }}>puntos de riesgo</span>
                       </div>
                     </div>
-                    <span className="text-[9px] font-bold tracking-[.08em] px-2.5 py-1 rounded-md" style={severityPillStyle(data.severity)}>
-                      {data.severity.toUpperCase()}
-                    </span>
+                    {data.severity && (
+                      <span className="text-[9px] font-bold tracking-[.08em] px-2.5 py-1 rounded-md" style={severityPillStyle(data.severity)}>
+                        {data.severity.toUpperCase()}
+                      </span>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
@@ -211,7 +214,7 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                   <Field label="Hostname" value={data.hostname} mono />
                   <Field label="Sistema operativo" value={data.operating_system} />
                   <Field label="Dirección IP" value={data.ip_address} mono />
-                  <Field label="Conectividad" value={<span className="inline-flex items-center gap-1.5" style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: data.is_online ? "var(--ok)" : "var(--off)" }} />{data.is_online ? "Online" : "Offline"}</span>} />
+                  <Field label="Conectividad" value={<span className="inline-flex items-center gap-1.5" style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: data.is_online ? "var(--ok)" : "var(--off)" }} />{CONN_STATUS_LABEL[data.is_online ? "ONLINE" : "OFFLINE"]}</span>} />
                   {data.is_honeyfile && <Field label="Origen" value={<span style={{ color: "var(--warn)" }}>Activación de honeyfile</span>} />}
                 </div>
               </Section>

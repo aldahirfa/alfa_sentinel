@@ -316,7 +316,7 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
                           style={a.is_live ? { background: "var(--ok-soft)", color: "var(--ok)" } : { background: "transparent", color: "var(--tx-mute)", border: "1px solid var(--line)" }}
                         >
                           {a.is_live && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ok)" }} />}
-                          {a.is_live ? "En línea" : "Desconectado"}
+                          {a.is_live ? "En línea" : "Sin comunicación"}
                         </span>
                       </label>
                     ))

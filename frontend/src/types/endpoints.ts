@@ -5,7 +5,6 @@
 import type { Severity } from "./dashboard";
 
 export type ConnStatus = "ONLINE" | "OFFLINE" | "ISOLATED";
-export type AgentHealth = "HEALTHY" | "WARNING" | "OFFLINE";
 
 export interface EndpointListItem {
   id: number;
@@ -15,7 +14,6 @@ export interface EndpointListItem {
   ip_address: string;
   conn_status: ConnStatus;
   risk: Severity;
-  agent_health: AgentHealth;
   last_seen_ago: string;
   alerts_count: number;
   last_activity_ago: string | null;
@@ -52,7 +50,7 @@ export interface EndpointsQuery {
 // endpoint ya lo consume server/templates/endpoints.html (Jinja2)
 // para el drawer real que ya existe en la consola vieja, así que
 // estos campos son honestos: no se inventó ninguno, y algunos
-// (agent_health, last_seen_ago, alerts_active, incidents_total/active,
+// (conn_status, last_seen_ago, alerts_active, incidents_total/active,
 // honeyfiles_violated_ago) se agregaron al backend reusando fórmulas
 // ya existentes en otras partes del sistema (ver PENDIENTES.md).
 export interface LatestAlert {
@@ -74,7 +72,8 @@ export interface EndpointDrawerData {
   mac_address: string | null;
   agent_version: string;
   status: string;
-  agent_health: AgentHealth;
+  // Regla única de estado del servidor; ISOLATED con prioridad.
+  conn_status: ConnStatus;
   last_seen_at: string;
   last_seen_ago: string;
   enrolled_at: string;

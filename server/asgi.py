@@ -12,7 +12,15 @@ import secrets
 from pydantic import BaseModel
 from fastapi import Depends, Header, HTTPException
 
-from main import app, get_connection, get_current_user, require_role, resolve_agent_id
+from main import (
+    agent_online_sql,
+    app,
+    get_agent_stale_seconds,
+    get_connection,
+    get_current_user,
+    require_role,
+    resolve_agent_id,
+)
 
 
 ENROLLMENT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -287,15 +295,18 @@ def response_endpoints(user: dict = Depends(get_current_user)):
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+            # agent_status con la regla única de estado (agent_online_sql),
+            # no agents.status crudo: así Respuesta dice lo mismo que Endpoints.
+            online_sql = agent_online_sql(get_agent_stale_seconds(cursor))
             cursor.execute(
-                """
+                f"""
                 SELECT
                     agents.id,
                     endpoints.hostname,
                     endpoints.os,
                     endpoints.os_version,
                     endpoints.ip_address,
-                    agents.status,
+                    CASE WHEN {online_sql} THEN 'ONLINE' ELSE 'OFFLINE' END,
                     agents.last_seen_at,
                     latest_iso.id,
                     latest_iso.status,
@@ -376,10 +387,13 @@ def response_endpoint_detail(agent_id: int, user: dict = Depends(get_current_use
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+            online_sql = agent_online_sql(get_agent_stale_seconds(cursor))
             cursor.execute(
-                """
+                f"""
                 SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
-                       endpoints.ip_address, agents.status, agents.last_seen_at,
+                       endpoints.ip_address,
+                       CASE WHEN {online_sql} THEN 'ONLINE' ELSE 'OFFLINE' END,
+                       agents.last_seen_at,
                        agents.agent_version
                 FROM agents
                 JOIN endpoints ON endpoints.id = agents.endpoint_id

@@ -3,6 +3,7 @@ import ModuleIntro from "../components/ModuleIntro";
 import { fetchResponseEndpointDetail } from "../api/responseClient";
 import type { ResponseEndpointDetail } from "../types/respuesta";
 import { severityPillStyle } from "../lib/severity";
+import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
 
 interface Props {
   agentId: number;
@@ -99,7 +100,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-[9px]" style={{ color: "var(--tx-mute)" }}>
                     <span>Agente v{data.endpoint.agent_version ?? "—"}</span>
                     <span>·</span>
-                    <span>{data.endpoint.agent_status === "ONLINE" ? "Online" : "Offline"}</span>
+                    <span>{CONN_STATUS_LABEL[data.endpoint.agent_status === "ONLINE" ? "ONLINE" : "OFFLINE"]}</span>
                     <span>·</span>
                     <span>Última conexión: {data.endpoint.last_seen_at ?? "No disponible"}</span>
                   </div>

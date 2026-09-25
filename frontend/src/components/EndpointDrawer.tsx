@@ -3,22 +3,14 @@ import { fetchEndpointDrawer } from "../api/client";
 import type { EndpointDrawerData } from "../types/endpoints";
 import { severityPillStyle } from "../lib/severity";
 import {
-  AGENT_HEALTH_LABEL,
-  AGENT_HEALTH_VAR,
   CONN_STATUS_LABEL,
   CONN_STATUS_VAR,
 } from "../lib/endpointStatus";
-import type { ConnStatus } from "../types/endpoints";
 import AgentRulesModal from "./AgentRulesModal";
 
 interface Props {
   endpointId: number | null;
   onClose: () => void;
-}
-
-function connStatusOf(d: EndpointDrawerData): ConnStatus {
-  if (d.is_isolated) return "ISOLATED";
-  return d.status === "ONLINE" ? "ONLINE" : "OFFLINE";
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -76,7 +68,7 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
 
   if (!render) return null;
 
-  const connStatus = data ? connStatusOf(data) : null;
+  const connStatus = data ? data.conn_status : null;
 
   type TimelineItem = { icon: string; color: string; label: string; detail: string; time: string };
   const timeline: TimelineItem[] = [];
@@ -183,19 +175,12 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                  <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
                     <div>
                       <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Estado</div>
                       <div className="flex items-center gap-1.5 mt-1 text-[12px] font-medium" style={{ color: "var(--tx)" }}>
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: CONN_STATUS_VAR[connStatus] }} />
                         {CONN_STATUS_LABEL[connStatus]}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Agente</div>
-                      <div className="flex items-center gap-1.5 mt-1 text-[12px] font-medium" style={{ color: "var(--tx)" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: AGENT_HEALTH_VAR[data.agent_health] }} />
-                        {AGENT_HEALTH_LABEL[data.agent_health]}
                       </div>
                     </div>
                     <div>

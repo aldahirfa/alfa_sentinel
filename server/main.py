@@ -13,6 +13,7 @@ from security import verify_password, hash_password
 
 import secrets
 import hashlib
+import threading
 import csv
 import io
 from datetime import datetime, timedelta
@@ -159,6 +160,97 @@ def get_agent_stale_seconds(cursor):
     vuelve a leer después de guardarlo."""
 
     return get_system_setting(cursor, "agent_stale_seconds", default=AGENT_STALE_SECONDS_DEFAULT, cast=int)
+
+
+# --- Estado de comunicación del endpoint (regla única, 2026-09-24) ---
+#
+# El servidor solo sabe de un endpoint por los heartbeats de su agente,
+# así que hay UN solo estado de conexión, definido por una sola regla:
+#
+#   En línea          -> último heartbeat hace menos de agent_stale_seconds
+#   Sin comunicación  -> heartbeat más viejo que el umbral (o nunca llegó)
+#   Aislado           -> hay un aislamiento ejecutado (prioridad, se
+#                        calcula aparte con _agent_is_isolated_sql)
+#
+# "Sin comunicación" no presupone la causa: puede ser un apagado normal,
+# una caída de red o un agente neutralizado por un ataque.
+#
+# agents.status se mantiene coherente con esa regla: el heartbeat lo
+# pone en ONLINE y mark_stale_agents_offline() lo baja a OFFLINE cuando
+# vence el umbral (hilo de fondo cada PRESENCE_SWEEP_SECONDS). Las
+# consultas usan además agent_online_sql()/is_agent_online(), que
+# aplican la regla completa, para no depender del retraso del barrido.
+
+PRESENCE_SWEEP_SECONDS = 10
+
+
+def agent_online_sql(stale_seconds, table="agents"):
+    """Expresión SQL booleana: el agente está en línea."""
+
+    return (
+        f"({table}.status = 'ONLINE' AND {table}.last_seen_at IS NOT NULL "
+        f"AND {table}.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '{int(stale_seconds)} seconds')"
+    )
+
+
+def is_agent_online(status, last_seen_at, stale_seconds):
+    """Misma regla que agent_online_sql(), para filas ya leídas."""
+
+    if status != "ONLINE" or last_seen_at is None:
+        return False
+    return (datetime.now(last_seen_at.tzinfo) - last_seen_at).total_seconds() < stale_seconds
+
+
+def mark_stale_agents_offline(cursor, stale_seconds=None):
+    """Pasa a OFFLINE los agentes cuyo último heartbeat venció.
+    Devuelve cuántos cambiaron."""
+
+    if stale_seconds is None:
+        stale_seconds = get_agent_stale_seconds(cursor)
+    cursor.execute(
+        f"""
+        UPDATE agents
+        SET status = 'OFFLINE', updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'ONLINE'
+          AND (last_seen_at IS NULL
+               OR last_seen_at < CURRENT_TIMESTAMP - INTERVAL '{int(stale_seconds)} seconds');
+        """
+    )
+    return cursor.rowcount
+
+
+def _presence_sweeper_loop(stop_event):
+    while not stop_event.wait(PRESENCE_SWEEP_SECONDS):
+        try:
+            connection = get_connection()
+            try:
+                with connection.cursor() as cursor:
+                    changed = mark_stale_agents_offline(cursor)
+                    connection.commit()
+                if changed:
+                    print(f"[presencia] {changed} endpoint(s) pasaron a 'Sin comunicación'")
+            finally:
+                connection.close()
+        except Exception as error:  # la base puede no estar lista todavía
+            print(f"[presencia] no se pudo actualizar el estado: {error}")
+
+
+_presence_stop = threading.Event()
+
+
+@app.on_event("startup")
+def _start_presence_sweeper():
+    threading.Thread(
+        target=_presence_sweeper_loop,
+        args=(_presence_stop,),
+        name="alfa-presence-sweeper",
+        daemon=True,
+    ).start()
+
+
+@app.on_event("shutdown")
+def _stop_presence_sweeper():
+    _presence_stop.set()
 
 
 def log_audit(cursor, user_id, action, entity_type=None, entity_id=None, description=None):
@@ -879,9 +971,8 @@ def _endpoint_cte(stale_seconds):
                endpoints.ip_address, agents.agent_version,
                agents.status, agents.last_seen_at, agents.enrolled_at,
                CASE
-                   WHEN agents.status != 'ONLINE' THEN 'offline'
-                   WHEN agents.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '{stale_seconds} seconds' THEN 'ok'
-                   ELSE 'attention'
+                   WHEN {online_sql} THEN 'ok'
+                   ELSE 'offline'
                END AS status_bucket,
                -- 'Peor severidad' de este endpoint: se busca en
                -- severity_levels la fila cuyo min_score coincide con
@@ -896,7 +987,7 @@ def _endpoint_cte(stale_seconds):
         LEFT JOIN severity_levels AS worst_sev ON worst_sev.min_score = endpoint_risk.worst_min_score
         CROSS JOIN (SELECT name FROM severity_levels ORDER BY min_score ASC LIMIT 1) AS lowest_sev
     )
-""".format(stale_seconds=stale_seconds)
+""".format(online_sql=agent_online_sql(stale_seconds))
 
 ENDPOINTS_PAGE_SIZE = 25
 
@@ -1258,17 +1349,10 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             if not row:
                 return JSONResponse({"error": "Endpoint no encontrado"}, status_code=404)
 
-            # Mismo cálculo que _endpoint_cte()/api_endpoints() (lista de
-            # Endpoints en React) -- Healthy/Warning/Offline según el
-            # último heartbeat contra el umbral configurado. No es un
-            # dato nuevo, es la misma fórmula real aplicada acá para
-            # que el drawer y la lista digan lo mismo.
-            if row[6] != "ONLINE":
-                agent_health = "OFFLINE"
-            elif row[7] and (datetime.now(row[7].tzinfo) - row[7]).total_seconds() <= stale_seconds:
-                agent_health = "HEALTHY"
-            else:
-                agent_health = "WARNING"
+            # Regla única de estado (ver agent_online_sql): la misma que
+            # la lista de Endpoints, para que el drawer y la lista digan
+            # lo mismo. "ISOLATED" se resuelve más abajo, con is_isolated.
+            conn_status = "ONLINE" if is_agent_online(row[6], row[7], stale_seconds) else "OFFLINE"
 
             # Alertas activas e incidentes asociados a este endpoint --
             # mismas tablas/columnas que ya usa el resto del sistema
@@ -1458,7 +1542,7 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
                 "mac_address": None,
                 "agent_version": row[5] or "v1.0.0 (watchdog)",
                 "status": row[6],
-                "agent_health": agent_health,
+                "conn_status": "ISOLATED" if is_isolated else conn_status,
                 "last_seen_at": row[7].strftime("%d/%m/%Y %H:%M:%S") if row[7] else "Nunca",
                 "last_seen_ago": time_ago(row[7]),
                 "enrolled_at": row[8].strftime("%d/%m/%Y") if row[8] else "",
@@ -1559,6 +1643,8 @@ def api_honeyfiles(
             cursor.execute("SELECT DISTINCT os FROM endpoints ORDER BY os;")
             distinct_os = [r[0] for r in cursor.fetchall()]
 
+            stale_seconds = get_agent_stale_seconds(cursor)
+
             cursor.execute(
                 """
                 SELECT agents.id, endpoints.hostname, endpoints.os, endpoints.os_version,
@@ -1577,7 +1663,7 @@ def api_honeyfiles(
                     "os_version": r[3] or "",
                     "ip_address": str(r[4]) if r[4] else "127.0.0.1",
                     "status": r[5],
-                    "is_live": (r[5] == "ONLINE" and r[6] is not None and (datetime.now(r[6].tzinfo) - r[6]).total_seconds() < 30) if r[6] else False
+                    "is_live": is_agent_online(r[5], r[6], stale_seconds)
                 }
                 for r in agent_rows
             ]
@@ -1593,7 +1679,7 @@ def api_honeyfiles(
             status_val = "TRIGGERED"
 
         last_seen = r[14]
-        is_agent_live = (r[13] == "ONLINE" and last_seen is not None and (datetime.now(last_seen.tzinfo) - last_seen).total_seconds() < 30) if last_seen else False
+        is_agent_live = is_agent_online(r[13], last_seen, stale_seconds)
 
         honeyfiles_list.append({
             "id": hf_id,
@@ -1686,7 +1772,7 @@ def get_honeyfile_detail_api(honeyfile_id: int, request: Request):
                 for ar in act_rows
             ]
 
-            is_online = (r[14] == "ONLINE" and r[15] is not None and (datetime.now(r[15].tzinfo) - r[15]).total_seconds() < 30) if r[15] else False
+            is_online = is_agent_online(r[14], r[15], get_agent_stale_seconds(cursor))
 
             status_val = r[4]
             if len(activations) > 0 and status_val == "ACTIVE":
@@ -2638,7 +2724,14 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             cursor.execute("SELECT COUNT(*) FROM agents;")
             endpoints_total = cursor.fetchone()[0]
 
-            cursor.execute("SELECT COUNT(*) FROM agents WHERE status = 'ONLINE';")
+            stale_seconds = get_agent_stale_seconds(cursor)
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) FROM agents
+                WHERE {agent_online_sql(stale_seconds)}
+                  AND NOT {_agent_is_isolated_sql("agents.id")};
+                """
+            )
             endpoints_online = cursor.fetchone()[0]
 
             # 'Aislados': real desde la corrección definitiva del motor
@@ -2737,9 +2830,17 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             # vez de un CASE con nombres hardcodeados: el "peor" nivel
             # de cada endpoint se calcula con el orden real del
             # catálogo (severity_names_by_min_score de arriba). ---
+            # status con la regla única (ISOLATED > ONLINE > OFFLINE), no
+            # agents.status crudo, para que coincida con Endpoints.
             cursor.execute(
-                """
-                SELECT endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at,
+                f"""
+                SELECT endpoints.hostname, endpoints.os,
+                       CASE
+                           WHEN {_agent_is_isolated_sql("agents.id")} THEN 'ISOLATED'
+                           WHEN {agent_online_sql(get_agent_stale_seconds(cursor))} THEN 'ONLINE'
+                           ELSE 'OFFLINE'
+                       END AS conn_status,
+                       agents.last_seen_at,
                        MAX(severity_levels.min_score) AS risk_min_score,
                        COUNT(*) AS alert_count
                 FROM alerts
@@ -2747,7 +2848,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
                 WHERE alerts.status = 'NEW'
-                GROUP BY endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at
+                GROUP BY agents.id, endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at
                 ORDER BY risk_min_score DESC, alert_count DESC
                 LIMIT 5;
                 """
@@ -2823,8 +2924,8 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             ]
 
             # --- Estado de endpoints (online/offline/aislados) + salud
-            # de agentes, mismo criterio de conectividad que el resto
-            # de la consola (agents.status, no heartbeat exacto). ---
+            # de agentes, con la regla única de estado (agent_online_sql):
+            # en línea = heartbeat vigente y sin aislamiento. ---
             agent_health_pct = (
                 round((endpoints_online / endpoints_total) * 100, 1)
                 if endpoints_total > 0 else 100.0
@@ -3089,15 +3190,12 @@ def api_endpoints(
     endpoint (mismo criterio en todo el sistema, un solo camino de
     código).
 
-    Diferencia real a propósito: acá "Estado" tiene un solo valor de
-    cara al usuario (ONLINE/OFFLINE/ISOLATED, con ISOLATED con
-    prioridad sobre el estado de conexión crudo), en vez de las tres
-    categorías ok/attention/offline de /endpoints -- así se pidió esta
-    pantalla. El estado de conexión más fino (Healthy/Warning/Offline)
-    se conserva aparte como "agent_health", derivado de status_bucket
-    (ok->HEALTHY, attention->WARNING, offline->OFFLINE). Riesgo sigue
-    siendo un eje aparte (Normal/Sospechoso/Alto/Crítico) -- nunca se
-    mezcla con conectividad, igual que en el resto del sistema.
+    "Estado" (conn_status) tiene un solo valor por endpoint, con la
+    regla única de agent_online_sql(): ONLINE (En línea), OFFLINE (Sin
+    comunicación) o ISOLATED (Aislado, con prioridad). La antigua
+    columna "Agente" (Healthy/Warning/Offline) se eliminó: medía la
+    misma señal (el heartbeat) con otra regla y confundía. Riesgo sigue
+    siendo un eje aparte -- nunca se mezcla con conectividad.
     """
     connection = get_connection()
     try:
@@ -3126,7 +3224,7 @@ def api_endpoints(
                     is_isolated, alerts_count, last_activity,
                     CASE
                         WHEN is_isolated THEN 'ISOLATED'
-                        WHEN status = 'ONLINE' THEN 'ONLINE'
+                        WHEN status_bucket = 'ok' THEN 'ONLINE'
                         ELSE 'OFFLINE'
                     END AS conn_status
                 FROM endpoint_full
@@ -3193,8 +3291,6 @@ def api_endpoints(
     finally:
         connection.close()
 
-    agent_health_map = {"ok": "HEALTHY", "attention": "WARNING", "offline": "OFFLINE"}
-
     endpoints = [
         {
             "id": r[0],
@@ -3204,7 +3300,6 @@ def api_endpoints(
             "ip_address": str(r[4]) if r[4] else "127.0.0.1",
             "conn_status": r[5],
             "risk": r[6],
-            "agent_health": agent_health_map[r[7]],
             "last_seen_ago": time_ago(r[8]),
             "alerts_count": r[9],
             "last_activity_ago": time_ago(r[10]) if r[10] else None,
@@ -4627,10 +4722,7 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 
             stale_seconds = get_agent_stale_seconds(cursor)
 
-            is_online = (
-                agent_status == "ONLINE" and last_seen_at is not None
-                and (datetime.now(last_seen_at.tzinfo) - last_seen_at).total_seconds() < stale_seconds
-            ) if last_seen_at else False
+            is_online = is_agent_online(agent_status, last_seen_at, stale_seconds)
 
             window_start = anchor_ts - timedelta(minutes=5)
             window_end = anchor_ts + timedelta(minutes=1)
@@ -5831,10 +5923,7 @@ def _gather_endpoints_report_data(cursor, start, end, endpoint_id):
         f"""
         SELECT endpoints.hostname, endpoints.ip_address, endpoints.os,
                agents.status, agents.agent_version, agents.last_seen_at,
-               (
-                   agents.status = 'ONLINE'
-                   AND agents.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '{stale_seconds} seconds'
-               ) AS is_online,
+               {agent_online_sql(stale_seconds)} AS is_online,
                (
                    SELECT COUNT(*) FROM events
                    WHERE events.agent_id = agents.id
@@ -5871,7 +5960,7 @@ def _gather_endpoints_report_data(cursor, start, end, endpoint_id):
     endpoints_data = []
     for (hostname, ip, os_name, status, agent_version, last_seen_at, is_online, event_count,
          hf_deployed, hf_pending, alert_count, incident_count) in rows:
-        status_label = "En línea" if is_online else ("Sin señal reciente" if status == "ONLINE" else "Desconectado")
+        status_label = "En línea" if is_online else "Sin comunicación"
         endpoints_data.append({
             "hostname": hostname,
             "ip_address": str(ip) if ip else "—",

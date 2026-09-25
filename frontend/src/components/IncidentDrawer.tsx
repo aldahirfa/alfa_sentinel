@@ -11,6 +11,7 @@ import type { IncidenteDrawerData } from "../types/alerts";
 import type { AssignableUser, IncidentClassification, IncidentStatus, ItemKind } from "../types/incidentes";
 import { severityPillStyle } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
+import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
 import type { AlertStatus } from "../types/alerts";
 import { INCIDENT_CLASSIFICATION_LABEL, INCIDENT_STATUS_LABEL } from "../lib/incidentStatus";
 import {
@@ -239,7 +240,7 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                 <Field label="Dirección IP" value={data.ip_address} />
                 <Field
                   label="Conectividad"
-                  value={<span style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}>{data.is_online ? "Online" : "Offline"}</span>}
+                  value={<span style={{ color: data.is_online ? "var(--ok)" : "var(--off)" }}>{CONN_STATUS_LABEL[data.is_online ? "ONLINE" : "OFFLINE"]}</span>}
                 />
                 {data.is_honeyfile && <Field label="Origen" value={<span style={{ color: "var(--warn)" }}>Honeyfile</span>} />}
               </Section>

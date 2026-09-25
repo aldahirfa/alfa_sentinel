@@ -1,5 +1,6 @@
 import type { EndpointAtRisk } from "../types/dashboard";
 import { SEVERITY_VAR, severityPillStyle } from "../lib/severity";
+import { CONN_STATUS_LABEL, CONN_STATUS_VAR } from "../lib/endpointStatus";
 
 interface Props {
   endpoints: EndpointAtRisk[];
@@ -96,10 +97,10 @@ export default function EndpointsAtRisk({ endpoints }: Props) {
                     </div>
                   </div>
                   <div className="text-right min-w-[70px]">
-                    <div className="text-[9px] uppercase tracking-wider" style={{ color: "var(--tx-mute)" }}>Agente</div>
-                    <div className="flex items-center justify-end gap-1.5 text-[10px] font-semibold mt-1" style={{ color: ep.status === "ONLINE" ? "var(--ok)" : "var(--tx-mute)" }}>
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: ep.status === "ONLINE" ? "var(--ok)" : "var(--off)" }} />
-                      {ep.status === "ONLINE" ? "En línea" : "Fuera de línea"}
+                    <div className="text-[9px] uppercase tracking-wider" style={{ color: "var(--tx-mute)" }}>Estado</div>
+                    <div className="flex items-center justify-end gap-1.5 text-[10px] font-semibold mt-1" style={{ color: ep.status === "OFFLINE" ? "var(--tx-mute)" : CONN_STATUS_VAR[ep.status] }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: CONN_STATUS_VAR[ep.status] }} />
+                      {CONN_STATUS_LABEL[ep.status]}
                     </div>
                   </div>
                 </div>
