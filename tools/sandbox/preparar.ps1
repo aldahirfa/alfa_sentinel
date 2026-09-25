@@ -36,6 +36,17 @@ if ($Servidor) {
     $Servidor = "https://${gateway}:$Puerto"
 }
 
+# --- Antivirus de la sandbox -----------------------------------------------
+# Solo DENTRO de esta sandbox desechable: evita que Microsoft Defender
+# bloquee RanSim y así se mide la detección de ALFA-Sentinel por sí sola.
+# Al cerrar la sandbox todo se descarta.
+try {
+    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+    Ok "Protección en tiempo real de Defender desactivada (solo en la sandbox)"
+} catch {
+    Aviso "No se pudo desactivar Defender en la sandbox: $($_.Exception.Message)"
+}
+
 # --- RanSim ----------------------------------------------------------------
 $ransim = Get-ChildItem "$Kit\descargas" | Where-Object { $_.Name -match "ransim|simulator" } | Select-Object -First 1
 if ($ransim) {

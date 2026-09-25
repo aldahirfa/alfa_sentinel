@@ -46,16 +46,24 @@ $IpsCertificado = @([regex]::Matches($san, "(\d{1,3}\.){3}\d{1,3}") | ForEach-Ob
 if (-not $IpsCertificado) { Falla "El certificado del servidor no incluye ninguna IP de red. Regenera con: python generar_certificados.py --ip <IP> --force-server" }
 Ok "IPs en el certificado del servidor: $($IpsCertificado -join ', ')"
 
-if (Test-NetConnection 127.0.0.1 -Port $Puerto -InformationLevel Quiet -WarningAction SilentlyContinue) {
-    Ok "El servidor está escuchando en el puerto $Puerto"
+# El servidor puede estar en este mismo equipo o en otro (p. ej. la laptop,
+# cuando la sandbox corre dentro de una VM).
+$ServidorLocal = Test-NetConnection 127.0.0.1 -Port $Puerto -InformationLevel Quiet -WarningAction SilentlyContinue
+$Alcanzable = @($IpsCertificado | Where-Object { Test-NetConnection $_ -Port $Puerto -InformationLevel Quiet -WarningAction SilentlyContinue })
+if ($ServidorLocal) {
+    Ok "El servidor corre en este equipo (puerto $Puerto)"
+} elseif ($Alcanzable) {
+    Ok "Servidor alcanzable en $($Alcanzable -join ', '):$Puerto"
 } else {
-    Aviso "El servidor no responde en el puerto $Puerto. Arráncalo (server\run_server.py) antes de registrar el agente."
+    Aviso "El servidor no responde en $($IpsCertificado -join ', '):$Puerto. Arráncalo (server\run_server.py) y revisa el firewall del equipo del servidor."
 }
 
-# La sandbox llega a la laptop por una red virtual que Windows considera
-# 'Pública': sin esta regla, el firewall de la laptop bloquea al agente.
+# La sandbox llega a este equipo por una red virtual que Windows considera
+# 'Pública': si el servidor corre AQUÍ, sin esta regla el firewall lo bloquea.
 $NombreRegla = "ALFA-Sentinel servidor ($Puerto)"
-if (-not (Get-NetFirewallRule -DisplayName $NombreRegla -ErrorAction SilentlyContinue)) {
+if (-not $ServidorLocal) {
+    # Servidor en otro equipo: la regla hace falta allá, no aquí.
+} elseif (-not (Get-NetFirewallRule -DisplayName $NombreRegla -ErrorAction SilentlyContinue)) {
     $r = Read-Host "  Crear una regla en el firewall de la laptop que permita conexiones entrantes al puerto $Puerto (necesaria para la sandbox)? [S/n]"
     if ($r -ne "n") {
         New-NetFirewallRule -DisplayName $NombreRegla -Direction Inbound -Protocol TCP -LocalPort $Puerto -Action Allow | Out-Null
