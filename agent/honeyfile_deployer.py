@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import os
 
@@ -17,13 +18,14 @@ def _write_and_hash(full_path, content):
     # La carpeta ya la creó resolve_logical_path() (con el dueño
     # correcto, ver agent/file_ownership.py).
 
-    # Contenido de texto plano guardado con la extensión elegida -- no
-    # es un .xlsx/.docx/.pdf válido de verdad (ver database/schema.sql,
-    # tabla honeyfile_templates). Alcanza para que watchdog y la
-    # detección de "Acceso Honeyfile" reaccionen, que es lo único que
-    # este proyecto necesita de él. Saltos de línea del SO, como al
-    # escribir en modo texto.
-    data = (content or "").replace("\n", os.linesep).encode("utf-8")
+    # 'content' son los bytes del archivo real que generó el servidor
+    # (PDF, DOCX, XLSX, JPG...; ver server/honeyfile_content.py). Si llega
+    # texto (un servidor anterior sin 'content_b64'), se guarda como texto
+    # con los saltos de línea del SO, como antes.
+    if isinstance(content, bytes):
+        data = content
+    else:
+        data = (content or "").replace("\n", os.linesep).encode("utf-8")
 
     # Archivo NUEVO sin seguir enlaces: el agente corre con privilegios y
     # escribe en una carpeta del usuario; si alguien plantó un enlace
@@ -36,6 +38,41 @@ def _write_and_hash(full_path, content):
     adopt_parent_owner(full_path, newly_created=True)
 
     return _hash_of(full_path)
+
+
+def _item_content(item):
+    """Bytes del archivo real si el servidor los mandó; si no, el texto."""
+
+    if "content_b64" not in item:
+        return item.get("content")  # servidor anterior: solo texto
+    if not item["content_b64"]:
+        # Honeyfile ya creado que llegó sin su archivo (no se pudo pedir
+        # la política completa). Nunca se escribe texto en su lugar: se
+        # informa el fallo y el servidor lo vuelve a mandar como pendiente.
+        raise OSError("el servidor no envió el archivo; se reintentará en el próximo ciclo")
+    return base64.b64decode(item["content_b64"], validate=True)
+
+
+def _honeyfile_path(directory, file_name):
+    """Ruta del honeyfile dentro de su carpeta. El nombre viene del
+    servidor: si trajera una ruta ('..', separadores) el agente, que corre
+    con privilegios, escribiría fuera de ALFA_ARCHIVOS."""
+
+    name = file_name or ""
+    if not name or name in (".", "..") or "/" in name or "\\" in name or name != os.path.basename(name):
+        raise OSError(f"Nombre de honeyfile inválido: {file_name!r}")
+    return os.path.join(directory, name)
+
+
+def _any_existing_missing(policy):
+    for item in policy.get("existing", []):
+        try:
+            directory = resolve_logical_path(item["file_path"])
+            if not os.path.lexists(_honeyfile_path(directory, item["file_name"])):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _hash_of(full_path):
@@ -89,6 +126,14 @@ def apply_honeyfile_policy(credential, honeyfile_monitor=None):
 
     policy = response.json()
 
+    # Los honeyfiles ya creados llegan sin su archivo (solo el hash
+    # esperado). Si alguno desapareció del disco hay que recrearlo: recién
+    # ahí se pide la política completa, con el archivo de cada uno.
+    if _any_existing_missing(policy):
+        full_response = get_honeyfile_policy(credential, full=True)
+        if full_response is not None and full_response.status_code == 200:
+            policy = full_response.json()
+
     watched_paths = []
     report_results = []
 
@@ -105,12 +150,12 @@ def apply_honeyfile_policy(credential, honeyfile_monitor=None):
             # del try: un fallo acá también debe reportarse FAILED
             # para este ítem puntual, no tumbar toda la sincronización.
             directory = resolve_logical_path(item["file_path"])
-            full_path = os.path.join(directory, item["file_name"])
+            full_path = _honeyfile_path(directory, item["file_name"])
 
             if not os.path.exists(full_path):
                 if honeyfile_monitor is not None:
                     honeyfile_monitor.mark_internal_operation(full_path)
-                file_hash = _write_and_hash(full_path, item.get("content"))
+                file_hash = _write_and_hash(full_path, _item_content(item))
                 print(f"Honeyfile creado: {full_path}")
             else:
                 # Ya existe en disco (p. ej. un ciclo anterior lo creó
@@ -154,7 +199,11 @@ def apply_honeyfile_policy(credential, honeyfile_monitor=None):
             })
             continue
 
-        full_path = os.path.join(directory, item["file_name"])
+        try:
+            full_path = _honeyfile_path(directory, item["file_name"])
+        except OSError as error:
+            print(f"No se pudo reconciliar el ítem {item['assignment_id']}: {error}")
+            continue
         expected_hash = item.get("expected_hash")
 
         if not os.path.exists(full_path):
@@ -162,7 +211,7 @@ def apply_honeyfile_policy(credential, honeyfile_monitor=None):
             try:
                 if honeyfile_monitor is not None:
                     honeyfile_monitor.mark_internal_operation(full_path)
-                file_hash = _write_and_hash(full_path, item.get("content"))
+                file_hash = _write_and_hash(full_path, _item_content(item))
                 print(f"Honeyfile recreado (había desaparecido): {full_path}")
                 watched_paths.append(full_path)
                 report_results.append({

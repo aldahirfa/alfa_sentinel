@@ -10,10 +10,12 @@ from dotenv import load_dotenv
 
 from database import get_connection
 from security import verify_password, hash_password
+from honeyfile_content import SUPPORTED_TYPES as HONEYFILE_TYPES, build_honeyfile_bytes
 from hardening import (
     AgentProtectionMiddleware, FreeText, Identifier, LoginGuard, MAX_PID,
 )
 
+import base64
 import secrets
 import hashlib
 import threading
@@ -1973,6 +1975,12 @@ def deploy_honeyfile_api(request: Request, body: dict = None):
 
     if not display_name:
         return JSONResponse({"error": "Falta el nombre del archivo"}, status_code=400)
+    # El nombre termina en una ruta del equipo (carpeta + nombre): no puede
+    # traer separadores ni '..', o el agente escribiría fuera de ALFA_ARCHIVOS.
+    if any(ch in display_name for ch in '/\\:*?"<>|') or ".." in display_name or len(display_name) > 150:
+        return JSONResponse({"error": "Nombre de archivo inválido: no puede contener rutas ni caracteres especiales"}, status_code=400)
+    if file_type.upper() not in HONEYFILE_TYPES:
+        return JSONResponse({"error": f"Tipo de archivo no soportado: {file_type}"}, status_code=400)
     if not target_path:
         return JSONResponse({"error": "Falta la ruta de destino en el cliente"}, status_code=400)
     if platform not in ("windows", "linux", "all"):
@@ -2041,8 +2049,12 @@ def deploy_honeyfile_api(request: Request, body: dict = None):
     }
 
 
+def _honeyfile_content_b64(file_type, file_name, content):
+    return base64.b64encode(build_honeyfile_bytes(file_type, file_name, content)).decode("ascii")
+
+
 @app.get("/agent/honeyfile-policy")
-def get_honeyfile_policy(x_agent_credential: str = Header(...)):
+def get_honeyfile_policy(x_agent_credential: str = Header(...), completo: bool = Query(False)):
     """El agente llama esto al arrancar Y periódicamente mientras sigue
     corriendo (2026-08-17, ver PENDIENTES.md, "Honeyfiles: despliegue
     automático, rutas, integridad, reconciliación y ejecución en
@@ -2143,7 +2155,11 @@ def get_honeyfile_policy(x_agent_credential: str = Header(...)):
                     "file_name": r[2],
                     "file_type": r[3],
                     "file_path": r[4],
-                    "content": r[5]
+                    "content": r[5],
+                    # Archivo real del tipo indicado (PDF, DOCX, XLSX,
+                    # JPG...), no texto con otra extensión. Ver
+                    # server/honeyfile_content.py.
+                    "content_b64": _honeyfile_content_b64(r[3], r[2], r[5]),
                 }
                 for r in cursor.fetchall()
             ]
@@ -2181,6 +2197,11 @@ def get_honeyfile_policy(x_agent_credential: str = Header(...)):
                     "file_type": r[3],
                     "file_path": r[4],
                     "content": r[5],
+                    # Los ya creados solo necesitan el archivo si el agente
+                    # tiene que recrearlo (faltan en disco): el agente pide
+                    # la política cada 45 s y reenviar siempre todos los
+                    # archivos sería tráfico inútil. Lo pide con ?completo=1.
+                    "content_b64": _honeyfile_content_b64(r[3], r[2], r[5]) if completo else None,
                     "honeyfile_id": r[6],
                     "expected_hash": r[7],
                 }

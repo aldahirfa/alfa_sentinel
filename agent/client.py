@@ -108,10 +108,13 @@ def send_event(credential, event_data):
         return None
 
 
-def get_honeyfile_policy(credential):
+def get_honeyfile_policy(credential, full=False):
+    """full=True pide también el archivo de los honeyfiles ya creados
+    (solo hace falta para recrear alguno que desapareció del disco)."""
     try:
         response = transport.get(
             config.HONEYFILE_POLICY_URL,
+            params={"completo": "1"} if full else None,
             headers={"X-Agent-Credential": credential},
             timeout=10
         )

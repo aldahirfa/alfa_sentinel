@@ -16,6 +16,9 @@ const FILE_TYPE_OPTIONS = [
   { value: "zip", label: "Archivo ZIP (.zip)" },
   { value: "txt", label: "Texto plano (.txt)" },
   { value: "pdf", label: "Documento PDF (.pdf)" },
+  { value: "csv", label: "Datos CSV (.csv)" },
+  { value: "jpg", label: "Imagen escaneada (.jpg)" },
+  { value: "png", label: "Imagen escaneada (.png)" },
 ];
 
 // Rutas LÓGICAS, no rutas físicas de una máquina concreta (2026-08-17,
@@ -248,8 +251,11 @@ export default function DeployHoneyfileWizard({ open, availableAgents, onClose, 
 
                 <div>
                   <label className="text-[11.5px] font-semibold block mb-1.5" style={{ color: "var(--tx-mute)" }}>
-                    Contenido del archivo (texto plano, guardado con la extensión elegida)
+                    Contenido del documento
                   </label>
+                  <div className="text-[10.5px] mb-1.5" style={{ color: "var(--tx-mute)" }}>
+                    Se genera un archivo real del tipo elegido. Cada línea es un párrafo y la primera es el título; en Excel, separa las celdas con “|”.
+                  </div>
                   <textarea
                     rows={3}
                     value={content}

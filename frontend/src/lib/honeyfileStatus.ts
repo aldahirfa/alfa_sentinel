@@ -51,5 +51,6 @@ export function fileTypeIcon(fileType: string): string {
   if (["ZIP", "RAR", "7Z", "TAR"].includes(t)) return "ph-fill ph-file-zip";
   if (["DOCX", "DOC"].includes(t)) return "ph-fill ph-file-doc";
   if (t === "PDF") return "ph-fill ph-file-pdf";
+  if (["JPG", "JPEG", "PNG"].includes(t)) return "ph-fill ph-file-image";
   return "ph ph-file-text";
 }
