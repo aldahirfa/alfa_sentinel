@@ -20,3 +20,6 @@ Thumbs.db
 # Certificados TLS (claves privadas de la CA y del servidor) -- NUNCA subir
 server/certs/
 agent/certs/
+
+# Estado del firewall guardado durante un aislamiento (se restaura al liberar)
+agent/isolation_state.json
