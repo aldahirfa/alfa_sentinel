@@ -5,11 +5,14 @@ from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from database import get_connection
 from security import verify_password, hash_password
+from hardening import (
+    AgentProtectionMiddleware, FreeText, Identifier, LoginGuard, MAX_PID,
+)
 
 import secrets
 import hashlib
@@ -40,14 +43,34 @@ app = FastAPI()
 # y el servidor pueda confiar en ella sin volver a pedir contraseña
 # en cada clic. SESSION_SECRET tiene que ser secreto y estable -- si
 # cambia, todas las sesiones abiertas se invalidan de golpe.
-SESSION_SECRET = os.getenv("SESSION_SECRET", "cambia-esto-en-produccion")
-
+#
 # ALFA_TLS_ENABLED lo pone server/run_server.py cuando arranca con
 # certificado (HTTPS). Con TLS activo la cookie de sesión se marca
 # Secure -- el navegador nunca la manda por HTTP en claro -- y se
 # agrega HSTS. Si alguien arranca con 'uvicorn asgi:app' a mano (las
 # pruebas lo hacen), queda en 0 y todo funciona como antes.
 TLS_ENABLED = os.getenv("ALFA_TLS_ENABLED", "0") == "1"
+
+# Con un secreto conocido (el valor de ejemplo, o uno corto) cualquiera
+# puede firmar una cookie de sesión de administrador. Por eso el
+# servidor en modo real (HTTPS) no arranca sin un SESSION_SECRET propio;
+# en modo desarrollo usa uno aleatorio que solo vale hasta reiniciar.
+SESSION_SECRET_MIN_LENGTH = 32
+_KNOWN_PLACEHOLDER_SECRETS = {
+    "cambia-esto-en-produccion",
+    "genera-uno-random-y-no-lo-compartas",
+}
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
+if SESSION_SECRET in _KNOWN_PLACEHOLDER_SECRETS or len(SESSION_SECRET) < SESSION_SECRET_MIN_LENGTH:
+    if TLS_ENABLED:
+        raise RuntimeError(
+            "SESSION_SECRET falta, es el valor de ejemplo o tiene menos de "
+            f"{SESSION_SECRET_MIN_LENGTH} caracteres. Genera uno con:\n"
+            '  python -c "import secrets; print(secrets.token_urlsafe(48))"\n'
+            "y guárdalo en server/.env como SESSION_SECRET=<valor>."
+        )
+    print("[seguridad] SESSION_SECRET no configurado: se usa uno temporal (las sesiones se pierden al reiniciar).")
+    SESSION_SECRET = secrets.token_urlsafe(48)
 
 app.add_middleware(
     SessionMiddleware,
@@ -89,6 +112,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
+
+# Límite de volumen por agente y de tamaño del cuerpo (ver hardening.py).
+# Se agrega último para que sea el más externo: un pedido que excede el
+# límite se corta antes de tocar la sesión o la base.
+app.add_middleware(AgentProtectionMiddleware)
 
 def time_ago(value):
     """'hace X minutos' -- lo usa el Panel de Control y varias APIs
@@ -294,12 +322,21 @@ class EnrollmentRequest(BaseModel):
     agent_version: str | None = None
 
 
+# Los modelos que manda el agente tienen largos máximos y tipos
+# estrictos (ver hardening.py): un equipo comprometido tiene una
+# credencial válida y podría mandar valores enormes o con caracteres de
+# control para llenar la base o engañar al analista.
+class EventMetadata(BaseModel):
+    file_path: FreeText(4096) | None = None
+    extension: FreeText(64) | None = None
+
+
 class EventCreate(BaseModel):
-    event_type: str
-    description: str | None = None
-    process_id: int | None = None
-    process_name: str | None = None
-    metadata: dict | None = None
+    event_type: Identifier(50)
+    description: FreeText(5000) | None = None
+    process_id: int | None = Field(default=None, ge=0, le=MAX_PID)
+    process_name: FreeText(255) | None = None
+    metadata: EventMetadata | None = None
 
 
 class AlertCreate(BaseModel):
@@ -312,14 +349,16 @@ class AlertCreate(BaseModel):
     'rule_name' (contrato viejo) se eliminan -- no quedaba ningún
     agente en uso con el contrato anterior que hubiera que soportar en
     paralelo."""
-    title: str
-    description: str | None = None
-    matched_rules: list[str] = []
+    title: FreeText(255)
+    description: FreeText(5000) | None = None
+    matched_rules: list[Identifier(100)] = Field(default=[], max_length=20)
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=150)
+    # bcrypt solo usa los primeros 72 bytes; el tope evita gastar CPU
+    # en contraseñas gigantes enviadas a propósito.
+    password: str = Field(max_length=256)
 
 
 class UserCreate(BaseModel):
@@ -477,8 +516,27 @@ def require_role(role_name: str):
     return dependency
 
 
+# Bloqueo temporal del login tras varios intentos fallidos (hardening.py).
+login_guard = LoginGuard()
+
+# Hash de relleno: cuando el usuario no existe se verifica igual contra
+# este hash, para que la respuesta tarde lo mismo que con un usuario
+# real y el tiempo no revele qué usuarios existen.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
+
+
 @app.post("/login")
 def login(credentials: LoginRequest, request: Request):
+
+    client_ip = request.client.host if request.client else "desconocido"
+    locked_seconds = login_guard.seconds_locked(credentials.username, client_ip)
+    if locked_seconds:
+        minutes = -(-locked_seconds // 60)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Demasiados intentos fallidos. Intenta de nuevo en {minutes} minuto{'s' if minutes != 1 else ''}.",
+            headers={"Retry-After": str(locked_seconds)},
+        )
 
     connection = get_connection()
 
@@ -498,8 +556,15 @@ def login(credentials: LoginRequest, request: Request):
 
             # Mismo mensaje de error tanto si el usuario no existe
             # como si la contraseña está mal -- así no le confirmamos
-            # a quien intenta entrar si el usuario es válido o no.
-            if row is None:
+            # a quien intenta entrar si el usuario es válido o no. La
+            # contraseña se verifica siempre (aunque el usuario no
+            # exista) y ANTES de mirar si está deshabilitado: así ni el
+            # tiempo ni el mensaje "Usuario deshabilitado" revelan nada
+            # a quien no conoce la contraseña.
+            password_ok = verify_password(credentials.password, row[1] if row else _DUMMY_PASSWORD_HASH)
+
+            if row is None or not password_ok:
+                login_guard.register_failure(credentials.username, client_ip)
                 raise HTTPException(
                     status_code=401,
                     detail="Usuario o contraseña incorrectos"
@@ -513,11 +578,7 @@ def login(credentials: LoginRequest, request: Request):
                     detail="Usuario deshabilitado"
                 )
 
-            if not verify_password(credentials.password, password_hash):
-                raise HTTPException(
-                    status_code=401,
-                    detail="Usuario o contraseña incorrectos"
-                )
+            login_guard.register_success(credentials.username)
 
             cursor.execute(
                 """
@@ -1110,6 +1171,17 @@ def _agent_isolation_id_sql(agent_id_expr):
         WHERE host_isolations.agent_id = {agent_id_expr}
         ORDER BY host_isolations.requested_at DESC LIMIT 1
     )"""
+
+
+def agent_is_quarantined(cursor, agent_id):
+    """Un agente aislado queda en cuarentena: el equipo puede estar
+    comprometido, así que sigue mandando heartbeat, eventos, alertas y el
+    estado de su aislamiento (lo necesita para poder liberarse), pero no
+    puede cambiar datos del servidor: ni su inventario (hostname, IP, SO)
+    ni el registro de honeyfiles."""
+
+    cursor.execute(f"SELECT {_agent_is_isolated_sql('%s')};", (agent_id,))
+    return cursor.fetchone()[0]
 
 
 def _agent_is_isolated_sql(agent_id_expr):
@@ -2217,9 +2289,9 @@ def get_isolation_status(x_agent_credential: str = Header(...)):
 
 
 class IsolationStatusReport(BaseModel):
-    isolation_id: int
-    status: str  # 'EXECUTED'/'ISOLATION_FAILED' (aislar) o 'RELEASED'/'RELEASE_FAILED' (liberar) -- cualquier otro valor se rechaza (ver abajo)
-    result: str | None = None
+    isolation_id: int = Field(ge=1)
+    status: Identifier(30)  # 'EXECUTED'/'ISOLATION_FAILED' (aislar) o 'RELEASED'/'RELEASE_FAILED' (liberar) -- cualquier otro valor se rechaza (ver abajo)
+    result: FreeText(2000) | None = None
 
 
 @app.post("/agent/isolation-status/report")
@@ -2446,17 +2518,17 @@ def release_host_isolation(isolation_id: int, user: dict = Depends(get_current_u
 
 
 class HoneyfileReportItem(BaseModel):
-    assignment_id: int
-    status: str
-    file_path: str | None = None
-    file_name: str | None = None
-    file_type: str | None = None
-    file_hash: str | None = None
-    error: str | None = None
+    assignment_id: int = Field(ge=1)
+    status: Identifier(30)
+    file_path: FreeText(4096) | None = None
+    file_name: FreeText(255) | None = None
+    file_type: Identifier(20) | None = None
+    file_hash: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
+    error: FreeText(2000) | None = None
 
 
 class HoneyfileReport(BaseModel):
-    results: list[HoneyfileReportItem]
+    results: list[HoneyfileReportItem] = Field(max_length=100)
 
 
 @app.post("/agent/honeyfile-policy/report")
@@ -2499,6 +2571,13 @@ def report_honeyfile_policy(
     try:
         with connection.cursor() as cursor:
             agent_id = resolve_agent_id(cursor, x_agent_credential)
+
+            if agent_is_quarantined(cursor, agent_id):
+                print(f"[cuarentena] agente {agent_id} aislado: se ignora su reporte de honeyfiles.")
+                raise HTTPException(
+                    status_code=423,
+                    detail="Endpoint aislado: no se registran cambios de honeyfiles hasta liberarlo."
+                )
 
             created_count = 0
             modified_count = 0
@@ -7552,7 +7631,7 @@ def report_event(
                     event_type_id,
                     event.process_id,
                     event.process_name,
-                    (event.metadata or {}).get("file_path")
+                    event.metadata.file_path if event.metadata else None
                 )
             )
 

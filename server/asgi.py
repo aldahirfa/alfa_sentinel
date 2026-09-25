@@ -12,7 +12,9 @@ import secrets
 from pydantic import BaseModel
 from fastapi import Depends, Header, HTTPException
 
+from hardening import FreeText, Identifier, IpAddress
 from main import (
+    agent_is_quarantined,
     agent_online_sql,
     app,
     get_agent_stale_seconds,
@@ -43,21 +45,24 @@ RESPONSE_INCIDENT_LABELS = {
 }
 
 
+# Inventario que reporta el agente: largos acotados, sin caracteres de
+# control e IP válida (ver hardening.py). 253 = largo máximo de un
+# nombre DNS.
 class HeartbeatUpdate(BaseModel):
-    hostname: str | None = None
-    os: str | None = None
-    os_version: str | None = None
-    ip_address: str | None = None
-    agent_version: str | None = None
+    hostname: Identifier(253) | None = None
+    os: Identifier(50) | None = None
+    os_version: FreeText(100) | None = None
+    ip_address: IpAddress | None = None
+    agent_version: Identifier(50) | None = None
 
 
 class EnrollmentRequest(BaseModel):
-    token: str
-    hostname: str
-    os: str
-    os_version: str | None = None
-    ip_address: str | None = None
-    agent_version: str | None = None
+    token: Identifier(64)
+    hostname: Identifier(253)
+    os: Identifier(50)
+    os_version: FreeText(100) | None = None
+    ip_address: IpAddress | None = None
+    agent_version: Identifier(50) | None = None
 
 
 def _normalize_enrollment_code(value: str) -> str:
@@ -234,6 +239,12 @@ def agent_heartbeat(
         with connection.cursor() as cursor:
             agent_id = resolve_agent_id(cursor, x_agent_credential)
 
+            # En cuarentena (endpoint aislado) el heartbeat solo cuenta
+            # como señal de vida: no se acepta que el equipo, posiblemente
+            # comprometido, cambie su hostname, IP, SO o versión.
+            quarantined = agent_is_quarantined(cursor, agent_id)
+            inventory = None if quarantined else heartbeat
+
             cursor.execute(
                 """
                 UPDATE agents
@@ -244,13 +255,13 @@ def agent_heartbeat(
                 WHERE id = %s
                 RETURNING endpoint_id;
                 """,
-                (heartbeat.agent_version if heartbeat else None, agent_id),
+                (inventory.agent_version if inventory else None, agent_id),
             )
 
             endpoint_row = cursor.fetchone()
             endpoint_id = endpoint_row[0]
 
-            if heartbeat is not None:
+            if inventory is not None:
                 cursor.execute(
                     """
                     UPDATE endpoints
@@ -262,10 +273,10 @@ def agent_heartbeat(
                     WHERE id = %s;
                     """,
                     (
-                        heartbeat.hostname,
-                        heartbeat.os,
-                        heartbeat.os_version,
-                        heartbeat.ip_address,
+                        inventory.hostname,
+                        inventory.os,
+                        inventory.os_version,
+                        inventory.ip_address,
                         endpoint_id,
                     ),
                 )
@@ -276,7 +287,8 @@ def agent_heartbeat(
                 "message": "Heartbeat recibido",
                 "agent_id": agent_id,
                 "endpoint_id": endpoint_id,
-                "inventory_updated": heartbeat is not None,
+                "inventory_updated": inventory is not None,
+                "quarantined": quarantined,
             }
     finally:
         connection.close()
