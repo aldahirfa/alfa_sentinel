@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { deployHoneyfile } from "../api/client";
 import type { AvailableAgent } from "../types/honeyfiles";
+import { HONEYFILE_LOCATION_LABEL } from "../lib/honeyfileStatus";
 
 interface Props {
   open: boolean;
@@ -24,12 +25,7 @@ const FILE_TYPE_OPTIONS = [
 // vive cada una según el sistema operativo y usuario reales del
 // endpoint, y según si corre en modo desarrollo o producción -- nunca
 // se hardcodea acá una ruta de Windows o Linux concreta.
-const TARGET_PATH_OPTIONS = [
-  { value: "DOCUMENTS", label: "Documentos" },
-  { value: "DESKTOP", label: "Escritorio" },
-  { value: "DOWNLOADS", label: "Descargas" },
-  { value: "PICTURES", label: "Imágenes" },
-];
+const TARGET_PATH_OPTIONS = Object.entries(HONEYFILE_LOCATION_LABEL).map(([value, label]) => ({ value, label }));
 
 const fieldStyle: React.CSSProperties = {
   background: "var(--surf2)",

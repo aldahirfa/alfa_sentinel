@@ -28,7 +28,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 )
 from reportlab.pdfgen import canvas as pdfcanvas
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 load_dotenv()
@@ -1177,7 +1177,7 @@ ALERT_GENERAL_TITLE_ES = {
     "BAJO": "ACTIVIDAD ANÓMALA",
     "MEDIO": "ACTIVIDAD SOSPECHOSA",
     "ALTO": "POSIBLE ATAQUE DE RANSOMWARE",
-    "CRÍTICO": "ATAQUE DE RANSOMWARE PROBABLE",
+    "CRÍTICO": "ATAQUE DE RANSOMWARE",
 }
 
 
@@ -1609,7 +1609,7 @@ def api_honeyfiles(
                        honeyfiles.last_checked_at, agents.id AS agent_id, endpoints.hostname,
                        endpoints.ip_address, endpoints.os, endpoints.os_version,
                        agents.agent_version, agents.status AS agent_status,
-                       agents.last_seen_at
+                       agents.last_seen_at, honeyfiles.template_id
                 FROM honeyfiles
                 JOIN agents ON agents.id = honeyfiles.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
@@ -1644,6 +1644,46 @@ def api_honeyfiles(
             distinct_os = [r[0] for r in cursor.fetchall()]
 
             stale_seconds = get_agent_stale_seconds(cursor)
+
+            # Señuelos (plantillas) con sus asignaciones por agente: la
+            # pantalla agrupa por señuelo y muestra, al desplegar uno,
+            # en qué endpoints existe. Las asignaciones sirven para que
+            # también se vean los endpoints donde está pendiente o falló.
+            cursor.execute(
+                """
+                SELECT honeyfile_templates.id, honeyfile_templates.name,
+                       honeyfile_templates.file_name, honeyfile_templates.file_type,
+                       honeyfile_templates.file_path, honeyfile_templates.operating_system,
+                       honeyfile_templates.auto_deploy, honeyfile_templates.is_active,
+                       aht.agent_id, aht.status, endpoints.hostname, endpoints.os
+                FROM honeyfile_templates
+                LEFT JOIN agent_honeyfile_templates aht ON aht.template_id = honeyfile_templates.id
+                LEFT JOIN agents ON agents.id = aht.agent_id
+                LEFT JOIN endpoints ON endpoints.id = agents.endpoint_id
+                ORDER BY honeyfile_templates.id, endpoints.hostname;
+                """
+            )
+            templates_by_id = {}
+            for r in cursor.fetchall():
+                template = templates_by_id.setdefault(r[0], {
+                    "id": r[0],
+                    "name": r[1],
+                    "file_name": r[2],
+                    "file_type": (r[3] or "FILE").upper(),
+                    "location": r[4],
+                    "platform": r[5],
+                    "auto_deploy": r[6],
+                    "is_active": r[7],
+                    "assignments": [],
+                })
+                if r[8] is not None:
+                    template["assignments"].append({
+                        "agent_id": r[8],
+                        "status": r[9],
+                        "hostname": r[10],
+                        "operating_system": r[11],
+                    })
+            templates = list(templates_by_id.values())
 
             cursor.execute(
                 """
@@ -1697,7 +1737,8 @@ def api_honeyfiles(
             "agent_version": r[12] or "v1.0.0",
             "agent_status": r[13],
             "is_agent_live": is_agent_live,
-            "activations_count": act_cnt
+            "activations_count": act_cnt,
+            "template_id": r[15],
         })
 
     if status:
@@ -1715,6 +1756,7 @@ def api_honeyfiles(
         "available_agents": available_agents,
         "filtered_total": len(honeyfiles_list),
         "honeyfiles": honeyfiles_list,
+        "templates": templates,
     }
 
 
@@ -6611,7 +6653,7 @@ def _build_security_xlsx(data, meta):
     ws.title = "Seguridad"
     ws.append([meta["title"]])
     ws.cell(row=1, column=1).font = Font(bold=True, size=14, color=_hex_no_hash(ALFA_BLUE))
-    ws.append([meta["subtitle"]])
+    ws.append([meta["subtitle"].replace("&mdash;", "—")])
     ws.append([])
 
     sev_rows = [([k, data["severity_counts"].get(k, 0)], _severity_color(k)) for k in ("CRÍTICO", "ALTO", "MEDIO", "BAJO")]
@@ -6683,7 +6725,7 @@ def _build_endpoints_xlsx(data, meta):
     ws.title = "Endpoints"
     ws.append([meta["title"]])
     ws.cell(row=1, column=1).font = Font(bold=True, size=14, color=_hex_no_hash(ALFA_BLUE))
-    ws.append([meta["subtitle"]])
+    ws.append([meta["subtitle"].replace("&mdash;", "—")])
     ws.append([])
 
     resumen_rows = [
@@ -6722,7 +6764,7 @@ def _build_incidents_xlsx(data, meta):
     ws.title = "Incidentes"
     ws.append([meta["title"]])
     ws.cell(row=1, column=1).font = Font(bold=True, size=14, color=_hex_no_hash(ALFA_BLUE))
-    ws.append([meta["subtitle"]])
+    ws.append([meta["subtitle"].replace("&mdash;", "—")])
     ws.append([])
 
     resumen_rows = [
@@ -6772,13 +6814,11 @@ REPORT_BUILDERS = {
 }
 
 
-@app.post("/reportes/generar")
-def generar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_user)):
-    """Genera el informe en el momento (PDF con reportlab o XLSX con
-    openpyxl), lo guarda en disco (server/generated_reports/, no en la
-    base -- ver comentario en 'reports' en database/schema.sql) e
-    inserta la fila de auditoría. 'generated_by' siempre es quien tiene
-    la sesión activa; no existe generación automática/por sistema hoy."""
+def _build_report(cursor, payload, user):
+    """Construye el informe (PDF con reportlab o XLSX con openpyxl) en
+    memoria, sin guardarlo ni auditarlo. Lo usan la generación real y
+    la vista previa, así la vista previa es exactamente el mismo
+    documento que se va a generar. Devuelve (buffer, meta)."""
 
     if payload.report_type not in REPORT_TYPE_LABELS_ES:
         raise HTTPException(status_code=422, detail=f"Tipo de informe desconocido: '{payload.report_type}'")
@@ -6788,49 +6828,118 @@ def generar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_us
 
     start, end, period_label = _resolve_report_period(payload.period)
 
+    endpoint_hostname = None
+    if payload.endpoint_id is not None:
+        cursor.execute("SELECT hostname FROM endpoints WHERE id = %s;", (payload.endpoint_id,))
+        ep_row = cursor.fetchone()
+        if ep_row is None:
+            raise HTTPException(status_code=404, detail="Endpoint no encontrado")
+        endpoint_hostname = ep_row[0]
+
+    data = REPORT_DATA_GATHERERS[payload.report_type](cursor, start, end, payload.endpoint_id)
+
+    type_label = REPORT_TYPE_LABELS_ES[payload.report_type]
+    title = f"{type_label} - {period_label}"
+    if endpoint_hostname:
+        title += f" - {endpoint_hostname}"
+
+    subtitle = (
+        f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')} por {user.get('full_name', 'usuario')} "
+        f"&mdash; Período evaluado: {start.strftime('%d/%m/%Y')} al {end.strftime('%d/%m/%Y')} "
+        f"&mdash; {('Endpoint: ' + endpoint_hostname) if endpoint_hostname else 'Todos los endpoints'}"
+    )
+    # 'meta' ampliado (rediseño visual 2026-08-18, ver
+    # PENDIENTES.md): 'title'/'subtitle' siguen existiendo tal
+    # cual porque los builders XLSX los siguen usando en sus
+    # filas superiores -- los campos nuevos son lo que necesitan
+    # la portada institucional y el encabezado/pie numerado de
+    # los builders PDF (ver _build_cover_page/_make_numbered_canvas).
+    meta = {
+        "title": title,
+        "subtitle": subtitle,
+        "report_type_label": type_label,
+        "period_label": period_label,
+        "start": start,
+        "end": end,
+        "generated_by": user.get("full_name", "usuario"),
+        "endpoint_hostname": endpoint_hostname,
+    }
+
+    return REPORT_BUILDERS[(payload.report_type, payload.format)](data, meta), meta
+
+
+# Vista previa de un XLSX: el navegador no puede mostrar un .xlsx, así
+# que se devuelven sus hojas como filas de texto para dibujarlas como
+# tablas. Se limita la cantidad de filas para no mandar un JSON enorme.
+XLSX_PREVIEW_MAX_ROWS = 500
+
+
+def _xlsx_to_sheets(content):
+    workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    sheets = []
+    for sheet in workbook.worksheets:
+        rows = []
+        truncated = False
+        for row in sheet.iter_rows(values_only=True):
+            if len(rows) >= XLSX_PREVIEW_MAX_ROWS:
+                truncated = True
+                break
+            cells = [
+                value.strftime("%d/%m/%Y %H:%M") if isinstance(value, datetime)
+                else "" if value is None else str(value)
+                for value in row
+            ]
+            while cells and cells[-1] == "":
+                cells.pop()
+            rows.append(cells)
+        while rows and not rows[-1]:
+            rows.pop()
+        sheets.append({"name": sheet.title, "rows": rows, "truncated": truncated})
+    workbook.close()
+    return {"sheets": sheets}
+
+
+@app.post("/reportes/previsualizar")
+def previsualizar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_user)):
+    """Vista previa del informe con los filtros elegidos, SIN guardarlo
+    en disco ni registrarlo en 'reports' (no ensucia el historial ni la
+    auditoría). PDF -> el propio PDF; XLSX -> sus hojas en JSON."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            buffer, _meta = _build_report(cursor, payload, user)
+    finally:
+        connection.close()
+
+    if payload.format == "PDF":
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'inline; filename="vista-previa.pdf"'},
+        )
+    return _xlsx_to_sheets(buffer.getvalue())
+
+
+@app.post("/reportes/generar")
+def generar_reporte(payload: ReportGenerate, user: dict = Depends(get_current_user)):
+    """Genera el informe en el momento (PDF con reportlab o XLSX con
+    openpyxl), lo guarda en disco (server/generated_reports/, no en la
+    base -- ver comentario en 'reports' en database/schema.sql) e
+    inserta la fila de auditoría. 'generated_by' siempre es quien tiene
+    la sesión activa; no existe generación automática/por sistema hoy."""
+
     connection = get_connection()
 
     try:
         with connection.cursor() as cursor:
 
-            endpoint_hostname = None
-            if payload.endpoint_id is not None:
-                cursor.execute("SELECT hostname FROM endpoints WHERE id = %s;", (payload.endpoint_id,))
-                ep_row = cursor.fetchone()
-                if ep_row is None:
-                    raise HTTPException(status_code=404, detail="Endpoint no encontrado")
-                endpoint_hostname = ep_row[0]
-
-            data = REPORT_DATA_GATHERERS[payload.report_type](cursor, start, end, payload.endpoint_id)
-
-            type_label = REPORT_TYPE_LABELS_ES[payload.report_type]
-            title = f"{type_label} - {period_label}"
-            if endpoint_hostname:
-                title += f" - {endpoint_hostname}"
-
-            subtitle = (
-                f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')} por {user.get('full_name', 'usuario')} "
-                f"&mdash; Período evaluado: {start.strftime('%d/%m/%Y')} al {end.strftime('%d/%m/%Y')} "
-                f"&mdash; {('Endpoint: ' + endpoint_hostname) if endpoint_hostname else 'Todos los endpoints'}"
-            )
-            # 'meta' ampliado (rediseño visual 2026-08-18, ver
-            # PENDIENTES.md): 'title'/'subtitle' siguen existiendo tal
-            # cual porque los builders XLSX los siguen usando en sus
-            # filas superiores -- los campos nuevos son lo que necesitan
-            # la portada institucional y el encabezado/pie numerado de
-            # los builders PDF (ver _build_cover_page/_make_numbered_canvas).
-            meta = {
-                "title": title,
-                "subtitle": subtitle,
-                "report_type_label": type_label,
-                "period_label": period_label,
-                "start": start,
-                "end": end,
-                "generated_by": user.get("full_name", "usuario"),
-                "endpoint_hostname": endpoint_hostname,
-            }
-
-            buffer = REPORT_BUILDERS[(payload.report_type, payload.format)](data, meta)
+            buffer, meta = _build_report(cursor, payload, user)
+            title = meta["title"]
+            type_label = meta["report_type_label"]
+            period_label = meta["period_label"]
+            start, end = meta["start"], meta["end"]
+            endpoint_hostname = meta["endpoint_hostname"]
 
             cursor.execute(
                 """
@@ -7003,6 +7112,33 @@ def descargar_reporte(report_id: int, request: Request, disposition: str = Query
         media_type=REPORT_FORMAT_MEDIA_TYPES.get(fmt, "application/octet-stream"),
         headers={"Content-Disposition": f'{disposition}; filename="{code}.{ext}"'}
     )
+
+
+@app.get("/api/reportes/{report_id}/hojas")
+def hojas_reporte(report_id: int, user: dict = Depends(get_current_user)):
+    """Vista previa de un informe XLSX ya generado: sus hojas en JSON,
+    leídas del mismo archivo guardado que se descarga (no se regenera).
+    Los PDF se previsualizan con /reportes/{id}/archivo?disposition=inline."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT format, file_path FROM reports WHERE id = %s;", (report_id,))
+            row = cursor.fetchone()
+    finally:
+        connection.close()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Informe no encontrado")
+
+    fmt, file_path = row
+    if fmt != "XLSX":
+        raise HTTPException(status_code=422, detail="Solo los informes XLSX se previsualizan como hojas.")
+    if not file_path or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="El archivo de este informe ya no está disponible en el servidor.")
+
+    with open(file_path, "rb") as f:
+        return _xlsx_to_sheets(f.read())
 
 
 # Etiquetas de 'audit_logs.action' -- strings libres a propósito

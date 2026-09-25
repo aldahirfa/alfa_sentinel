@@ -2,6 +2,8 @@ import type { AlertListItem } from "../types/alerts";
 import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import { rowSelectionStyle } from "../lib/rowSelection";
+import DateCell from "./DateCell";
+import RiskMeter from "./RiskMeter";
 
 interface Props {
   alerts: AlertListItem[];
@@ -31,21 +33,6 @@ function SkeletonRow() {
   );
 }
 
-function RiskMeter({ score, color }: { score: number; color: string }) {
-  const pct = Math.max(0, Math.min(100, score));
-  return (
-    <div className="min-w-[92px]">
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-[12px] font-bold tabular-nums" style={{ color }}>{score.toFixed(1)}</span>
-        <span className="text-[8.5px]" style={{ color: "var(--tx-mute)" }}>/ 100</span>
-      </div>
-      <div className="h-[3px] rounded-full overflow-hidden mt-1.5" style={{ background: "var(--surf3)" }}>
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
-
 export default function AlertsTable({ alerts, loading, hasFilters, onSelect, selectedId, flashId }: Props) {
   return (
     <section className="soc-panel rounded-2xl overflow-hidden">
@@ -71,7 +58,7 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
               <th className="px-4 py-3 font-semibold">Severidad</th>
               <th className="px-3 py-3 font-semibold">Detección</th>
               <th className="px-3 py-3 font-semibold">Endpoint</th>
-              <th className="px-3 py-3 font-semibold">Riesgo</th>
+              <th className="px-3 py-3 font-semibold">Puntaje</th>
               <th className="px-3 py-3 font-semibold">Estado</th>
               <th className="px-3 py-3 font-semibold">Fecha</th>
               <th className="px-3 py-3 font-semibold">Incidente</th>
@@ -165,9 +152,7 @@ export default function AlertsTable({ alerts, loading, hasFilters, onSelect, sel
                       </span>
                     </td>
 
-                    <td className="px-3 py-3.5 whitespace-nowrap">
-                      <div className="font-medium tabular-nums" style={{ color: "var(--tx-dim)" }}>{a.created_at}</div>
-                    </td>
+                    <DateCell value={a.created_at} />
 
                     <td className="px-3 py-3.5">
                       {a.incident_id ? (

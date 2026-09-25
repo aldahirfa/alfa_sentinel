@@ -49,6 +49,18 @@ export interface GenerateReportPayload {
   endpoint_id: number | null;
 }
 
+// Vista previa: un PDF se muestra tal cual (URL de un blob); un XLSX,
+// que el navegador no puede abrir, llega como hojas de texto.
+export interface ReportSheet {
+  name: string;
+  rows: string[][];
+  truncated: boolean;
+}
+
+export type ReportPreview =
+  | { kind: "pdf"; url: string }
+  | { kind: "sheets"; sheets: ReportSheet[] };
+
 export interface GenerateReportResult {
   message: string;
   report: {

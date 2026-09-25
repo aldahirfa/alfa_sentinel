@@ -1,3 +1,4 @@
+import DateCell from "./DateCell";
 import { useState } from "react";
 import type { IsolationRecord } from "../types/respuesta";
 import { releaseIsolation } from "../api/client";
@@ -84,11 +85,11 @@ export default function IsolationsHistoryTable({ items, loading, onReleased }: P
                   <td className="px-4 py-3.5 font-semibold" style={{ color: "var(--tx)" }}>{item.hostname}</td>
                   <td className="px-3 py-3.5" style={{ color: "var(--tx-dim)" }}>{item.isolation_type_label}</td>
                   <td className="px-3 py-3.5"><span className="inline-flex px-2 py-1 rounded-md text-[9px] font-semibold" style={{ background: item.status === "EXECUTED" ? "var(--crit-soft)" : item.status === "RELEASE_REQUESTED" ? "var(--warn-soft)" : "var(--brand-fill)", color: item.status === "EXECUTED" ? "var(--crit)" : item.status === "RELEASE_REQUESTED" ? "var(--warn)" : "var(--tx-dim)" }}>{item.status_label}</span></td>
-                  <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.requested_at}</td>
+                  <DateCell value={item.requested_at} />
                   <td className="px-3 py-3.5" style={{ color: item.requested_by_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>{item.requested_by_name ?? "Automático (motor heurístico)"}</td>
-                  <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.executed_at ?? "—"}</td>
+                  <DateCell value={item.executed_at} />
                   <td className="px-3 py-3.5 max-w-[220px] truncate" style={{ color: "var(--tx-mute)" }} title={item.result ?? undefined}>{item.result ?? "—"}</td>
-                  <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.released_at ?? "—"}</td>
+                  <DateCell value={item.released_at} />
                   <td className="px-3 py-3.5">
                     <a href={`/incidentes/${item.incident_id}`} className="inline-flex items-center gap-1.5 text-[10px] font-semibold no-underline whitespace-nowrap transition-premium btn-hover" style={{ color: "var(--brand)" }}>
                       Ver #{item.incident_id}<i className="ph ph-arrow-right" style={{ fontSize: "12px" }} />

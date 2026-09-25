@@ -30,6 +30,21 @@ export function honeyfileStatusPillStyle(status: HoneyfileStatus): CSSProperties
   return { border: "1px solid var(--line)", color: "var(--tx-mute)" };
 }
 
+// Ubicaciones LÓGICAS de un señuelo (honeyfile_templates.file_path); el
+// agente las resuelve a la carpeta real según su SO (agent/paths.py).
+export const HONEYFILE_LOCATION_LABEL: Record<string, string> = {
+  DOCUMENTS: "Documentos",
+  DESKTOP: "Escritorio",
+  DOWNLOADS: "Descargas",
+  PICTURES: "Imágenes",
+};
+
+export const HONEYFILE_PLATFORM_LABEL: Record<string, string> = {
+  WINDOWS: "Windows",
+  LINUX: "Linux",
+  ALL: "Windows y Linux",
+};
+
 export function fileTypeIcon(fileType: string): string {
   const t = fileType.toUpperCase();
   if (["XLSX", "XLS", "CSV"].includes(t)) return "ph-fill ph-file-xls";

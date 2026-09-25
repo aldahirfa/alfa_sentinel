@@ -26,6 +26,32 @@ export interface HoneyfileListItem {
   agent_status: string;
   is_agent_live: boolean;
   activations_count: number;
+  // null en honeyfiles creados antes de existir las plantillas.
+  template_id: number | null;
+}
+
+// Asignación de un señuelo a un agente (agent_honeyfile_templates).
+export type HoneyfileAssignmentStatus = "PENDING" | "CREATED" | "FAILED";
+
+export interface HoneyfileAssignment {
+  agent_id: number;
+  status: HoneyfileAssignmentStatus;
+  hostname: string;
+  operating_system: string;
+}
+
+// Señuelo (honeyfile_templates): la pantalla agrupa las instancias
+// desplegadas por señuelo, en vez de repetir el archivo por endpoint.
+export interface HoneyfileTemplate {
+  id: number;
+  name: string;
+  file_name: string;
+  file_type: string;
+  location: string;
+  platform: "WINDOWS" | "LINUX" | "ALL";
+  auto_deploy: boolean;
+  is_active: boolean;
+  assignments: HoneyfileAssignment[];
 }
 
 export interface HoneyfilesSummary {
@@ -52,6 +78,7 @@ export interface HoneyfilesResponse {
   available_agents: AvailableAgent[];
   filtered_total: number;
   honeyfiles: HoneyfileListItem[];
+  templates: HoneyfileTemplate[];
 }
 
 export interface HoneyfilesQuery {

@@ -104,7 +104,11 @@ export default function HoneyfilesPage() {
           <div className="text-[10px] mt-1" style={{ color: "var(--tx-mute)" }}>{error}</div>
         </div>
       ) : (
-        <HoneyfilesTable honeyfiles={data?.honeyfiles ?? []} loading={loading} hasFilters={hasFilters} onSelect={setSelectedId} selectedId={selectedId} flashId={flashId} />
+        <HoneyfilesTable
+          key={hasFilters ? "filtered" : "all"}
+          honeyfiles={data?.honeyfiles ?? []}
+          templates={data?.templates ?? []}
+          loading={loading} hasFilters={hasFilters} onSelect={setSelectedId} selectedId={selectedId} flashId={flashId} />
       )}
 
       <HoneyfileDrawer honeyfileId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} />

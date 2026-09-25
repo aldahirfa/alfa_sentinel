@@ -4,6 +4,9 @@ import { fetchResponseEndpointDetail } from "../api/responseClient";
 import type { ResponseEndpointDetail } from "../types/respuesta";
 import { severityPillStyle } from "../lib/severity";
 import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
+import { SEVERITY_VAR } from "../lib/severity";
+import DateCell from "../components/DateCell";
+import RiskMeter from "../components/RiskMeter";
 
 interface Props {
   agentId: number;
@@ -138,7 +141,7 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                   <tr className="text-left text-[8.5px] tracking-[.14em] uppercase font-bold" style={{ color: "var(--tx-mute)" }}>
                     <th className="px-4 py-3 font-semibold">Incidente</th>
                     <th className="px-3 py-3 font-semibold">Severidad</th>
-                    <th className="px-3 py-3 font-semibold">Riesgo</th>
+                    <th className="px-3 py-3 font-semibold">Puntaje</th>
                     <th className="px-3 py-3 font-semibold">Estado</th>
                     <th className="px-3 py-3 font-semibold">Responsable</th>
                     <th className="px-3 py-3 font-semibold">Apertura</th>
@@ -155,10 +158,10 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                         <div className="text-[9px] mt-1 truncate max-w-[280px]" style={{ color: "var(--tx-mute)" }}>{incident.title}</div>
                       </td>
                       <td className="px-3 py-3.5">{incident.severity ? <span className="text-[9px] font-bold px-2 py-1 rounded-md" style={severityPillStyle(incident.severity)}>{incident.severity.toUpperCase()}</span> : "—"}</td>
-                      <td className="px-3 py-3.5 font-bold tabular-nums" style={{ color: "var(--tx-dim)" }}>{incident.risk_score.toFixed(1)}</td>
+                      <td className="px-3 py-3.5"><RiskMeter score={incident.risk_score} color={incident.severity ? SEVERITY_VAR[incident.severity] : "var(--brand)"} /></td>
                       <td className="px-3 py-3.5"><span className="text-[9.5px] font-semibold" style={{ color: incident.status === "CLOSED" ? "var(--ok)" : "var(--warn)" }}>{incident.status_label}</span></td>
                       <td className="px-3 py-3.5" style={{ color: incident.assigned_to_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>{incident.assigned_to_name ?? "Sin asignar"}</td>
-                      <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{incident.opened_at ?? "—"}</td>
+                      <DateCell value={incident.opened_at} />
                       <td className="px-4 py-3.5 text-right">
                         <button onClick={() => onViewIncident(incident.id)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-premium btn-hover" style={{ color: "var(--brand)", background: "var(--brand-fill)", borderColor: "var(--brand-soft)" }}>
                           <span className="text-[10px] font-semibold">Ver incidente</span><i className="ph ph-arrow-right" />
@@ -203,10 +206,10 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
                     return (
                       <tr key={item.id} className="border-t" style={{ borderColor: "var(--line-soft)" }}>
                         <td className="px-4 py-3.5"><span className="inline-flex px-2.5 py-1.5 rounded-lg text-[9.5px] font-bold" style={{ color: tone.color, background: tone.bg }}>{item.status_label}</span></td>
-                        <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.requested_at ?? "—"}</td>
+                        <DateCell value={item.requested_at} />
                         <td className="px-3 py-3.5" style={{ color: item.requested_by_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>{item.requested_by_name ?? "Automático (motor heurístico)"}</td>
-                        <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.executed_at ?? "—"}</td>
-                        <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.released_at ?? "—"}</td>
+                        <DateCell value={item.executed_at} />
+                        <DateCell value={item.released_at} />
                         <td className="px-3 py-3.5 mono-data font-semibold" style={{ color: "var(--tx-dim)" }}>INC-{String(item.incident_id).padStart(5, "0")}</td>
                       </tr>
                     );

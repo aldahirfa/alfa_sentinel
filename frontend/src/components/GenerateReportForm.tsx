@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { generateReport } from "../api/client";
-import type { EndpointOption, GenerateReportResult, ReportFormat, ReportOption, ReportPeriod, ReportType } from "../types/reports";
+import { generateReport, previewReport } from "../api/client";
+import type { EndpointOption, GenerateReportPayload, GenerateReportResult, ReportFormat, ReportOption, ReportPeriod, ReportPreview, ReportType } from "../types/reports";
+import ReportPreviewModal from "./ReportPreviewModal";
 
 interface Props {
   reportTypeOptions: ReportOption[];
@@ -22,21 +23,33 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
   const [endpointId, setEndpointId] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewLoad, setPreviewLoad] = useState<(() => Promise<ReportPreview>) | null>(null);
 
   const reportLabel = useMemo(() => reportTypeOptions.find((o) => o.value === reportType)?.label ?? "Informe de seguridad", [reportTypeOptions, reportType]);
   const periodLabel = useMemo(() => periodOptions.find((o) => o.value === period)?.label ?? period, [periodOptions, period]);
   const endpointLabel = useMemo(() => endpointOptions.find((o) => String(o.id) === endpointId)?.hostname ?? "Todos los endpoints", [endpointOptions, endpointId]);
 
+  function currentPayload(): GenerateReportPayload {
+    return {
+      report_type: reportType,
+      period,
+      format,
+      endpoint_id: endpointId ? Number(endpointId) : null,
+    };
+  }
+
+  function openPreview() {
+    const payload = currentPayload();
+    setPreviewLoad(() => () => previewReport(payload));
+  }
+
   async function handleGenerate() {
+    // Se cierra la vista previa para que un error quede a la vista.
+    setPreviewLoad(null);
     setSaving(true);
     setError(null);
     try {
-      const result = await generateReport({
-        report_type: reportType,
-        period,
-        format,
-        endpoint_id: endpointId ? Number(endpointId) : null,
-      });
+      const result = await generateReport(currentPayload());
       onGenerated(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo generar el informe.");
@@ -106,15 +119,18 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
             <div className="text-[9.5px] leading-relaxed max-w-[520px]" style={{ color: "var(--tx-mute)" }}>
               El informe se genera con la información registrada por el Sistema ALFA-Sentinel para el período y alcance seleccionados.
             </div>
-            <button onClick={handleGenerate} disabled={saving} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-bold border-0 cursor-pointer disabled:opacity-50 transition-premium btn-hover" style={{ background: "var(--brand)", color: "#fff", boxShadow: "0 8px 24px var(--brand-glow)" }}>
-              <i className={saving ? "ph ph-spinner" : "ph ph-file-arrow-down"} style={{ fontSize: "14px" }} />
-              {saving ? "Generando informe..." : "Generar informe"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={openPreview} disabled={saving} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-bold border cursor-pointer disabled:opacity-50 transition-premium btn-hover" style={{ background: "var(--brand-fill)", borderColor: "var(--brand-soft)", color: "var(--brand)" }} title="Ver el documento completo sin guardarlo en el historial">
+                <i className="ph ph-eye" style={{ fontSize: "14px" }} />
+                Vista previa
+              </button>
+              <GenerateButton saving={saving} onClick={handleGenerate} />
+            </div>
           </div>
         </div>
 
         <div className="p-5" style={{ background: "color-mix(in srgb, var(--surf2) 72%, transparent)" }}>
-          <div className="text-[9px] font-bold tracking-[.14em] uppercase" style={{ color: "var(--tx-mute)" }}>Vista previa</div>
+          <div className="text-[9px] font-bold tracking-[.14em] uppercase" style={{ color: "var(--tx-mute)" }}>Resumen del documento</div>
           <div className="mt-3 rounded-2xl border overflow-hidden" style={{ background: "var(--surf)", borderColor: "var(--line-soft)", boxShadow: "var(--shadow)" }}>
             <div className="h-1" style={{ background: "linear-gradient(90deg, var(--brand), var(--info))" }} />
             <div className="p-4">
@@ -135,17 +151,42 @@ export default function GenerateReportForm({ reportTypeOptions, periodOptions, e
               </div>
 
               <div className="mt-5 pt-4 border-t" style={{ borderColor: "var(--line-soft)" }}>
-                <div className="h-2 rounded-full w-[82%]" style={{ background: "var(--surf3)" }} />
-                <div className="h-2 rounded-full w-full mt-2" style={{ background: "var(--surf3)" }} />
-                <div className="h-2 rounded-full w-[68%] mt-2" style={{ background: "var(--surf3)" }} />
+                <button onClick={openPreview} disabled={saving} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-[10.5px] font-semibold border cursor-pointer disabled:opacity-50 transition-premium btn-hover" style={{ background: "var(--brand-fill)", borderColor: "var(--brand-soft)", color: "var(--brand)" }}>
+                  <i className="ph ph-eye" style={{ fontSize: "13px" }} />
+                  Ver el documento completo
+                </button>
               </div>
             </div>
           </div>
           <div className="text-[9px] leading-relaxed mt-3" style={{ color: "var(--tx-mute)" }}>
-            La vista previa representa la portada y metadatos del documento; el contenido final se construye con los datos reales del período.
+            La vista previa construye el documento real con los datos del período, sin guardarlo ni registrarlo en el historial.
           </div>
         </div>
       </div>
+
+      <ReportPreviewModal
+        load={previewLoad}
+        title={reportLabel}
+        subtitle={`${periodLabel} · ${endpointLabel} · ${format}`}
+        onClose={() => setPreviewLoad(null)}
+        actions={
+          <>
+            <button onClick={() => setPreviewLoad(null)} className="px-4 py-2.5 rounded-xl text-[11px] font-semibold border cursor-pointer transition-premium btn-hover" style={{ background: "var(--surf2)", borderColor: "var(--line-soft)", color: "var(--tx-dim)" }}>
+              Cerrar
+            </button>
+            <GenerateButton saving={saving} onClick={handleGenerate} />
+          </>
+        }
+      />
     </section>
+  );
+}
+
+function GenerateButton({ saving, onClick }: { saving: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} disabled={saving} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-bold border-0 cursor-pointer disabled:opacity-50 transition-premium btn-hover" style={{ background: "var(--brand)", color: "#fff", boxShadow: "0 8px 24px var(--brand-glow)" }}>
+      <i className={saving ? "ph ph-spinner" : "ph ph-file-arrow-down"} style={{ fontSize: "14px" }} />
+      {saving ? "Generando informe..." : "Generar informe"}
+    </button>
   );
 }

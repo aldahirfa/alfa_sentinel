@@ -1,3 +1,4 @@
+import DateCell from "./DateCell";
 import type { AuditLogEntry } from "../types/admin";
 
 interface Props {
@@ -47,7 +48,7 @@ export default function AuditLogPanel({ entries, loading, page, totalPages, tota
                   <td className="px-4 py-3.5 min-w-[210px]"><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-xl grid place-items-center shrink-0" style={{ background: "var(--brand-fill)", color: "var(--brand)" }}><i className={actionIcon(e.action_label)} style={{ fontSize: "14px" }} /></div><div className="font-semibold" style={{ color: "var(--tx)" }}>{e.action_label}</div></div></td>
                   <td className="px-3 py-3.5"><span className="inline-flex px-2 py-1 rounded-lg text-[9.5px]" style={{ background: "var(--surf3)", color: "var(--tx-dim)" }}>{e.user_name}</span></td>
                   <td className="px-3 py-3.5 max-w-[440px]" style={{ color: "var(--tx-mute)" }}>{e.description ?? "—"}</td>
-                  <td className="px-4 py-3.5 whitespace-nowrap tabular-nums" style={{ color: "var(--tx-mute)" }}>{e.created_at}</td>
+                  <DateCell value={e.created_at} className="px-4 py-3.5" />
                 </tr>
               ))
             )}

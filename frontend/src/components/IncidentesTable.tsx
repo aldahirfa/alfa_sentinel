@@ -1,7 +1,9 @@
 import type { CombinedItem } from "../types/incidentes";
-import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
+import { severityPillStyle } from "../lib/severity";
 import { statusBucketPillStyle } from "../lib/incidentStatus";
 import { rowSelectionStyle } from "../lib/rowSelection";
+import DateCell from "./DateCell";
+import RiskMeter from "./RiskMeter";
 import {
   ISOLATED_ICON_CLASS, PENDING_ICON_CLASS,
   ISOLATED_LABEL_COMPACT, PENDING_LABEL_COMPACT,
@@ -56,7 +58,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
               <th className="px-4 py-3 font-semibold">Caso</th>
               <th className="px-3 py-3 font-semibold">Endpoint / detección</th>
               <th className="px-3 py-3 font-semibold">Severidad</th>
-              <th className="px-3 py-3 font-semibold">Riesgo</th>
+              <th className="px-3 py-3 font-semibold">Puntaje</th>
               <th className="px-3 py-3 font-semibold">Estado</th>
               <th className="px-3 py-3 font-semibold">Responsable</th>
               <th className="px-3 py-3 font-semibold">Fecha</th>
@@ -118,9 +120,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                       {item.severity ? <span className="text-[9px] font-bold tracking-[.08em] px-2 py-1 rounded-md" style={severityPillStyle(item.severity)}>{item.severity.toUpperCase()}</span> : <span style={{ color: "var(--tx-mute)" }}>—</span>}
                     </td>
 
-                    <td className="px-3 py-3.5">
-                      <div className="text-[12px] font-bold tabular-nums" style={{ color: item.severity ? SEVERITY_VAR[item.severity] : "var(--tx)" }}>{item.risk_score !== null ? item.risk_score.toFixed(1) : "—"}</div>
-                    </td>
+                    <td className="px-3 py-3.5"><RiskMeter score={item.risk_score} color={accent} /></td>
 
                     <td className="px-3 py-3.5">
                       <span className="inline-flex items-center gap-1.5 text-[9px] font-semibold px-2 py-1 rounded-md" style={{ ...statusBucketPillStyle(item.status_bucket), border: `1px solid ${statusBucketPillStyle(item.status_bucket).color}` }}>
@@ -138,7 +138,7 @@ export default function IncidentesTable({ items, loading, hasFilters, onSelect, 
                       </div>
                     </td>
 
-                    <td className="px-3 py-3.5 whitespace-nowrap text-[9.5px] tabular-nums" style={{ color: "var(--tx-dim)" }}>{item.created_at}</td>
+                    <DateCell value={item.created_at} />
 
                     <td className="px-4 py-3.5">
                       <div className="flex flex-col items-end gap-1.5">

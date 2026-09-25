@@ -11,7 +11,7 @@ export interface AlertListItem {
   id: number;
   severity: Severity;
   // Título GENERAL por nivel de riesgo (ACTIVIDAD ANÓMALA/SOSPECHOSA,
-  // POSIBLE ATAQUE DE RANSOMWARE, ATAQUE DE RANSOMWARE PROBABLE) --
+  // POSIBLE ATAQUE DE RANSOMWARE, ATAQUE DE RANSOMWARE) --
   // ya no es el nombre de una regla individual (2026-08-18, ver
   // PENDIENTES.md, "Corrección definitiva en la lógica y presentación
   // de ALERTAS"). Qué reglas contribuyeron se ve en el detalle

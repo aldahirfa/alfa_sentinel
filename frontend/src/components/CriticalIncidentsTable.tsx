@@ -1,3 +1,4 @@
+import DateCell from "./DateCell";
 import { useState } from "react";
 import type { CriticalIncidentItem } from "../types/respuesta";
 import { severityPillStyle } from "../lib/severity";
@@ -102,7 +103,7 @@ export default function CriticalIncidentsTable({ items, loading, onIsolated }: P
                   </td>
                   <td className="px-3 py-3.5 font-semibold" style={{ color: "var(--tx-dim)" }}>{item.status_label}</td>
                   <td className="px-3 py-3.5" style={{ color: item.assigned_to_name ? "var(--tx-dim)" : "var(--tx-mute)" }}>{item.assigned_to_name ?? "Sin asignar"}</td>
-                  <td className="px-3 py-3.5 tabular-nums" style={{ color: "var(--tx-mute)" }}>{item.opened_at}</td>
+                  <DateCell value={item.opened_at} />
                   <td className="px-3 py-3.5">
                     {item.isolation_status === "REQUESTED" || item.isolation_status === "RELEASE_REQUESTED" ? (
                       <span className="text-[10px] font-semibold whitespace-nowrap" style={{ color: "var(--warn)" }}><i className={`${PENDING_ICON_CLASS} mr-1`} />{PENDING_LABEL_COMPACT}</span>

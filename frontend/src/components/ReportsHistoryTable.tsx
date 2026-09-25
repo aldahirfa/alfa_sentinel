@@ -1,4 +1,8 @@
-import type { ReportHistoryItem } from "../types/reports";
+import { useState } from "react";
+import DateCell from "./DateCell";
+import ReportPreviewModal from "./ReportPreviewModal";
+import { previewSavedReport } from "../api/client";
+import type { ReportHistoryItem, ReportPreview } from "../types/reports";
 
 interface Props {
   history: ReportHistoryItem[];
@@ -10,6 +14,8 @@ function formatIcon(format: string) {
 }
 
 export default function ReportsHistoryTable({ history, loading }: Props) {
+  const [previewing, setPreviewing] = useState<{ item: ReportHistoryItem; load: () => Promise<ReportPreview> } | null>(null);
+
   return (
     <section className="soc-panel rounded-2xl overflow-hidden">
       <div className="px-5 py-4 border-b flex items-center gap-3" style={{ borderColor: "var(--line-soft)", background: "linear-gradient(90deg, var(--surf), var(--surf2))" }}>
@@ -69,12 +75,20 @@ export default function ReportsHistoryTable({ history, loading }: Props) {
                   <td className="px-3 py-3.5" style={{ color: "var(--tx-dim)" }}>{r.period_label}</td>
                   <td className="px-3 py-3.5"><span className="inline-flex px-2 py-1 rounded-lg text-[9.5px]" style={{ background: "var(--brand-fill)", color: "var(--tx-dim)", border: "1px solid var(--brand-soft)" }}>{r.endpoint}</span></td>
                   <td className="px-3 py-3.5" style={{ color: "var(--tx-dim)" }}>{r.generated_by}</td>
-                  <td className="px-3 py-3.5 whitespace-nowrap tabular-nums" style={{ color: "var(--tx-mute)" }}>{r.created_at}</td>
+                  <DateCell value={r.created_at} />
                   <td className="px-4 py-3.5 text-right">
-                    <a href={`/reportes/${r.id}/archivo`} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border no-underline whitespace-nowrap transition-premium btn-hover" style={{ color: "var(--brand)", background: "var(--brand-fill)", borderColor: "var(--brand-soft)" }}>
-                      <i className="ph ph-download-simple" style={{ fontSize: "13px" }} />
-                      <span className="text-[10px] font-semibold">Descargar</span>
-                    </a>
+                    <div className="inline-flex items-center gap-2">
+                      <button
+                        onClick={() => setPreviewing({ item: r, load: () => previewSavedReport(r.id, r.format) })}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer whitespace-nowrap transition-premium btn-hover"
+                        style={{ color: "var(--tx-dim)", background: "var(--surf2)", borderColor: "var(--line-soft)" }}
+                        title="Ver el informe sin descargarlo"
+                      >
+                        <i className="ph ph-eye" style={{ fontSize: "13px" }} />
+                        <span className="text-[10px] font-semibold">Vista previa</span>
+                      </button>
+                      <DownloadLink id={r.id} />
+                    </div>
                   </td>
                 </tr>
               ))
@@ -82,6 +96,23 @@ export default function ReportsHistoryTable({ history, loading }: Props) {
           </tbody>
         </table>
       </div>
+
+      <ReportPreviewModal
+        load={previewing?.load ?? null}
+        title={previewing ? `${previewing.item.report_type_label} · ${previewing.item.code}` : ""}
+        subtitle={previewing ? `${previewing.item.period_label} · ${previewing.item.endpoint} · ${previewing.item.format} · ${previewing.item.created_at}` : ""}
+        onClose={() => setPreviewing(null)}
+        actions={previewing && <DownloadLink id={previewing.item.id} />}
+      />
     </section>
+  );
+}
+
+function DownloadLink({ id }: { id: number }) {
+  return (
+    <a href={`/reportes/${id}/archivo`} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border no-underline whitespace-nowrap transition-premium btn-hover" style={{ color: "var(--brand)", background: "var(--brand-fill)", borderColor: "var(--brand-soft)" }}>
+      <i className="ph ph-download-simple" style={{ fontSize: "13px" }} />
+      <span className="text-[10px] font-semibold">Descargar</span>
+    </a>
   );
 }

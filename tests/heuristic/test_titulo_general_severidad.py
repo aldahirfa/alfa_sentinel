@@ -7,13 +7,13 @@ que pidió el usuario, más los casos concretos que originaron el pedido
   T-01: solo CPU -> título corresponde al nivel de riesgo alcanzado
         (BAJO con el peso real de HR-06), nunca "Consumo de CPU elevado".
   T-02: solo Honeyfile -> CRÍTICO de inmediato (weight=100 fijo),
-        título "ATAQUE DE RANSOMWARE PROBABLE", nunca "Acceso Honeyfile".
+        título "ATAQUE DE RANSOMWARE", nunca "Acceso Honeyfile".
   T-03: CPU + Honeyfile en el mismo episodio -> UNA sola alerta, título
         general por la severidad final, AMBAS reglas visibles en el
         detalle (el caso exacto que reportó el usuario).
   T-04: CPU + actividad masiva + Honeyfile -> una sola alerta, score
-        acumulado, las 3 reglas visibles, título "ATAQUE DE RANSOMWARE
-        PROBABLE" si crítico.
+        acumulado, las 3 reglas visibles, título "ATAQUE DE RANSOMWARE"
+        si crítico.
   T-05: el orden de llegada de las reglas no determina el título NI el
         orden en que se listan en el detalle (se prueba con dos
         episodios equivalentes, reglas en orden inverso).
@@ -185,7 +185,7 @@ try:
         "BAJO": "ACTIVIDAD ANÓMALA",
         "MEDIO": "ACTIVIDAD SOSPECHOSA",
         "ALTO": "POSIBLE ATAQUE DE RANSOMWARE",
-        "CRÍTICO": "ATAQUE DE RANSOMWARE PROBABLE",
+        "CRÍTICO": "ATAQUE DE RANSOMWARE",
     }
     BANNED_RULE_TITLES = {
         "Consumo de CPU elevado", "Acceso a Honeyfile", "Acceso Honeyfile",
@@ -217,7 +217,7 @@ try:
     body2 = r2.json()
     check("T-02: severidad CRÍTICO de inmediato (weight fijo 100)", body2["risk_score"] >= 75, str(body2))
     drawer2 = alert_drawer(body2["alert_id"])
-    check("T-02: título == 'ATAQUE DE RANSOMWARE PROBABLE'", drawer2["title"] == "ATAQUE DE RANSOMWARE PROBABLE", str(drawer2))
+    check("T-02: título == 'ATAQUE DE RANSOMWARE'", drawer2["title"] == "ATAQUE DE RANSOMWARE", str(drawer2))
     check("T-02: el título NO es 'Acceso Honeyfile'/'Honeyfile activado'", drawer2["title"] not in BANNED_RULE_TITLES, str(drawer2))
     check("T-02: la regla real sigue visible en el detalle", any(x["rule_name"] == "Acceso Honeyfile" for x in drawer2["rules"]), str(drawer2))
 
@@ -234,7 +234,7 @@ try:
     check("T-03b: sigue siendo LA MISMA alerta (mismo episodio, no una nueva)", r3b.json()["alert_id"] == alert_id_3, str(r3b.json()))
 
     drawer3 = alert_drawer(alert_id_3)
-    check("T-03: título == 'ATAQUE DE RANSOMWARE PROBABLE' (severidad final, no la primera regla)", drawer3["title"] == "ATAQUE DE RANSOMWARE PROBABLE", str(drawer3))
+    check("T-03: título == 'ATAQUE DE RANSOMWARE' (severidad final, no la primera regla)", drawer3["title"] == "ATAQUE DE RANSOMWARE", str(drawer3))
     rule_names_3 = {x["rule_name"] for x in drawer3["rules"]}
     check("T-03: 'Consumo CPU Elevado' sigue visible en el detalle", "Consumo CPU Elevado" in rule_names_3, str(drawer3))
     check("T-03: 'Acceso Honeyfile' sigue visible en el detalle", "Acceso Honeyfile" in rule_names_3, str(drawer3))
@@ -248,7 +248,7 @@ try:
     # no se oculta (sección 3: "no ocultar reglas secundarias").
     api_alerts3 = client.get("/api/alerts", params={"page_size": 50}).json()["alerts"]
     row3 = find(api_alerts3, alert_id_3)
-    check("T-03: en la tabla de Alertas, título general y rule_count == 3 (2 señales + bonificación de correlación, no un nombre de regla)", row3 is not None and row3["title"] == "ATAQUE DE RANSOMWARE PROBABLE" and row3["rule_count"] == 3, str(row3))
+    check("T-03: en la tabla de Alertas, título general y rule_count == 3 (2 señales + bonificación de correlación, no un nombre de regla)", row3 is not None and row3["title"] == "ATAQUE DE RANSOMWARE" and row3["rule_count"] == 3, str(row3))
 
     # ================= T-04: CPU + actividad masiva + Honeyfile =================
     r4a = report(token_t4, ["Consumo CPU Elevado"])
@@ -259,7 +259,7 @@ try:
     check("T-04: risk_score acumulado >= 75 (CRÍTICO)", r4c.json()["risk_score"] >= 75, str(r4c.json()))
 
     drawer4 = alert_drawer(alert_id_4)
-    check("T-04: título == 'ATAQUE DE RANSOMWARE PROBABLE'", drawer4["title"] == "ATAQUE DE RANSOMWARE PROBABLE", str(drawer4))
+    check("T-04: título == 'ATAQUE DE RANSOMWARE'", drawer4["title"] == "ATAQUE DE RANSOMWARE", str(drawer4))
     rule_names_4 = {x["rule_name"] for x in drawer4["rules"]}
     check(
         "T-04: las 3 reglas visibles en el detalle (no se oculta ninguna)",
@@ -278,7 +278,7 @@ try:
 
     drawer5a = alert_drawer(alert_id_5a)
     drawer5b = alert_drawer(alert_id_5b)
-    check("T-05: mismo título sin importar el orden de llegada (CPU->Honeyfile)", drawer5a["title"] == "ATAQUE DE RANSOMWARE PROBABLE", str(drawer5a))
+    check("T-05: mismo título sin importar el orden de llegada (CPU->Honeyfile)", drawer5a["title"] == "ATAQUE DE RANSOMWARE", str(drawer5a))
     check("T-05: mismo título sin importar el orden de llegada (Honeyfile->CPU)", drawer5b["title"] == drawer5a["title"], f"a={drawer5a['title']} b={drawer5b['title']}")
     # Se excluye 'Correlacion Multiples Indicadores' de esta comparación
     # a propósito: su 'matched_at' se actualiza en CADA report_alert()
@@ -345,7 +345,7 @@ try:
     alerts7 = open_alerts()["alerts"]
     elapsed_open = time_mod.monotonic() - t1
     row7 = find(alerts7, r7.json()["alert_id"])
-    check("T-07: la alerta aparece en /alerts/open de inmediato, YA con el título general calculado", row7 is not None and row7["title"] == "ATAQUE DE RANSOMWARE PROBABLE", str(row7))
+    check("T-07: la alerta aparece en /alerts/open de inmediato, YA con el título general calculado", row7 is not None and row7["title"] == "ATAQUE DE RANSOMWARE", str(row7))
     check(f"T-07: /alerts/open respondió en <1s ({elapsed_open*1000:.0f} ms)", elapsed_open < 1.0)
     print(f"    [T-07 latencia] POST /agent/alerts={elapsed_report*1000:.0f}ms  GET /alerts/open={elapsed_open*1000:.0f}ms")
 

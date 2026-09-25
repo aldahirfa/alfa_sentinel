@@ -117,6 +117,10 @@ export default defineConfig({
       '^/reportes/generar$': {
         ...backend,
       },
+      // POST /reportes/previsualizar: vista previa sin guardar el informe.
+      '^/reportes/previsualizar$': {
+        ...backend,
+      },
       '^/reportes/\\d+/archivo$': {
         ...backend,
       },

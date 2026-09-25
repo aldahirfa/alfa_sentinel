@@ -21,7 +21,7 @@ import type {
   AgentRuleUpdateResult,
 } from "../types/agentRules";
 import type { RespuestaResponse } from "../types/respuesta";
-import type { GenerateReportPayload, GenerateReportResult, ReportsResponse } from "../types/reports";
+import type { GenerateReportPayload, GenerateReportResult, ReportFormat, ReportPreview, ReportSheet, ReportsResponse } from "../types/reports";
 import type {
   AgentSettingsResponse,
   AuditLogsResponse,
@@ -393,6 +393,39 @@ export async function generateReport(payload: GenerateReportPayload): Promise<Ge
     throw new ApiError(res.status, data.detail || "No se pudo generar el informe");
   }
   return res.json();
+}
+
+// Convierte la respuesta de una vista previa: PDF -> URL de un blob (se
+// muestra en un iframe; como blob no depende de X-Frame-Options), XLSX ->
+// hojas en JSON. Quien la usa libera la URL con URL.revokeObjectURL.
+async function toReportPreview(res: Response, format: ReportFormat): Promise<ReportPreview> {
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || "No se pudo cargar la vista previa");
+  }
+  if (format === "PDF") {
+    return { kind: "pdf", url: URL.createObjectURL(await res.blob()) };
+  }
+  const data: { sheets: ReportSheet[] } = await res.json();
+  return { kind: "sheets", sheets: data.sheets };
+}
+
+// POST /reportes/previsualizar -- mismo documento que generaría
+// /reportes/generar, pero sin guardarlo ni registrarlo en el historial.
+export async function previewReport(payload: GenerateReportPayload): Promise<ReportPreview> {
+  const res = await fetch("/reportes/previsualizar", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return toReportPreview(res, payload.format);
+}
+
+// Vista previa de un informe ya generado: el mismo archivo guardado.
+export async function previewSavedReport(id: number, format: ReportFormat): Promise<ReportPreview> {
+  const url = format === "PDF" ? `/reportes/${id}/archivo?disposition=inline` : `/api/reportes/${id}/hojas`;
+  return toReportPreview(await fetch(url, { credentials: "include" }), format);
 }
 
 // GET /api/users -- versión JSON de /usuarios (Jinja2), misma consulta
