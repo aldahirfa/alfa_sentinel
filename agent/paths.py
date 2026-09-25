@@ -19,6 +19,8 @@ ahí. Ver database/schema.sql, tabla honeyfile_templates.
 import os
 import platform
 
+from file_ownership import make_dirs_owned
+
 
 # Las 4 rutas lógicas que puede usar una plantilla de honeyfile
 # (sección 19 de la especificación) -- coinciden con las carpetas de
@@ -138,8 +140,9 @@ def _user_home():
 
 
 def _ensure_dir(directory):
-    os.makedirs(directory, exist_ok=True)
-    return directory
+    # Cada carpeta que crea el agente (privilegiado) toma el dueño de su
+    # carpeta padre -- ver agent/file_ownership.py.
+    return make_dirs_owned(directory)
 
 
 def resolve_logical_path(raw_path):

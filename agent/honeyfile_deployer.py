@@ -2,6 +2,7 @@ import hashlib
 import os
 
 from client import get_honeyfile_policy, report_honeyfile_policy
+from file_ownership import adopt_parent_owner, open_for_read_no_follow, open_new_file_for_write
 from paths import resolve_logical_path
 
 
@@ -13,22 +14,32 @@ def _write_and_hash(full_path, content):
     "el hash tiene que corresponder al archivo REAL que el agente
     escribió, nunca a un valor generado o supuesto")."""
 
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    # La carpeta ya la creó resolve_logical_path() (con el dueño
+    # correcto, ver agent/file_ownership.py).
 
     # Contenido de texto plano guardado con la extensión elegida -- no
     # es un .xlsx/.docx/.pdf válido de verdad (ver database/schema.sql,
     # tabla honeyfile_templates). Alcanza para que watchdog y la
     # detección de "Acceso Honeyfile" reaccionen, que es lo único que
-    # este proyecto necesita de él.
-    with open(full_path, "w", encoding="utf-8") as f:
-        f.write(content or "")
+    # este proyecto necesita de él. Saltos de línea del SO, como al
+    # escribir en modo texto.
+    data = (content or "").replace("\n", os.linesep).encode("utf-8")
 
-    with open(full_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    # Archivo NUEVO sin seguir enlaces: el agente corre con privilegios y
+    # escribe en una carpeta del usuario; si alguien plantó un enlace
+    # simbólico en esta ruta, falla en vez de escribir a través de él.
+    with open_new_file_for_write(full_path) as f:
+        f.write(data)
+
+    # Queda a nombre del dueño de la carpeta (el usuario), como cualquier
+    # archivo suyo -- ver agent/file_ownership.py.
+    adopt_parent_owner(full_path, newly_created=True)
+
+    return _hash_of(full_path)
 
 
 def _hash_of(full_path):
-    with open(full_path, "rb") as f:
+    with open_for_read_no_follow(full_path) as f:
         return hashlib.sha256(f.read()).hexdigest()
 
 
@@ -172,6 +183,14 @@ def apply_honeyfile_policy(credential, honeyfile_monitor=None):
             continue
 
         watched_paths.append(full_path)
+
+        # Honeyfile que una versión anterior dejó a nombre de root: se le
+        # asigna el dueño de la carpeta. Se marca como operación propia
+        # porque cambiar el dueño genera un evento de atributos que
+        # watchdog informa como modificación (evita una falsa HR-03).
+        if honeyfile_monitor is not None:
+            honeyfile_monitor.mark_internal_operation(full_path)
+        adopt_parent_owner(full_path, newly_created=False)
 
         try:
             real_hash = _hash_of(full_path)
