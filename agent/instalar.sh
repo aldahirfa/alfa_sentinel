@@ -68,6 +68,22 @@ while true; do
     rojo "Indica un usuario existente del equipo (no root)."
 done
 
+# Opcional: carpetas fuera de las del usuario que también se vigilan
+# (p. ej. una carpeta de datos compartida).
+EXTRAS_ACTUALES="$(python3 -c "import json;print(';'.join(json.load(open('$DEST/agent_config.json')).get('extra_monitored_paths') or []))" 2>/dev/null || true)"
+while true; do
+    read -rp "Carpetas adicionales a vigilar (opcional, separadas por ;) [${EXTRAS_ACTUALES}]: " EXTRAS
+    EXTRAS="${EXTRAS:-$EXTRAS_ACTUALES}"
+    INVALIDA=""
+    IFS=';' read -ra LISTA <<< "$EXTRAS"
+    for c in "${LISTA[@]}"; do
+        c="$(echo "$c" | xargs)"
+        [[ -n "$c" && "$c" != /* ]] && INVALIDA="$c"
+    done
+    [[ -z "$INVALIDA" ]] && break
+    rojo "Usa rutas completas, por ejemplo /srv/datos (revisa: $INVALIDA)"
+done
+
 # --- 3. Copia ------------------------------------------------------------
 paso 3/6 "Copiando el agente a $DEST"
 systemctl stop "$SERVICE" 2>/dev/null || true
@@ -76,9 +92,15 @@ tar -C "$SRC" \
     --exclude=.venv --exclude=__pycache__ --exclude=agent_credential.json --exclude=agent_config.json \
     --exclude=isolation_state.json --exclude=logs --exclude=honeyfiles --exclude=test_endpoint \
     --exclude=test_files --exclude='*.pyc' -cf - . | tar -C "$DEST" -xf -
-cat > "$DEST/agent_config.json" <<EOF
-{"server_url": "$SERVIDOR", "env_mode": "production", "protected_user": "$USUARIO"}
-EOF
+# JSON armado con Python: las rutas pueden traer espacios o comillas.
+SERVIDOR="$SERVIDOR" USUARIO="$USUARIO" EXTRAS="$EXTRAS" python3 - "$DEST/agent_config.json" <<'PYEOF'
+import json, os, sys
+extras = [p.strip() for p in os.environ["EXTRAS"].split(";") if p.strip()]
+config = {"server_url": os.environ["SERVIDOR"], "env_mode": "production",
+          "protected_user": os.environ["USUARIO"], "extra_monitored_paths": extras}
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(config, f, ensure_ascii=False)
+PYEOF
 chown -R root:root "$DEST"
 chmod 755 "$DEST"
 chmod 600 "$DEST/agent_config.json"

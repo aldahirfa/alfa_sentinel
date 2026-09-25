@@ -19,6 +19,7 @@ ahí. Ver database/schema.sql, tabla honeyfile_templates.
 import os
 import platform
 
+import config
 from file_ownership import make_dirs_owned
 import user_folders
 
@@ -232,5 +233,17 @@ def get_monitored_roots():
 
     if not production:
         add(_DEV_HONEYFILES_DIR)
+
+    # Carpetas adicionales que el administrador indicó al instalar
+    # (agent_config.json, "extra_monitored_paths"): p. ej. una carpeta de
+    # datos compartida del área, o C:\KB4\Newsim\DataDir para evaluar con
+    # RanSim, que trabaja sobre sus propios archivos fuera de las carpetas
+    # del usuario. Si no existe todavía, se crea para poder vigilarla.
+    for extra in config.LOCAL_CONFIG.get("extra_monitored_paths") or []:
+        if isinstance(extra, str) and os.path.isabs(extra):
+            try:
+                add(extra)
+            except OSError as error:
+                print(f"⚠ No se puede vigilar la carpeta adicional {extra}: {error}")
 
     return roots

@@ -26,3 +26,7 @@ agent/isolation_state.json
 
 # Registro del agente cuando corre como servicio
 agent/logs/
+
+# Kit de Windows Sandbox (se genera) e instaladores descargados
+tools/sandbox/kit/
+tools/sandbox/descargas/

@@ -6,6 +6,13 @@
 # administradores pueden modificarlo), instala dependencias, registra el
 # agente, guarda la configuración y lo deja como tarea del sistema que
 # arranca con el equipo (cuenta SYSTEM) y se reinicia si se detiene.
+#
+# Parámetros opcionales (los usa el kit de Windows Sandbox, tools\sandbox):
+# valores sugeridos para las preguntas; se pueden cambiar con el teclado.
+param(
+    [string]$ServidorSugerido = "",
+    [string]$CarpetasSugeridas = ""
+)
 $ErrorActionPreference = "Stop"
 $Dest = Join-Path $env:ProgramFiles "ALFA-Sentinel"
 $TaskName = "ALFA-Sentinel"
@@ -54,9 +61,14 @@ $Conservar = $false
 if (Test-Path $CredFile) {
     $Conservar = (Read-Host "  Este equipo ya está registrado. ¿Conservar el registro actual? [S/n]") -ne "n"
 }
-$ServidorActual = "https://192.168.81.1:8000"
+$ServidorActual = if ($ServidorSugerido) { $ServidorSugerido } else { "https://192.168.81.1:8000" }
+$ExtrasActuales = $CarpetasSugeridas
 if (Test-Path $ConfigFile) {
-    try { $ServidorActual = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).server_url } catch { }
+    try {
+        $previa = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+        $ServidorActual = $previa.server_url
+        if ($previa.extra_monitored_paths) { $ExtrasActuales = $previa.extra_monitored_paths -join ";" }
+    } catch { }
 }
 do {
     $Servidor = (Preguntar "Dirección del servidor" $ServidorActual).TrimEnd("/")
@@ -75,6 +87,15 @@ do {
     if (-not $valido) { Aviso "No hay un perfil '$Usuario' en este equipo. Perfiles: $($Perfiles -join ', ')" }
 } until ($valido)
 
+# Opcional: carpetas fuera de las del usuario que también se vigilan
+# (p. ej. C:\KB4\Newsim\DataDir para evaluar con RanSim).
+do {
+    $Extras = [string[]]@((Preguntar "Carpetas adicionales a vigilar (opcional, separadas por ;)" $ExtrasActuales) -split ";" |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $invalidas = @($Extras | Where-Object { -not [IO.Path]::IsPathRooted($_) })
+    if ($invalidas) { Aviso "Usa rutas completas, por ejemplo C:\Datos\Compartido. Revisa: $($invalidas -join ', ')" }
+} until (-not $invalidas)
+
 # --- 3. Copia ------------------------------------------------------------
 Paso "3/6" "Copiando el agente a $Dest"
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -83,7 +104,7 @@ robocopy $Src $Dest /E /NFL /NDL /NJH /NJS /NP `
     /XD .venv __pycache__ logs honeyfiles test_endpoint test_files `
     /XF agent_credential.json agent_config.json isolation_state.json *.pyc | Out-Null
 if ($LASTEXITCODE -ge 8) { Falla "No se pudieron copiar los archivos del agente." }
-$config = [ordered]@{ server_url = $Servidor; env_mode = "production"; protected_user = $Usuario } | ConvertTo-Json -Compress
+$config = [ordered]@{ server_url = $Servidor; env_mode = "production"; protected_user = $Usuario; extra_monitored_paths = $Extras } | ConvertTo-Json -Compress
 [IO.File]::WriteAllText($ConfigFile, $config, (New-Object Text.UTF8Encoding($false)))
 Ok "Agente copiado"
 
