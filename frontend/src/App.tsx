@@ -257,7 +257,6 @@ export default function App() {
             page={page}
             title={meta.title}
             subtitle={meta.subtitle}
-            systemOk={data.system_status.db_ok && data.system_status.api_ok}
             userName={userName}
             roleLabel={roleLabel}
             theme={theme}

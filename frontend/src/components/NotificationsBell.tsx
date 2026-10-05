@@ -36,13 +36,19 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
         onClick={toggle}
         className="relative w-9 h-9 rounded-lg border grid place-items-center cursor-pointer transition-premium btn-hover shadow-sm"
         style={{ borderColor: "var(--line)", background: "var(--surf2)", color: "var(--tx-dim)" }}
+        title={count > 0 ? `${count} ${count === 1 ? "alerta sin atender" : "alertas sin atender"}` : "Sin alertas pendientes"}
+        aria-label={count > 0 ? `Notificaciones: ${count} alertas sin atender` : "Notificaciones"}
       >
         <i className="ph-fill ph-bell" style={{ fontSize: "17px" }} />
         {count > 0 && (
+          // Cantidad de alertas sin atender (pendientes o en un incidente
+          // que nadie tomó todavía).
           <span
-            className="absolute top-[5px] right-1.5 w-1.5 h-1.5 rounded-full"
-            style={{ background: "var(--crit)" }}
-          />
+            className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full grid place-items-center text-[9.5px] font-bold tabular-nums"
+            style={{ background: "var(--crit)", color: "#fff", boxShadow: "0 0 0 2px var(--surf)" }}
+          >
+            {count > 99 ? "99+" : count}
+          </span>
         )}
       </button>
 
@@ -53,7 +59,7 @@ export default function NotificationsBell({ count, onSelectAlert, onViewAll }: P
         >
           <div className="px-3.5 py-3 border-b flex items-center" style={{ borderColor: "var(--line-soft)" }}>
             <span className="text-[13px] font-semibold" style={{ color: "var(--tx)" }}>
-              Alertas nuevas
+              Alertas sin atender
             </span>
             {count > 0 && (
               <span

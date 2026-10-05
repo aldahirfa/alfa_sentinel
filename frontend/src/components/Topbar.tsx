@@ -7,7 +7,6 @@ interface TopbarProps {
   page: Page;
   title?: string;
   subtitle?: string;
-  systemOk: boolean;
   userName: string;
   roleLabel: string;
   theme: "dark" | "light";
@@ -22,7 +21,6 @@ export default function Topbar({
   page,
   title = "Panel de control",
   subtitle = "Resumen general de seguridad y estado de los endpoints",
-  systemOk,
   userName,
   roleLabel,
   theme,
@@ -71,28 +69,6 @@ export default function Topbar({
       </div>
 
       <div className="ml-auto flex items-center gap-2.5 shrink-0">
-        {openAlertsCount > 0 && (
-          <div
-            className="hidden xl:flex items-center gap-2 px-3 py-2 rounded-lg text-[10.5px] font-semibold border"
-            style={{ background: "var(--crit-fill)", color: "var(--crit)", borderColor: "var(--crit-soft)" }}
-          >
-            <i className="ph-fill ph-warning-circle" style={{ fontSize: "14px" }} />
-            {openAlertsCount} {openAlertsCount === 1 ? "alerta abierta" : "alertas abiertas"}
-          </div>
-        )}
-
-        <div
-          className="hidden lg:flex items-center gap-2 px-3 py-2 rounded-lg text-[10.5px] font-semibold border"
-          style={{
-            background: systemOk ? "var(--ok-soft)" : "var(--crit-soft)",
-            color: systemOk ? "var(--ok)" : "var(--crit)",
-            borderColor: systemOk ? "color-mix(in srgb, var(--ok) 22%, transparent)" : "var(--crit-soft)",
-          }}
-        >
-          <span className="w-2 h-2 rounded-full" style={{ background: systemOk ? "var(--ok)" : "var(--crit)" }} />
-          {systemOk ? "Servicios operativos" : "Servicios con problemas"}
-        </div>
-
         <button
           onClick={onToggleTheme}
           title={theme === "dark" ? "Usar tema claro" : "Usar tema oscuro"}
