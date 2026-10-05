@@ -7,8 +7,8 @@
 # agente, guarda la configuración y lo deja como tarea del sistema que
 # arranca con el equipo (cuenta SYSTEM) y se reinicia si se detiene.
 #
-# Parámetros opcionales (los usa el kit de Windows Sandbox, tools\sandbox):
-# valores sugeridos para las preguntas; se pueden cambiar con el teclado.
+# Parámetros opcionales: valores sugeridos para las preguntas; se pueden
+# cambiar con el teclado.
 param(
     [string]$ServidorSugerido = "",
     [string]$CarpetasSugeridas = ""
@@ -72,15 +72,26 @@ if (Test-Path $ConfigFile) {
 }
 do {
     $Servidor = (Preguntar "Dirección del servidor" $ServidorActual).TrimEnd("/")
-    $valido = $Servidor -match "^https://[^/]+$"
+    # El puerto es obligatorio: sin él se usaría el 443, donde no escucha
+    # el servidor, y el registro fallaría con "timed out" sin más pista.
+    $valido = $Servidor -match "^https://[^/:]+:\d+$"
     if (-not $valido) { Aviso "Debe ser https://IP:puerto, por ejemplo https://192.168.81.1:8000" }
 } until ($valido)
 
 # Usuario con la sesión abierta (el que se protege), aunque el instalador
 # se haya elevado con otra cuenta de administrador.
-$UsuarioDefecto = ((Get-CimInstance Win32_ComputerSystem).UserName -split "\\")[-1]
+# WMI (Get-CimInstance) no existe en algunos Windows, como Windows Sandbox
+# ("clase no válida"): se intenta y, si falla, se usa el usuario actual.
+$UsuarioDefecto = $null
+try { $UsuarioDefecto = ((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName -split "\\")[-1] } catch { }
 if (-not $UsuarioDefecto) { $UsuarioDefecto = $env:USERNAME }
-$Perfiles = Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special } | ForEach-Object { Split-Path $_.LocalPath -Leaf }
+# Perfiles de usuarios reales desde el registro, igual que el agente
+# (agent/user_folders.py::_windows_profiles), sin depender de WMI.
+$Perfiles = @(Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" -ErrorAction SilentlyContinue |
+    Where-Object { $_.PSChildName -like "S-1-5-21-*" } |
+    ForEach-Object { [Environment]::ExpandEnvironmentVariables((Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).ProfileImagePath) } |
+    Where-Object { $_ -and (Test-Path $_) } |
+    ForEach-Object { Split-Path $_ -Leaf })
 do {
     $Usuario = Preguntar "Usuario del equipo a proteger" $UsuarioDefecto
     $valido = $Perfiles -contains $Usuario

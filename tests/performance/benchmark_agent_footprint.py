@@ -21,10 +21,9 @@ Uso típico (en una máquina, con el agente ya corriendo en otra terminal):
         --phases "reposo:60,carga:120,reposo:60" \
         --json-out rendimiento_agente.json
 
-Durante la fase "carga" el script avisa en pantalla cuándo lanzar, en una
-tercera terminal, el simulador seguro de comportamientos tipo ransomware
-(tools/simulator/alfa_ransomware_simulator.py) apuntando a una carpeta que
-el agente esté vigilando.
+Durante la fase "carga" el script avisa en pantalla cuándo generar
+actividad de archivos (crear, modificar, renombrar, borrar) en una carpeta
+que el agente esté vigilando, por ejemplo Documentos.
 
 Ver README_agente.md en esta misma carpeta para más contexto.
 """
@@ -120,8 +119,8 @@ def phase_hint(name: str) -> Optional[str]:
     lowered = name.lower()
     if any(word in lowered for word in ("carga", "ataque", "simul", "load", "attack")):
         return (
-            "  >>> Lanza AHORA, en otra terminal, el simulador seguro de ransomware "
-            "(tools/simulator/alfa_ransomware_simulator.py) contra una carpeta vigilada por el agente."
+            "  >>> Genera AHORA actividad de archivos (crear, modificar, renombrar, borrar) "
+            "en una carpeta vigilada por el agente, por ejemplo Documentos."
         )
     if any(word in lowered for word in ("reposo", "idle", "baseline")):
         return "  >>> No generes actividad manual: esta fase mide el agente en reposo."

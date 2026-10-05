@@ -56,7 +56,9 @@ SERVIDOR_ACTUAL="$(python3 -c "import json;print(json.load(open('$DEST/agent_con
 while true; do
     read -rp "Dirección del servidor [${SERVIDOR_ACTUAL:-https://192.168.81.1:8000}]: " SERVIDOR
     SERVIDOR="${SERVIDOR:-${SERVIDOR_ACTUAL:-https://192.168.81.1:8000}}"
-    [[ "$SERVIDOR" =~ ^https://[^/]+$ ]] && break
+    # El puerto es obligatorio: sin él se usaría el 443, donde no escucha
+    # el servidor, y el registro fallaría con "timed out" sin más pista.
+    [[ "$SERVIDOR" =~ ^https://[^/:]+:[0-9]+$ ]] && break
     rojo "Debe ser https://IP:puerto, por ejemplo https://192.168.81.1:8000"
 done
 

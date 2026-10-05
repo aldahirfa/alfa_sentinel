@@ -7,9 +7,11 @@ from honeyfile_monitor import HoneyfileMonitor
 
 from client import send_event, send_alert
 
-from adapters import get_process_for_file_event
+from adapters import get_process_for_file_event, open_files_index, enrich_pid
 
 import os
+import queue
+import threading
 import time
 
 # Deduplicación de "eventos técnicos" (2026-08-18, ver PENDIENTES.md,
@@ -49,6 +51,29 @@ import time
 # el mismo archivo (que sí debe seguir contando aparte).
 DEDUP_WINDOW_SECONDS = 2.0
 
+# Corrección 2026-10-05 -- por qué las reglas "no detectaban nada":
+# antes, por CADA evento, el hilo de watchdog buscaba el proceso
+# responsable recorriendo todos los procesos (psutil.open_files(),
+# medido en Windows: ~18 s por evento) y además hacía un POST al
+# servidor, y recién después evaluaba las reglas con time() de ESE
+# momento. Con 18 s por evento, 20 borrados nunca caían dentro de los
+# 15 s de HR-09, aunque hubieran ocurrido en 1 segundo.
+#
+# Ahora:
+#  1. Las reglas que dependen solo de la ruta (HR-01/02/03/04/07/08/09/10)
+#     se evalúan en el acto, con el momento real del evento.
+#  2. La atribución de proceso (HR-05/HR-11) y la telemetría van a un
+#     hilo aparte que procesa los eventos por lotes: un solo recorrido
+#     de procesos para todo el lote, y las reglas de proceso se evalúan
+#     con el momento real de cada evento.
+#  3. Las alertas salen por un tercer hilo, para no quedar detrás de la
+#     telemetría ni de la atribución.
+#
+# Un evento con más de ATTRIBUTION_MAX_AGE_SECONDS en la cola ya no se
+# intenta atribuir con el recorrido de psutil: el proceso casi seguro
+# ya cerró el archivo y el resultado sería engañoso.
+ATTRIBUTION_MAX_AGE_SECONDS = 30.0
+
 
 class FileActivityHandler(FileSystemEventHandler):
 
@@ -58,6 +83,12 @@ class FileActivityHandler(FileSystemEventHandler):
         self.honeyfile_monitor = honeyfile_monitor
         self.credential = credential
         self._last_technical_event = {}  # (file_path, event_type) -> último timestamp real
+
+        self._event_queue = queue.Queue()  # (file_path, event_type, timestamp, evaluar_proceso)
+        self._alert_queue = queue.Queue()  # payloads para send_alert
+
+        threading.Thread(target=self._attribution_loop, name="alfa-atribucion", daemon=True).start()
+        threading.Thread(target=self._alert_loop, name="alfa-alertas", daemon=True).start()
 
     def _is_technical_duplicate(self, file_path, event_type):
         """Ver DEDUP_WINDOW_SECONDS arriba. Actualiza el registro en
@@ -106,6 +137,11 @@ class FileActivityHandler(FileSystemEventHandler):
         nombre NUEVO, ver on_moved) sigue siendo una interacción con un
         honeyfile, aunque el nombre nuevo ya no lo sea."""
 
+        # Momento REAL del evento (ver ATTRIBUTION_MAX_AGE_SECONDS arriba):
+        # se toma antes de cualquier trabajo lento y es el que usan
+        # todas las ventanas de las reglas.
+        timestamp = time.time()
+
         extension = os.path.splitext(file_path)[1].lower()
 
         print(
@@ -114,48 +150,6 @@ class FileActivityHandler(FileSystemEventHandler):
 
         print(
             f"Extensión: {extension}"
-        )
-
-        # Enriquecimiento de eventos (2026-08-16, ver PENDIENTES.md):
-        # intenta identificar qué proceso tiene este archivo abierto
-        # AHORA MISMO (agent/adapters/) -- best-effort, honesto: si no
-        # se puede determinar (el proceso ya cerró el archivo, o no
-        # hay permisos para inspeccionarlo), process_info queda en
-        # None y el evento se reporta igual, sin inventar
-        # process_id/process_name (sección 8 de la especificación).
-        process_info = get_process_for_file_event(file_path, event_type)
-
-        if process_info:
-            print(
-                f"Proceso atribuido: PID {process_info.get('process_id')} "
-                f"({process_info.get('process_name')}, usuario: {process_info.get('username') or '—'})"
-            )
-
-        # Reportar el evento crudo al servidor (tabla 'events'). Antes
-        # esto capturaba el event_id de la respuesta para vincular la
-        # alerta a los eventos que la dispararon (tabla 'alert_events'),
-        # pero esa tabla no existe en la nueva estructura (alfa_sentinel)
-        # -- ver PENDIENTES.md. Se sigue mandando el evento igual, solo
-        # que ya no se hace nada con el id de vuelta. 'executable_path'
-        # y 'username' (agregado 2026-08-16 a la salida de los
-        # adaptadores) no viajan acá -- 'events' no tiene columnas para
-        # eso (sección 10 de la especificación de atribución: "no
-        # cambiar la estructura de la BD solamente para satisfacer esta
-        # tarea"; quedan como información interna del agente, usadas
-        # solo para evaluar HR-05 y para el log en consola);
-        # process_id/process_name sí, esas columnas ya existían.
-        send_event(
-            self.credential,
-            {
-                "event_type": event_type,
-                "description": f"{event_type} en {file_path}",
-                "process_id": process_info.get("process_id") if process_info else None,
-                "process_name": process_info.get("process_name") if process_info else None,
-                "metadata": {
-                    "file_path": file_path,
-                    "extension": extension
-                }
-            }
         )
 
         # Comprobar honeyfile ANTES de evaluar reglas: HR-03 es
@@ -169,9 +163,9 @@ class FileActivityHandler(FileSystemEventHandler):
         # (agent/honeyfile_deployer.py, durante el despliegue o la
         # reconciliación periódica), el evento de watchdog que llega
         # ahora no es una interacción externa -- no debe activar HR-03.
-        # El evento se sigue mandando igual (línea de abajo) y las
-        # demás reglas se siguen evaluando igual -- solo se fuerza
-        # is_honeyfile=False para ESTA evaluación puntual.
+        # El evento se sigue mandando igual y las demás reglas se siguen
+        # evaluando igual -- solo se fuerza is_honeyfile=False para ESTA
+        # evaluación puntual.
         if is_honeyfile and self.honeyfile_monitor.is_internal_operation(file_path):
 
             print(f"(actividad interna del agente sobre este honeyfile -- HR-03 no se evalúa: {file_path})")
@@ -191,16 +185,18 @@ class FileActivityHandler(FileSystemEventHandler):
         # un solo guardado real -- no se vuelve a evaluar contra el motor
         # heurístico una segunda vez (evita inflar artificialmente
         # umbrales como Escritura Intensiva Archivos o Actividad
-        # Repetitiva Automatizada). El evento YA se reportó tal cual a
-        # /agent/events arriba -- la telemetría cruda no se pierde, solo
-        # se evita contarlo dos veces hacia un umbral.
+        # Repetitiva Automatizada). El evento se reporta igual a
+        # /agent/events -- la telemetría cruda no se pierde, solo se
+        # evita contarlo dos veces hacia un umbral.
         if self._is_technical_duplicate(file_path, event_type):
             print(f"(evento técnico duplicado del mismo guardado -- no se reevalúa el motor heurístico: {file_path})")
             matched_rules = []
+            evaluate_process = False
         else:
             matched_rules = self.analyzer.register_event(
-                file_path, event_type, is_honeyfile=is_honeyfile, process_info=process_info
+                file_path, event_type, is_honeyfile=is_honeyfile, timestamp=timestamp
             )
+            evaluate_process = True
 
         file_count = self.analyzer.get_unique_file_count()
 
@@ -210,18 +206,10 @@ class FileActivityHandler(FileSystemEventHandler):
         )
 
         # Corregido 2026-08-18 (ver PENDIENTES.md, "Revisión y corrección
-        # integral de ALFA-Sentinel", problema A): la línea anterior decía
-        # solo "Reglas activas: ninguna" cuando NINGUNA regla cruzó su
-        # umbral con ESTE evento puntual -- lo normal en la inmensa
-        # mayoría de los eventos individuales (la mayoría de las reglas
-        # requieren varios eventos dentro de una ventana, ej. 20 archivos
-        # en 10s). Esa frase se confundía con "no hay reglas cargadas",
-        # que es un problema completamente distinto (y que, de existir,
-        # ya se reportaría al arrancar el agente -- ver agent/main.py).
-        # Ahora se imprimen dos números separados y sin ambigüedad: cuántas
-        # reglas tiene cargadas el motor (constante mientras el agente
-        # corre) y cuántas de esas coincidieron con ESTE evento (variable,
-        # normalmente 0).
+        # integral de ALFA-Sentinel", problema A): se imprimen dos números
+        # separados y sin ambigüedad: cuántas reglas tiene cargadas el
+        # motor (constante mientras el agente corre) y cuántas de esas
+        # coincidieron con ESTE evento (variable, normalmente 0).
         print(f"Reglas evaluadas: {len(self.analyzer.rules)}")
         print(
             f"Reglas coincidentes con este evento: "
@@ -229,30 +217,117 @@ class FileActivityHandler(FileSystemEventHandler):
         )
 
         if matched_rules:
+            self._queue_alert(matched_rules, file_count)
 
-            print(
-                "¡ACTIVIDAD SOSPECHOSA DETECTADA!"
-            )
+        # Atribución de proceso (HR-05/HR-11) y telemetría: en el hilo de
+        # atribución, para no frenar la evaluación de los eventos que
+        # siguen llegando.
+        self._event_queue.put((file_path, event_type, extension, timestamp, evaluate_process))
 
-            # El agente ya no decide severidad/score/título compuesto:
-            # manda TODAS las reglas que coincidieron (matched_rules) y
-            # deja que el servidor calcule peso, correlación, score y
-            # severidad a partir de heuristic_rules (ver
-            # server/main.py::report_alert). 'title'/'description' son
-            # solo un resumen legible para el caso en que el servidor
-            # tenga que generar una alerta nueva -- si actualiza una
-            # existente, conserva su propio título.
-            primary_rule = matched_rules[0]
+    def _queue_alert(self, matched_rules, file_count):
+        """El agente no decide severidad/score/título compuesto: manda
+        TODAS las reglas que coincidieron y el servidor calcula peso,
+        correlación, score y severidad a partir de heuristic_rules (ver
+        server/main.py::report_alert). 'title'/'description' son solo un
+        resumen legible para el caso en que el servidor tenga que generar
+        una alerta nueva -- si actualiza una existente, conserva su propio
+        título."""
 
-            send_alert(
+        print(
+            "¡ACTIVIDAD SOSPECHOSA DETECTADA!"
+        )
+
+        primary_rule = matched_rules[0]
+
+        self._alert_queue.put({
+            "title": self.RULE_TITLES.get(primary_rule, "Actividad de archivos sospechosa"),
+            "description": (
+                f"{file_count} archivos únicos modificados en la ventana de HR-01; "
+                f"reglas coincidentes: {', '.join(matched_rules)}"
+            ),
+            "matched_rules": matched_rules
+        })
+
+    def _alert_loop(self):
+        while True:
+            alert = self._alert_queue.get()
+            try:
+                send_alert(self.credential, alert)
+            except Exception as error:
+                print(f"⚠ No se pudo enviar la alerta: {error}")
+
+    def _attribution_loop(self):
+        while True:
+            batch = [self._event_queue.get()]
+            while True:
+                try:
+                    batch.append(self._event_queue.get_nowait())
+                except queue.Empty:
+                    break
+            try:
+                self._process_batch(batch)
+            except Exception as error:
+                print(f"⚠ Error procesando eventos de archivo en segundo plano: {error}")
+
+    def _process_batch(self, batch):
+        """Enriquecimiento de eventos (2026-08-16, ver PENDIENTES.md):
+        intenta identificar qué proceso tocó cada archivo
+        (agent/adapters/) -- best-effort, honesto: si no se puede
+        determinar, process_info queda en None y el evento se reporta
+        igual, sin inventar process_id/process_name (sección 8 de la
+        especificación).
+
+        Primero el mecanismo nativo (ETW/fanotify), que es inmediato. Si
+        no alcanza, UN solo recorrido de psutil para todo el lote. Un
+        archivo borrado ya no puede estar abierto, así que los borrados
+        no disparan ese recorrido."""
+
+        started = time.time()
+        index = None
+
+        for file_path, event_type, extension, timestamp, evaluate_process in batch:
+
+            process_info = get_process_for_file_event(file_path, event_type, allow_scan=False)
+
+            if (
+                process_info is None
+                and event_type != "file_deleted"
+                and started - timestamp <= ATTRIBUTION_MAX_AGE_SECONDS
+            ):
+                if index is None:
+                    index = open_files_index()
+                pid = index.get(os.path.normcase(os.path.abspath(file_path)))
+                process_info = enrich_pid(pid) if pid is not None else None
+
+            if process_info:
+                print(
+                    f"Proceso atribuido: PID {process_info.get('process_id')} "
+                    f"({process_info.get('process_name')}, usuario: {process_info.get('username') or '—'}) "
+                    f"-> {file_path}"
+                )
+
+            if process_info and evaluate_process:
+                matched_rules = self.analyzer.register_process_event(process_info, timestamp)
+                if matched_rules:
+                    print(f"Reglas coincidentes con este evento: {', '.join(matched_rules)} ({file_path})")
+                    self._queue_alert(matched_rules, self.analyzer.get_unique_file_count())
+
+            # Reportar el evento crudo al servidor (tabla 'events').
+            # 'executable_path' y 'username' no viajan acá -- 'events' no
+            # tiene columnas para eso (quedan como información interna
+            # del agente, usadas para evaluar HR-05 y para el log);
+            # process_id/process_name sí.
+            send_event(
                 self.credential,
                 {
-                    "title": self.RULE_TITLES.get(primary_rule, "Actividad de archivos sospechosa"),
-                    "description": (
-                        f"{file_count} archivos únicos modificados en la ventana de HR-01; "
-                        f"reglas coincidentes: {', '.join(matched_rules)}"
-                    ),
-                    "matched_rules": matched_rules
+                    "event_type": event_type,
+                    "description": f"{event_type} en {file_path}",
+                    "process_id": process_info.get("process_id") if process_info else None,
+                    "process_name": process_info.get("process_name") if process_info else None,
+                    "metadata": {
+                        "file_path": file_path,
+                        "extension": extension
+                    }
                 }
             )
 

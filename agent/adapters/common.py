@@ -81,3 +81,23 @@ def find_process_for_open_file(file_path):
                     return enriched
 
     return None
+
+
+def open_files_index():
+    """Un solo recorrido de procesos (el mismo de find_process_for_open_file)
+    que devuelve {ruta normalizada: pid} con TODOS los archivos abiertos
+    en este momento. En Windows cada recorrido tarda varios segundos
+    (medido: ~18 s con ~170 procesos), así que file_monitor.py lo hace una
+    vez por lote de eventos en vez de una vez por evento (2026-10-05)."""
+
+    index = {}
+
+    for process in psutil.process_iter(["pid"]):
+        try:
+            open_files = process.open_files()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        for open_file in open_files:
+            index.setdefault(os.path.normcase(os.path.abspath(open_file.path)), process.pid)
+
+    return index

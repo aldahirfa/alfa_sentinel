@@ -42,14 +42,8 @@ python tests/performance/benchmark_agent_footprint.py --pid 12345 --json-out ren
 
 Por defecto corre 3 fases: `reposo` (60s) -> `carga` (120s) -> `reposo`
 (60s). Al entrar en una fase de "carga" el script imprime un aviso para
-que, en una TERCERA terminal, lances el simulador seguro:
-
-```bash
-python tools/simulator/alfa_ransomware_simulator.py
-```
-
-y marques ahí las reglas HR-01..HR-12 que quieras disparar contra una
-carpeta que el agente esté vigilando. Así se compara el consumo del
+que generes actividad de archivos (crear, modificar, renombrar, borrar)
+en una carpeta que el agente esté vigilando, por ejemplo Documentos. Así se compara el consumo del
 agente cuando no pasa nada frente a cuando está procesando actividad
 sospechosa real.
 

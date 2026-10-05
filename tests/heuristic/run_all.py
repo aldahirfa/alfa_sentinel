@@ -1,8 +1,7 @@
 """Corre todos los archivos test_*.py de este directorio en secuencia
 y agrega el resultado -- no usa pytest (el proyecto no lo tiene como
 dependencia, ver README.md de este directorio); cada test_*.py ya es
-un script standalone con sus propios asserts y sys.exit(0/1), mismo
-estilo que agent/test_mass_activity.py.
+un script standalone con sus propios asserts y sys.exit(0/1).
 
 Ejecutar: python3 tests/heuristic/run_all.py
 """

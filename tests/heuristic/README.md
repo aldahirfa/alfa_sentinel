@@ -2,7 +2,7 @@
 
 Este directorio prueba, con procesos reales de laboratorio (nunca ransomware real, nunca datos inventados), la atribución de procesos y las reglas heurísticas HR-05, HR-06 y HR-11 implementadas el 2026-08-16 (ver `PENDIENTES.md`, "Atribución de procesos y completado del motor heurístico"), además de una regresión de las reglas de archivos preexistentes y una prueba end-to-end de la configuración por endpoint.
 
-No usa `pytest` (no es una dependencia del proyecto). Cada `test_*.py` es un script standalone con sus propios `assert`/`check()` y `sys.exit(0/1)`, el mismo estilo que ya usaba `agent/test_mass_activity.py`.
+No usa `pytest` (no es una dependencia del proyecto). Cada `test_*.py` es un script standalone con sus propios `assert`/`check()` y `sys.exit(0/1)`.
 
 ## Cómo correr las pruebas
 

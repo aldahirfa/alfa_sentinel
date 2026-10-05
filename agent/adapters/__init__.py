@@ -32,10 +32,10 @@ import platform
 # como respaldo, 3) None si ninguno pudo atribuir. Nunca se inventa un
 # valor parcial (sección 8/9: "no inventar process_id ni
 # process_name"; "la atribución no es 100% -- eso es válido").
-from .common import find_process_for_open_file
+from .common import find_process_for_open_file, open_files_index, enrich_pid  # noqa: F401
 
 
-def get_process_for_file_event(file_path, event_type):
+def get_process_for_file_event(file_path, event_type, allow_scan=True):
     """Punto de entrada único, sin importar el SO. Devuelve
     {"process_id", "process_name", "executable_path", "username"} si
     se pudo determinar el proceso responsable, o None si no se pudo
@@ -52,7 +52,7 @@ def get_process_for_file_event(file_path, event_type):
         # especificación -- se usa la implementación compartida
         # (psutil funciona igual ahí) en vez de fallar. Sin mecanismo
         # nativo específico para macOS (no estaba pedido).
-        def _impl(path, evt):
-            return find_process_for_open_file(path)
+        def _impl(path, evt, allow_scan=True):
+            return find_process_for_open_file(path) if allow_scan else None
 
-    return _impl(file_path, event_type)
+    return _impl(file_path, event_type, allow_scan=allow_scan)

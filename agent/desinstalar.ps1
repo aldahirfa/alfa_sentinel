@@ -12,7 +12,7 @@ if ((Read-Host "¿Desinstalar el agente ALFA-Sentinel de este equipo? [s/N]") -n
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 # Por si quedó algún proceso del agente vivo.
-Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
+Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like "*ALFA-Sentinel*main.py*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 

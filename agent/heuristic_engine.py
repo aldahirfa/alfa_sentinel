@@ -1,6 +1,7 @@
 from collections import deque
 from time import time
 import os
+import threading
 
 
 # ============================================================
@@ -191,6 +192,10 @@ class FileActivityAnalyzer:
         self._rename_events = deque()     # timestamps -- HR-02, solo renombrados con extensión sospechosa
         self._suspicious_process_events = deque()  # timestamps -- HR-05
         self._process_activity = {}       # pid -> deque(timestamps) -- HR-11, UNA ventana por proceso
+        # file_monitor.py evalúa las reglas de ruta en el hilo de
+        # watchdog y las de proceso (HR-05/HR-11) en el hilo de
+        # atribución -- este lock evita que se pisen.
+        self._lock = threading.Lock()
 
     @classmethod
     def from_policy(cls, policy_rules):
@@ -242,7 +247,7 @@ class FileActivityAnalyzer:
             dq.popleft()
 
 
-    def register_event(self, file_path, event_type, is_honeyfile=False, process_info=None):
+    def register_event(self, file_path, event_type, is_honeyfile=False, process_info=None, timestamp=None):
         """Registra un evento de archivo y devuelve la lista de
         nombres de regla que están activas justo después de
         incorporarlo (puede ser más de una a la vez, ej. borrado
@@ -259,9 +264,31 @@ class FileActivityAnalyzer:
         Habilita HR-05 (Proceso Sospechoso) y HR-11 (Actividad
         Repetitiva Automatizada); si es None, ambas reglas
         simplemente no evalúan nada para este evento puntual -- no
-        se cuenta como "no sospechoso", no hay dato."""
+        se cuenta como "no sospechoso", no hay dato.
 
-        now = time()
+        'timestamp' (2026-10-05): momento REAL en que ocurrió el evento.
+        file_monitor.py lo toma apenas watchdog lo entrega; sin esto,
+        las ventanas medían el ritmo al que el agente procesaba los
+        eventos y no el ritmo al que ocurrían."""
+
+        with self._lock:
+            matched = self._register_path_event(file_path, event_type, is_honeyfile, timestamp)
+            if process_info:
+                matched += self._register_process(process_info, timestamp)
+            return matched
+
+    def register_process_event(self, process_info, timestamp=None):
+        """HR-05 y HR-11 para un evento cuyo proceso responsable se
+        identificó DESPUÉS (hilo de atribución de file_monitor.py), con
+        el momento real del evento."""
+
+        if not process_info:
+            return []
+        with self._lock:
+            return self._register_process(process_info, timestamp)
+
+    def _register_path_event(self, file_path, event_type, is_honeyfile, timestamp):
+        now = timestamp if timestamp is not None else time()
         matched = []
 
         # HR-03: inmediata, sin ventana ni acumulación -- cualquier
@@ -324,6 +351,12 @@ class FileActivityAnalyzer:
             if len(self._user_events) >= cfg["threshold"]:
                 matched.append("Actividad Archivos Usuario")
 
+        return matched
+
+    def _register_process(self, process_info, timestamp):
+        now = timestamp if timestamp is not None else time()
+        matched = []
+
         # HR-05: requiere haber podido atribuir el proceso responsable
         # de este evento (process_info no es None) -- sin eso no hay
         # ruta de ejecutable que evaluar.
@@ -370,6 +403,7 @@ class FileActivityAnalyzer:
         cfg = self.rules.get("Modificacion Masiva Archivos")
         if not cfg:
             return 0
-        now = time()
-        self._prune(self._modified_events, cfg["window_seconds"], now, key=True)
-        return len({p for _, p in self._modified_events})
+        with self._lock:
+            now = time()
+            self._prune(self._modified_events, cfg["window_seconds"], now, key=True)
+            return len({p for _, p in self._modified_events})

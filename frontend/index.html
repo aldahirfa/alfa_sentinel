@@ -6,32 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070b13" />
     <title>ALFA-Sentinel · Consola de Seguridad</title>
-
-    <!-- Tailwind se mantiene vía CDN para conservar el entorno actual del frontend. -->
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Iconografía utilitaria. La identidad de los módulos principales usa SVG propios del sistema. -->
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css" />
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css" />
-    <script>
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            colors: {
-              base: {
-                950: "#0b0f19",
-                900: "#0f1420",
-                850: "#131926",
-                800: "#171f2e",
-                700: "#232c3d",
-                600: "#333f54",
-              },
-            },
-          },
-        },
-      };
-    </script>
   </head>
   <body class="bg-base-950 text-slate-200 antialiased">
     <div id="root"></div>

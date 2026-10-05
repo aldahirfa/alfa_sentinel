@@ -116,7 +116,7 @@ if __name__ == "__main__":
         response = authenticate_agent(existing_credential)
 
         if response is None:
-            print("No se pudo contactar al servidor para autenticar. Deteniendo.")
+            print(f"No se pudo contactar al servidor ({config.SERVER_URL}) para autenticar. Deteniendo.")
             raise SystemExit(1)
 
         print("Respuesta de autenticación:")
@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
         # Código de salida para el instalador: 0 = registrado, 1 = no.
         if response is None:
-            print("No se pudo contactar al servidor para registrar el agente.")
+            print(f"No se pudo contactar al servidor ({config.SERVER_URL}) para registrar el agente.")
             raise SystemExit(1)
 
         if response.status_code == 200:

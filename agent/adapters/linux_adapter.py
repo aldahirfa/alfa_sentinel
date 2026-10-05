@@ -24,7 +24,7 @@ def _get_watcher(file_path):
     return _watcher
 
 
-def get_process_for_file_event(file_path, event_type):
+def get_process_for_file_event(file_path, event_type, allow_scan=True):
     """Adaptador Linux -- orden de atribución (sección 8 de la
     especificación de atribución de procesos, 2026-08-16):
     1) fanotify (mecanismo nativo del SO, linux_fanotify.py) -- si
@@ -51,5 +51,11 @@ def get_process_for_file_event(file_path, event_type):
             # fanotify vio un PID válido, pero el proceso ya no existe
             # para cuando se consulta psutil (vida muy corta) -- cae
             # al fallback en vez de reportar un proceso fantasma.
+
+    # allow_scan=False (2026-10-05): solo el mecanismo nativo. El
+    # recorrido de psutil tarda segundos en Windows; file_monitor.py lo
+    # hace una sola vez por lote con common.open_files_index().
+    if not allow_scan:
+        return None
 
     return common.find_process_for_open_file(file_path)
