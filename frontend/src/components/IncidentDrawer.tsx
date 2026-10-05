@@ -13,7 +13,7 @@ import { severityPillStyle } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
 import type { AlertStatus } from "../types/alerts";
-import { INCIDENT_CLASSIFICATION_LABEL, INCIDENT_STATUS_LABEL } from "../lib/incidentStatus";
+import { INCIDENT_CLASSIFICATION_LABEL, INCIDENT_CLASSIFICATION_OPTIONS, INCIDENT_STATUS_LABEL } from "../lib/incidentStatus";
 import {
   ISOLATE_ICON_CLASS, ISOLATED_ICON_CLASS, PENDING_ICON_CLASS,
   ISOLATE_LABEL_FULL, ISOLATED_LABEL_FULL, PENDING_LABEL_FULL,
@@ -61,11 +61,14 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Clasificación elegida para cerrar (si el incidente no estaba clasificado).
+  const [closeClassification, setCloseClassification] = useState<IncidentClassification | "">("");
 
   function load() {
     if (!selected) return;
     setData(null);
     setError(null);
+    setCloseClassification("");
     fetchIncidenteDrawer(selected.kind, selected.id)
       .then(setData)
       .catch(() => setError("No se pudo cargar la información de este elemento."));
@@ -195,15 +198,16 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       <div className="text-[10px]" style={{ color: "var(--tx-mute)" }}>Estado</div>
                       <div className="mt-1">
                         {selected.kind === "incident" ? (
-                          <select
-                            value={data.status}
-                            disabled={saving}
-                            onChange={(e) => runAction(() => updateIncidentStatus(selected.id, e.target.value as IncidentStatus))}
-                            className="text-[10.5px] font-medium px-1.5 py-0.5 rounded outline-none cursor-pointer"
-                            style={selectStyle}
+                          // El estado cambia solo: Abierto -> En investigación
+                          // (cuando un analista lo toma) -> Contenido (cuando el
+                          // agente confirma el aislamiento). Solo cerrar es manual.
+                          <span
+                            className="text-[10.5px] font-semibold px-2 py-0.5 rounded inline-block"
+                            style={{ border: "1px solid var(--line)", color: "var(--tx-dim)" }}
+                            title="Se actualiza automáticamente; para cerrarlo usa 'Cerrar incidente'"
                           >
-                            {Object.entries(INCIDENT_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                          </select>
+                            {INCIDENT_STATUS_LABEL[data.status as IncidentStatus] ?? data.status_label}
+                          </span>
                         ) : (
                           <span
                             className="text-[10.5px] font-bold tracking-wide px-2.5 py-0.5 rounded-full inline-block"
@@ -293,9 +297,54 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
                       style={selectStyle}
                     >
                       <option value="" disabled>Sin clasificar</option>
-                      {Object.entries(INCIDENT_CLASSIFICATION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      {INCIDENT_CLASSIFICATION_OPTIONS
+                        .concat(data.classification && !INCIDENT_CLASSIFICATION_OPTIONS.includes(data.classification as IncidentClassification) ? [data.classification as IncidentClassification] : [])
+                        .map((k) => <option key={k} value={k}>{INCIDENT_CLASSIFICATION_LABEL[k]}</option>)}
                     </select>
                   </div>
+
+                  {data.status === "CLOSED" ? (
+                    <button
+                      disabled={saving}
+                      onClick={() => runAction(() => updateIncidentStatus(selected.id, "IN_PROGRESS"))}
+                      className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12px] font-semibold cursor-pointer border transition-premium btn-hover disabled:opacity-50"
+                      style={{ borderColor: "var(--line)", color: "var(--tx-dim)", background: "transparent" }}
+                    >
+                      <i className="ph ph-arrow-counter-clockwise" />
+                      Reabrir incidente
+                    </button>
+                  ) : (
+                    <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--line-soft)" }}>
+                      {!data.classification && (
+                        <div className="flex items-center justify-between text-[12.5px] pb-2">
+                          <span style={{ color: "var(--tx-mute)" }}>¿Qué fue?</span>
+                          <select
+                            value={closeClassification}
+                            disabled={saving}
+                            onChange={(e) => setCloseClassification(e.target.value as IncidentClassification | "")}
+                            className="text-[12px] font-medium px-2 py-1 rounded outline-none cursor-pointer max-w-[190px]"
+                            style={selectStyle}
+                          >
+                            <option value="" disabled>Elige para cerrar</option>
+                            {INCIDENT_CLASSIFICATION_OPTIONS.map((k) => <option key={k} value={k}>{INCIDENT_CLASSIFICATION_LABEL[k]}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      <button
+                        disabled={saving || (!data.classification && !closeClassification)}
+                        onClick={() => runAction(() => updateIncidentStatus(selected.id, "CLOSED", closeClassification || undefined))}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12px] font-bold cursor-pointer border transition-premium btn-hover disabled:opacity-50"
+                        style={{ borderColor: "var(--ok)", color: "#fff", background: "var(--ok)" }}
+                        title={!data.classification && !closeClassification ? "Indica primero qué fue el incidente" : "Cerrar el incidente"}
+                      >
+                        <i className="ph-fill ph-check-circle" />
+                        Cerrar incidente
+                      </button>
+                      <div className="text-[10px] mt-1.5" style={{ color: "var(--tx-mute)" }}>
+                        El estado avanza solo; cerrar es la decisión final del analista.
+                      </div>
+                    </div>
+                  )}
                 </Section>
               )}
 

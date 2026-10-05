@@ -5,7 +5,13 @@
 
 import type { Severity } from "./dashboard";
 
-export type AlertStatus = "NEW" | "ACKNOWLEDGED" | "ESCALATED" | "CLOSED" | "FALSE_POSITIVE";
+// Una alerta solo se tría: Pendiente, Escalada (a un incidente) o
+// Descartada (falso positivo / actividad legítima). Investigar y cerrar
+// son del incidente.
+export type AlertStatus = "NEW" | "ESCALATED" | "FALSE_POSITIVE" | "LEGITIMATE_ACTIVITY";
+// Filtro de la lista: DISCARDED agrupa los dos motivos de descarte.
+export type AlertStatusFilter = "NEW" | "ESCALATED" | "DISCARDED";
+export type AlertDiscardReason = "FALSE_POSITIVE" | "LEGITIMATE_ACTIVITY";
 
 export interface AlertListItem {
   id: number;
@@ -59,7 +65,7 @@ export interface AlertsResponse {
 export interface AlertsQuery {
   search?: string;
   severity?: Severity | "";
-  status?: AlertStatus | "";
+  status?: AlertStatusFilter | "";
   since?: "24h" | "7d" | "30d" | "";
   rule?: string;
   // Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,

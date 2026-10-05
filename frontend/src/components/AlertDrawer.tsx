@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { fetchAlertDrawer } from "../api/client";
-import type { IncidenteDrawerData, AlertStatus } from "../types/alerts";
+import { discardAlert, fetchAlertDrawer, reopenAlert } from "../api/client";
+import type { AlertDiscardReason, IncidenteDrawerData, AlertStatus } from "../types/alerts";
 import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
 import { statusPillStyle } from "../lib/alertStatus";
 import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
@@ -44,6 +44,29 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
   const [data, setData] = useState<IncidenteDrawerData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showEscalate, setShowEscalate] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Descartar / reabrir: única acción manual sobre una alerta (el resto
+  // de los estados cambia solo; ver ALERT_STATUS_LABELS_ES en el servidor).
+  async function runAlertAction(fn: () => Promise<void>) {
+    if (!data) return;
+    setWorking(true);
+    setActionError(null);
+    try {
+      await fn();
+      loadDrawer(data.id);
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "No se pudo guardar el cambio.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function discard(reason: AlertDiscardReason) {
+    if (data) runAlertAction(() => discardAlert(data.id, reason));
+  }
 
   function loadDrawer(id: number) {
     setData(null);
@@ -262,17 +285,41 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
                       <i className="ph ph-arrow-up-right" style={{ fontSize: "12px" }} />
                     </button>
                   </div>
+                ) : data.status === "FALSE_POSITIVE" || data.status === "LEGITIMATE_ACTIVITY" ? (
+                  <div className="rounded-2xl p-4" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
+                    <div className="text-[11px] font-semibold" style={{ color: "var(--tx)" }}>{data.status_label}</div>
+                    <p className="text-[9.5px] leading-relaxed mt-1.5 mb-3" style={{ color: "var(--tx-mute)" }}>
+                      Ya no cuenta para el riesgo del equipo ni para las notificaciones, pero queda en el historial. Si fue un error, puedes reabrirla.
+                    </p>
+                    <button disabled={working} onClick={() => runAlertAction(() => reopenAlert(data.id))} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10.5px] font-semibold cursor-pointer border transition-premium btn-hover disabled:opacity-50" style={{ borderColor: "var(--line)", color: "var(--tx-dim)", background: "var(--surf)" }}>
+                      <i className="ph ph-arrow-counter-clockwise" style={{ fontSize: "13px" }} />
+                      Reabrir alerta
+                    </button>
+                  </div>
                 ) : (
                   <div className="rounded-2xl p-4" style={{ background: "var(--surf2)", border: "1px solid var(--line-soft)" }}>
-                    <div className="text-[11px] font-semibold" style={{ color: "var(--tx)" }}>Esta alerta aún no forma parte de un incidente.</div>
+                    <div className="text-[11px] font-semibold" style={{ color: "var(--tx)" }}>¿Qué hacemos con esta alerta?</div>
                     <p className="text-[9.5px] leading-relaxed mt-1.5 mb-3" style={{ color: "var(--tx-mute)" }}>
-                      El analista puede escalarla manualmente si la evidencia y el contexto justifican abrir un caso de investigación.
+                      Escálala si merece investigarse como incidente, o descártala si fue un falso positivo o una actividad normal del usuario.
                     </p>
-                    <button onClick={() => setShowEscalate(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10.5px] font-semibold cursor-pointer border transition-premium btn-hover" style={{ borderColor: "var(--brand-soft)", color: "#fff", background: "var(--brand)" }}>
+                    <button disabled={working} onClick={() => setShowEscalate(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10.5px] font-semibold cursor-pointer border transition-premium btn-hover disabled:opacity-50" style={{ borderColor: "var(--brand-soft)", color: "#fff", background: "var(--brand)" }}>
                       <i className="ph-fill ph-siren" style={{ fontSize: "13px" }} />
                       Escalar a incidente
                     </button>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <button disabled={working} onClick={() => discard("FALSE_POSITIVE")} className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-semibold cursor-pointer border transition-premium btn-hover disabled:opacity-50" style={{ borderColor: "var(--line)", color: "var(--tx-dim)", background: "var(--surf)" }}>
+                        <i className="ph ph-x-circle" style={{ fontSize: "12px" }} />
+                        Falso positivo
+                      </button>
+                      <button disabled={working} onClick={() => discard("LEGITIMATE_ACTIVITY")} className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-semibold cursor-pointer border transition-premium btn-hover disabled:opacity-50" style={{ borderColor: "var(--line)", color: "var(--tx-dim)", background: "var(--surf)" }}>
+                        <i className="ph ph-user-check" style={{ fontSize: "12px" }} />
+                        Actividad legítima
+                      </button>
+                    </div>
                   </div>
+                )}
+                {actionError && (
+                  <div className="text-[10px] mt-2" style={{ color: "var(--crit)" }}>{actionError}</div>
                 )}
               </Section>
 

@@ -390,6 +390,8 @@ class IncidentAssign(BaseModel):
 
 class IncidentStatusUpdate(BaseModel):
     status: str
+    # Al cerrar: qué fue el incidente (obligatorio si no estaba clasificado).
+    classification: str | None = None
 
 
 class IncidentClassify(BaseModel):
@@ -1026,7 +1028,7 @@ def _endpoint_cte(stale_seconds):
                MAX(severity_levels.min_score) AS worst_min_score
         FROM alerts
         JOIN severity_levels ON severity_levels.id = alerts.severity_id
-        WHERE alerts.status = 'NEW'
+        WHERE {alert_active}
         GROUP BY alerts.agent_id
     ),
     endpoint_data AS (
@@ -1050,7 +1052,7 @@ def _endpoint_cte(stale_seconds):
         LEFT JOIN severity_levels AS worst_sev ON worst_sev.min_score = endpoint_risk.worst_min_score
         CROSS JOIN (SELECT name FROM severity_levels ORDER BY min_score ASC LIMIT 1) AS lowest_sev
     )
-""".format(online_sql=agent_online_sql(stale_seconds))
+""".format(online_sql=agent_online_sql(stale_seconds), alert_active=alert_active_sql())
 
 ENDPOINTS_PAGE_SIZE = 25
 
@@ -1225,12 +1227,44 @@ def _agent_is_isolated_sql(agent_id_expr):
 # En investigación/Confirmada/Cerrada/Falso positivo) sigue siendo una
 # decisión de producto, no algo que venga dado.
 ALERT_STATUS_LABELS_ES = {
-    "NEW": "Nueva",
-    "ACKNOWLEDGED": "En investigación",
-    "ESCALATED": "Confirmada",
-    "CLOSED": "Cerrada",
-    "FALSE_POSITIVE": "Falso positivo",
+    "NEW": "Pendiente",
+    "ESCALATED": "Escalada",
+    "FALSE_POSITIVE": "Descartada · falso positivo",
+    "LEGITIMATE_ACTIVITY": "Descartada · actividad legítima",
 }
+
+# Estados de una alerta (2026-10-04). La alerta solo se TRIA: o se escala
+# a incidente, o se descarta. Investigar, contener, clasificar y cerrar
+# son del INCIDENTE (incidents.status / classification), no se repiten
+# acá.
+#   Pendiente  -> automático al llegar.
+#   Escalada   -> automático al escalarla (manual o por el motor); desde
+#                 ahí el estado que manda es el de su incidente.
+#   Descartada -> única acción manual: falso positivo o actividad legítima.
+ALERT_DISCARD_REASONS = ("FALSE_POSITIVE", "LEGITIMATE_ACTIVITY")
+
+
+def alert_active_sql(a="alerts"):
+    """Alerta que todavía cuenta para el riesgo del equipo: pendiente, o
+    escalada a un incidente que no se cerró. Al descartarla o cerrar su
+    incidente, el riesgo del endpoint baja."""
+
+    return (
+        f"({a}.status = 'NEW' OR ({a}.status = 'ESCALATED' AND EXISTS ("
+        f"SELECT 1 FROM incidents ai WHERE ai.id = {a}.incident_id AND ai.status <> 'CLOSED')))"
+    )
+
+
+def alert_unreviewed_sql(a="alerts"):
+    """Alerta que nadie atendió todavía: pendiente, o escalada a un
+    incidente que sigue 'Abierto' (ningún analista lo tomó). Es lo que
+    muestran la campana y las notificaciones: una alerta crítica que el
+    motor escala solo no desaparece hasta que alguien la atiende."""
+
+    return (
+        f"({a}.status = 'NEW' OR ({a}.status = 'ESCALATED' AND EXISTS ("
+        f"SELECT 1 FROM incidents ai WHERE ai.id = {a}.incident_id AND ai.status = 'OPEN')))"
+    )
 
 # "Corrección definitiva en la lógica y presentación de ALERTAS"
 # (2026-08-18, ver PENDIENTES.md): el título VISIBLE de una alerta (o
@@ -1331,11 +1365,14 @@ ISOLATION_TYPE_LABELS_ES = {
 # diccionario.
 INCIDENT_CLASSIFICATION_LABELS_ES = {
     "CONFIRMED": "Confirmado",
-    "POSSIBLE_THREAT": "Posible amenaza",
     "FALSE_POSITIVE": "Falso positivo",
     "LEGITIMATE_ACTIVITY": "Actividad legítima",
     "UNDETERMINED": "No determinado",
+    # Ya no se ofrece (se pisaba con "No determinado"); solo para mostrar
+    # incidentes viejos que la tengan.
+    "POSSIBLE_THREAT": "Posible amenaza",
 }
+INCIDENT_CLASSIFICATION_OPTIONS = ("CONFIRMED", "FALSE_POSITIVE", "LEGITIMATE_ACTIVITY", "UNDETERMINED")
 
 # Página /reportes (2026-08-12). Solo 3 tipos -- cubren lo directivo
 # (SECURITY), lo operativo (ENDPOINTS) e investigativo (INCIDENTS) sin
@@ -1428,12 +1465,10 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             # lo mismo. "ISOLATED" se resuelve más abajo, con is_isolated.
             conn_status = "ONLINE" if is_agent_online(row[6], row[7], stale_seconds) else "OFFLINE"
 
-            # Alertas activas e incidentes asociados a este endpoint --
-            # mismas tablas/columnas que ya usa el resto del sistema
-            # (alerts.status='NEW', incidents.status!='CLOSED'), sin
-            # estructuras nuevas.
+            # Alertas activas (pendientes o en un incidente abierto, ver
+            # alert_active_sql) e incidentes asociados a este endpoint.
             cursor.execute(
-                "SELECT COUNT(*) FROM alerts WHERE agent_id = %s AND status = 'NEW';",
+                f"SELECT COUNT(*) FROM alerts WHERE agent_id = %s AND {alert_active_sql()};",
                 (agent_id,)
             )
             alerts_active = cursor.fetchone()[0]
@@ -1450,11 +1485,11 @@ def get_endpoint_drawer_data(agent_id: int, request: Request):
             # tiene alertas abiertas, se cae al nivel más bajo del
             # catálogo, el que quede.
             cursor.execute(
-                """
+                f"""
                 SELECT severity_levels.name, severity_levels.min_score, severity_levels.max_score
                 FROM alerts
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.agent_id = %s AND alerts.status = 'NEW'
+                WHERE alerts.agent_id = %s AND {alert_active_sql()}
                 ORDER BY severity_levels.min_score DESC
                 LIMIT 1;
                 """,
@@ -2388,6 +2423,21 @@ def report_isolation_status(
                     "UPDATE host_isolations SET status = 'EXECUTED', executed_at = CURRENT_TIMESTAMP, result = %s WHERE id = %s;",
                     (report.result, report.isolation_id)
                 )
+                # El agente confirmó el aislamiento: la amenaza está
+                # contenida. El incidente pasa solo a 'Contenido'.
+                cursor.execute(
+                    """
+                    UPDATE incidents SET status = 'CONTAINED'
+                    WHERE id = (SELECT incident_id FROM host_isolations WHERE id = %s)
+                      AND status IN ('OPEN', 'IN_PROGRESS')
+                    RETURNING id;
+                    """,
+                    (report.isolation_id,)
+                )
+                contained = cursor.fetchone()
+                if contained is not None:
+                    log_audit(cursor, None, "UPDATE_INCIDENT_STATUS", "incidents", contained[0],
+                              "Estado -> CONTAINED (automático: el agente confirmó el aislamiento del equipo)")
             elif report.status == "ISOLATION_FAILED":
                 cursor.execute(
                     "UPDATE host_isolations SET status = 'ISOLATION_FAILED', result = %s WHERE id = %s;",
@@ -2490,6 +2540,7 @@ def isolate_incident_manually(incident_id: int, user: dict = Depends(get_current
             isolation_id = cursor.fetchone()[0]
 
             log_audit(cursor, user["id"], "MANUAL_ISOLATE_REQUEST", "host_isolations", isolation_id, reason)
+            incident_take_in_progress(cursor, incident_id, user["id"], "se pidió aislar el equipo")
 
             connection.commit()
 
@@ -2737,7 +2788,8 @@ def api_users(user: dict = Depends(get_current_user)):
 def alerts_open(user: dict = Depends(get_current_user)):
     """JSON liviano para la campanita de notificaciones -- se consulta
     solo, sin pasar por cada ruta de página. Trae las alertas todavía
-    sin revisar (status = 'NEW'), sin importar la severidad: hasta las
+    sin atender (alert_unreviewed_sql: pendientes, o escaladas a un
+    incidente que nadie tomó todavía), sin importar la severidad: hasta las
     de severidad BAJO quedan fuera porque esas ni siquiera generan alerta
     (el agente solo llama a send_alert cuando is_suspicious() es
     True).
@@ -2780,7 +2832,7 @@ def alerts_open(user: dict = Depends(get_current_user)):
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
+                WHERE {alert_unreviewed_sql()}
                 ORDER BY alerts.created_at DESC
                 LIMIT 10;
                 """
@@ -2789,7 +2841,7 @@ def alerts_open(user: dict = Depends(get_current_user)):
             rows = cursor.fetchall()
 
             cursor.execute(
-                "SELECT COUNT(*) FROM alerts WHERE status = 'NEW';"
+                f"SELECT COUNT(*) FROM alerts WHERE {alert_unreviewed_sql()};"
             )
 
             total = cursor.fetchone()[0]
@@ -2893,7 +2945,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             endpoints_offline = max(endpoints_total - endpoints_online - endpoints_isolated, 0)
 
             # --- Alertas activas + tendencia vs. periodo anterior (24h) ---
-            cursor.execute("SELECT COUNT(*) FROM alerts WHERE status = 'NEW';")
+            cursor.execute(f"SELECT COUNT(*) FROM alerts WHERE {alert_active_sql()};")
             alerts_active = cursor.fetchone()[0]
 
             cursor.execute(
@@ -2947,17 +2999,17 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
             # entre sus alertas abiertas; el nivel más bajo del
             # catálogo = sin ninguna alerta abierta) ---
             cursor.execute(
-                """
+                f"""
                 SELECT severity_levels.name, COUNT(DISTINCT alerts.agent_id)
                 FROM alerts
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
+                WHERE {alert_active_sql()}
                 GROUP BY severity_levels.name;
                 """
             )
             severity_rows = dict(cursor.fetchall())
 
-            cursor.execute("SELECT COUNT(DISTINCT agent_id) FROM alerts WHERE status = 'NEW';")
+            cursor.execute(f"SELECT COUNT(DISTINCT agent_id) FROM alerts WHERE {alert_active_sql()};")
             agents_with_open_alerts = cursor.fetchone()[0]
             severity_rows[lowest_severity_name] = severity_rows.get(lowest_severity_name, 0) + max(
                 endpoints_total - agents_with_open_alerts, 0
@@ -2989,7 +3041,7 @@ def api_dashboard_overview(user: dict = Depends(get_current_user)):
                 JOIN agents ON agents.id = alerts.agent_id
                 JOIN endpoints ON endpoints.id = agents.endpoint_id
                 JOIN severity_levels ON severity_levels.id = alerts.severity_id
-                WHERE alerts.status = 'NEW'
+                WHERE {alert_active_sql()}
                 GROUP BY agents.id, endpoints.hostname, endpoints.os, agents.status, agents.last_seen_at
                 ORDER BY risk_min_score DESC, alert_count DESC
                 LIMIT 5;
@@ -3351,7 +3403,7 @@ def api_endpoints(
                     {_agent_is_isolated_sql("endpoint_data.id")} AS is_isolated,
                     (
                         SELECT COUNT(*) FROM alerts a
-                        WHERE a.agent_id = endpoint_data.id AND a.status = 'NEW'
+                        WHERE a.agent_id = endpoint_data.id AND {alert_active_sql('a')}
                     ) AS alerts_count,
                     (
                         SELECT MAX(e.detected_at) FROM events e
@@ -3478,6 +3530,9 @@ def create_incident(
     incidente). Si la detección ya estaba en un incidente, se
     devuelve ese en vez de crear uno nuevo."""
 
+    if incident.classification is not None and incident.classification not in INCIDENT_CLASSIFICATION_OPTIONS:
+        raise HTTPException(status_code=422, detail="Clasificación inválida")
+
     connection = get_connection()
 
     try:
@@ -3523,9 +3578,13 @@ def create_incident(
             incident_id = cursor.fetchone()[0]
 
             cursor.execute(
-                "UPDATE alerts SET incident_id = %s WHERE id = %s;",
+                "UPDATE alerts SET incident_id = %s, status = 'ESCALATED', resolved_at = NULL WHERE id = %s;",
                 (incident_id, incident.alert_id)
             )
+            log_audit(cursor, user["id"], "ESCALATE_ALERT", "alerts", incident.alert_id, f"Escalada a INC-{incident_id:05d}")
+
+            # Lo escaló un analista: ya lo está atendiendo.
+            incident_take_in_progress(cursor, incident_id, user["id"], "lo escaló un analista")
 
             connection.commit()
 
@@ -3536,6 +3595,80 @@ def create_incident(
 
     finally:
         connection.close()
+
+
+class AlertDiscard(BaseModel):
+    reason: str
+
+
+@app.post("/api/alerts/{alert_id}/discard")
+def discard_alert(alert_id: int, payload: AlertDiscard, user: dict = Depends(get_current_user)):
+    """Única acción manual sobre una alerta: descartarla sin abrir
+    incidente (falso positivo o actividad legítima). Deja de contar para
+    el riesgo del equipo y para la campana, pero queda en el historial."""
+
+    if payload.reason not in ALERT_DISCARD_REASONS:
+        raise HTTPException(status_code=422, detail="Motivo inválido: FALSE_POSITIVE o LEGITIMATE_ACTIVITY")
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT status, incident_id FROM alerts WHERE id = %s;", (alert_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Alerta no encontrada")
+            if row[1] is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="La alerta ya está en un incidente: se resuelve cerrando y clasificando el incidente."
+                )
+            cursor.execute(
+                "UPDATE alerts SET status = %s, resolved_at = CURRENT_TIMESTAMP WHERE id = %s;",
+                (payload.reason, alert_id)
+            )
+            log_audit(cursor, user["id"], "DISCARD_ALERT", "alerts", alert_id, ALERT_STATUS_LABELS_ES[payload.reason])
+            connection.commit()
+        return {"alert_id": alert_id, "status": payload.reason, "status_label": ALERT_STATUS_LABELS_ES[payload.reason]}
+    finally:
+        connection.close()
+
+
+@app.post("/api/alerts/{alert_id}/reopen")
+def reopen_alert(alert_id: int, user: dict = Depends(get_current_user)):
+    """Deshace un descarte hecho por error: la alerta vuelve a Pendiente."""
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE alerts SET status = 'NEW', resolved_at = NULL
+                WHERE id = %s AND status IN {ALERT_DISCARD_REASONS}
+                RETURNING id;
+                """,
+                (alert_id,)
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=409, detail="Solo se puede reabrir una alerta descartada")
+            log_audit(cursor, user["id"], "REOPEN_ALERT", "alerts", alert_id, "Descarte deshecho -> Pendiente")
+            connection.commit()
+        return {"alert_id": alert_id, "status": "NEW", "status_label": ALERT_STATUS_LABELS_ES["NEW"]}
+    finally:
+        connection.close()
+
+
+def incident_take_in_progress(cursor, incident_id, user_id, motivo):
+    """Abierto -> En investigación, automático, la primera vez que un
+    analista actúa sobre el incidente (lo escala, se lo asigna, lo
+    clasifica o pide aislar). Así nadie tiene que cambiarlo a mano."""
+
+    cursor.execute(
+        "UPDATE incidents SET status = 'IN_PROGRESS' WHERE id = %s AND status = 'OPEN' RETURNING id;",
+        (incident_id,)
+    )
+    if cursor.fetchone() is not None:
+        log_audit(cursor, user_id, "UPDATE_INCIDENT_STATUS", "incidents", incident_id,
+                  f"Estado -> IN_PROGRESS (automático: {motivo})")
 
 
 @app.patch("/incidents/{incident_id}/status")
@@ -3550,6 +3683,8 @@ def update_incident_status(
 
     if payload.status not in INCIDENT_STATUS_LABELS_ES:
         raise HTTPException(status_code=422, detail="Estado inválido")
+    if payload.classification is not None and payload.classification not in INCIDENT_CLASSIFICATION_OPTIONS:
+        raise HTTPException(status_code=422, detail="Clasificación inválida")
 
     connection = get_connection()
 
@@ -3557,14 +3692,24 @@ def update_incident_status(
         with connection.cursor() as cursor:
 
             if payload.status == "CLOSED":
+                # Cerrar es la decisión final del analista: exige decir qué
+                # fue (Confirmado, Falso positivo, Actividad legítima o No
+                # determinado), en el mismo paso.
+                cursor.execute("SELECT classification FROM incidents WHERE id = %s;", (incident_id,))
+                current = cursor.fetchone()
+                if current is None:
+                    raise HTTPException(status_code=404, detail="Incidente no encontrado")
+                if not (payload.classification or current[0]):
+                    raise HTTPException(status_code=422, detail="Para cerrar el incidente indica qué fue (clasificación).")
                 cursor.execute(
                     """
                     UPDATE incidents
-                    SET status = %s, closed_at = CURRENT_TIMESTAMP
+                    SET status = %s, closed_at = CURRENT_TIMESTAMP,
+                        classification = COALESCE(%s, classification)
                     WHERE id = %s
                     RETURNING id;
                     """,
-                    (payload.status, incident_id)
+                    (payload.status, payload.classification, incident_id)
                 )
             else:
                 cursor.execute(
@@ -3649,6 +3794,9 @@ def assign_incident(
 
             if updated is None:
                 raise HTTPException(status_code=404, detail="Incidente no encontrado")
+
+            if payload.user_id is not None:
+                incident_take_in_progress(cursor, incident_id, user["id"], "se le asignó un responsable")
 
             log_audit(
                 cursor, user["id"],
@@ -4295,7 +4443,7 @@ def update_incident_classification(
     """Clasificación del resultado -- deliberadamente separada del
     estado (ver comentario de INCIDENT_CLASSIFICATION_LABELS_ES)."""
 
-    if payload.classification not in INCIDENT_CLASSIFICATION_LABELS_ES:
+    if payload.classification not in INCIDENT_CLASSIFICATION_OPTIONS:
         raise HTTPException(status_code=422, detail="Clasificación inválida")
 
     connection = get_connection()
@@ -4317,6 +4465,10 @@ def update_incident_classification(
 
             if updated is None:
                 raise HTTPException(status_code=404, detail="Incidente no encontrado")
+
+            log_audit(cursor, user["id"], "CLASSIFY_INCIDENT", "incidents", incident_id,
+                      f"Clasificación -> {payload.classification}")
+            incident_take_in_progress(cursor, incident_id, user["id"], "lo clasificó un analista")
 
             connection.commit()
 
@@ -4437,9 +4589,10 @@ COMBINED_CTE = f"""
             'alert' AS kind, alerts.id AS id, alerts.created_at AS ts,
             alerts.status AS raw_status,
             CASE alerts.status
-                WHEN 'NEW' THEN 'nuevo' WHEN 'ACKNOWLEDGED' THEN 'investigando'
-                WHEN 'ESCALATED' THEN 'confirmado' WHEN 'CLOSED' THEN 'cerrado'
+                WHEN 'NEW' THEN 'nuevo'
+                WHEN 'ESCALATED' THEN 'confirmado'
                 WHEN 'FALSE_POSITIVE' THEN 'falso_positivo'
+                WHEN 'LEGITIMATE_ACTIVITY' THEN 'falso_positivo'
                 ELSE 'nuevo'
             END AS status_bucket,
             endpoints.hostname, endpoints.ip_address, agents.id AS agent_id,
@@ -4572,7 +4725,7 @@ def api_incidentes(
             )
             critical_incidents = cursor.fetchone()[0]
 
-            cursor.execute("SELECT COUNT(*) FROM alerts WHERE status IN ('NEW', 'ACKNOWLEDGED');")
+            cursor.execute(f"SELECT COUNT(*) FROM alerts WHERE {alert_active_sql()};")
             active_alerts = cursor.fetchone()[0]
 
             # Real desde la corrección definitiva del motor heurístico
@@ -5070,7 +5223,8 @@ def get_incidente_drawer(kind: str, item_id: int, request: Request):
 def api_alerts(
     search: str = "",
     severity: str = Query("", pattern="^(MEDIO|ALTO|CRÍTICO|)$"),
-    status: str = Query("", pattern="^(NEW|ACKNOWLEDGED|ESCALATED|CLOSED|FALSE_POSITIVE|)$"),
+    # DISCARDED = cualquiera de los dos motivos de descarte.
+    status: str = Query("", pattern="^(NEW|ESCALATED|DISCARDED|)$"),
     since: str = Query("", pattern="^(24h|7d|30d|)$"),
     rule: str = "",
     # Vista operativa vs. historial (2026-08-18, ver PENDIENTES.md,
@@ -5106,7 +5260,7 @@ def api_alerts(
             params = {}
 
             if not status and view == "activas":
-                where_clauses.append("alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')")
+                where_clauses.append(alert_active_sql())
 
             if search:
                 # Busca sobre 'alerts.title' -- la columna GUARDADA
@@ -5122,7 +5276,9 @@ def api_alerts(
             if severity:
                 where_clauses.append("severity_levels.name = %(severity)s")
                 params["severity"] = severity
-            if status:
+            if status == "DISCARDED":
+                where_clauses.append("alerts.status IN ('FALSE_POSITIVE', 'LEGITIMATE_ACTIVITY')")
+            elif status:
                 where_clauses.append("alerts.status = %(status)s")
                 params["status"] = status
             if since:
@@ -5169,10 +5325,10 @@ def api_alerts(
                 f"""
                 SELECT
                     COUNT(*) AS total_n,
-                    COUNT(*) FILTER (WHERE alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS active_n,
-                    COUNT(*) FILTER (WHERE severity_levels.name = 'CRÍTICO' AND alerts.status NOT IN ('CLOSED', 'FALSE_POSITIVE')) AS critical_n,
-                    COUNT(*) FILTER (WHERE alerts.status = 'ACKNOWLEDGED') AS investigating_n,
-                    COUNT(*) FILTER (WHERE alerts.status IN ('CLOSED', 'FALSE_POSITIVE')) AS resolved_n
+                    COUNT(*) FILTER (WHERE alerts.status = 'NEW') AS active_n,
+                    COUNT(*) FILTER (WHERE severity_levels.name = 'CRÍTICO' AND {alert_active_sql()}) AS critical_n,
+                    COUNT(*) FILTER (WHERE alerts.status = 'ESCALATED' AND {alert_active_sql()}) AS investigating_n,
+                    COUNT(*) FILTER (WHERE NOT {alert_active_sql()}) AS resolved_n
                 {base_from};
                 """
             )
@@ -5313,6 +5469,7 @@ _STATUS_COLOR_MAP = {
     "CLOSED": ALFA_OK,
     "RESOLVED": ALFA_OK,
     "FALSE_POSITIVE": ALFA_GREY_MED,
+    "LEGITIMATE_ACTIVITY": ALFA_GREY_MED,
     # Aislamiento de host (host_isolations.status)
     "REQUESTED": ALFA_MEDIO,
     "EXECUTED": ALFA_OK,
@@ -7858,13 +8015,16 @@ def report_alert(
             # se considera cerrado cuando pasan 120s sin ninguna
             # evidencia nueva. Con evidencia continua, un episodio puede
             # durar mucho más de 120s en total y seguir siendo UNO solo.
+            # Episodio abierto = alerta todavía activa (pendiente, o escalada
+            # a un incidente sin cerrar): la evidencia nueva se suma a esa
+            # misma alerta aunque el motor ya la haya escalado.
             cursor.execute(
-                """
+                f"""
                 SELECT alerts.id
                 FROM alerts
                 LEFT JOIN alert_rule ON alert_rule.alert_id = alerts.id
                 WHERE alerts.agent_id = %s
-                  AND alerts.status IN ('NEW', 'ACKNOWLEDGED')
+                  AND {alert_active_sql()}
                 GROUP BY alerts.id, alerts.created_at
                 HAVING GREATEST(alerts.created_at, COALESCE(MAX(alert_rule.matched_at), alerts.created_at))
                        >= NOW() - (%s || ' seconds')::INTERVAL
@@ -8046,7 +8206,7 @@ def report_alert(
                 incident_id = cursor.fetchone()[0]
 
                 cursor.execute(
-                    "UPDATE alerts SET incident_id = %s WHERE id = %s;",
+                    "UPDATE alerts SET incident_id = %s, status = 'ESCALATED' WHERE id = %s;",
                     (incident_id, alert_id)
                 )
 

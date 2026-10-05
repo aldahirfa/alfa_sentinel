@@ -5,7 +5,7 @@ import type {
   Severity,
 } from "../types/dashboard";
 import type { EndpointDrawerData, EndpointsQuery, EndpointsResponse } from "../types/endpoints";
-import type { AlertsQuery, AlertsResponse, IncidenteDrawerData } from "../types/alerts";
+import type { AlertDiscardReason, AlertsQuery, AlertsResponse, IncidenteDrawerData } from "../types/alerts";
 import type { IncidentClassification, IncidentesQuery, IncidentesResponse, IncidentStatus, ItemKind } from "../types/incidentes";
 import type {
   DeployHoneyfilePayload,
@@ -195,8 +195,32 @@ async function patchJson(path: string, body: unknown): Promise<void> {
 // PATCH /incidents/{id}/status -- endpoint real ya existente, usado
 // hoy por incidentes.html. Cambia el ciclo de vida del incidente
 // (Abierto -> En investigación -> Contenido -> Cerrado).
-export function updateIncidentStatus(id: number, status: IncidentStatus): Promise<void> {
-  return patchJson(`/incidents/${id}/status`, { status });
+// Al cerrar se manda la clasificación (obligatoria si no estaba clasificado).
+export function updateIncidentStatus(id: number, status: IncidentStatus, classification?: IncidentClassification): Promise<void> {
+  return patchJson(`/incidents/${id}/status`, classification ? { status, classification } : { status });
+}
+
+async function postWithBody(path: string, body?: unknown): Promise<void> {
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.detail || "No se pudo guardar el cambio");
+  }
+}
+
+// POST /api/alerts/{id}/discard -- descarta una alerta sin abrir incidente.
+export function discardAlert(id: number, reason: AlertDiscardReason): Promise<void> {
+  return postWithBody(`/api/alerts/${id}/discard`, { reason });
+}
+
+// POST /api/alerts/{id}/reopen -- deshace un descarte (vuelve a Pendiente).
+export function reopenAlert(id: number): Promise<void> {
+  return postWithBody(`/api/alerts/${id}/reopen`);
 }
 
 // PATCH /incidents/{id}/assign -- user_id null desasigna.

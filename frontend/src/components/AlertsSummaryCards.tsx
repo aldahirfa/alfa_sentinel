@@ -66,7 +66,7 @@ export default function AlertsSummaryCards({ summary }: Props) {
                 {summary.critical > 0
                   ? `${summary.critical} alerta${summary.critical === 1 ? "" : "s"} crítica${summary.critical === 1 ? "" : "s"}`
                   : summary.active > 0
-                    ? `${summary.active} alerta${summary.active === 1 ? "" : "s"} activa${summary.active === 1 ? "" : "s"}`
+                    ? `${summary.active} alerta${summary.active === 1 ? "" : "s"} pendiente${summary.active === 1 ? "" : "s"}`
                     : "Sin alertas pendientes"}
               </div>
             </div>
@@ -76,7 +76,7 @@ export default function AlertsSummaryCards({ summary }: Props) {
             {summary.critical > 0
               ? "Existen detecciones críticas que deben revisarse antes de continuar con el flujo normal de análisis."
               : summary.active > 0
-                ? "La cola operativa contiene detecciones pendientes de revisión, investigación o escalamiento."
+                ? "Hay alertas pendientes: escálalas a incidente o descártalas si son falsos positivos."
                 : "No hay detecciones abiertas que requieran intervención inmediata del personal responsable."}
           </p>
 
@@ -93,10 +93,10 @@ export default function AlertsSummaryCards({ summary }: Props) {
         </div>
 
         <div className="flex-1 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Metric icon="ph ph-pulse" label="Activas" value={summary.active} tone="brand" detail="Pendientes de atención" />
-          <Metric icon="ph-fill ph-warning-octagon" label="Críticas" value={summary.critical} tone="crit" detail="Prioridad inmediata" />
-          <Metric icon="ph ph-magnifying-glass" label="Investigación" value={summary.investigating} tone="warn" detail="Bajo análisis" />
-          <Metric icon="ph-fill ph-check-circle" label="Resueltas" value={summary.resolved} tone="ok" detail="Cerradas correctamente" />
+          <Metric icon="ph ph-pulse" label="Pendientes" value={summary.active} tone="brand" detail="Sin revisar" />
+          <Metric icon="ph-fill ph-warning-octagon" label="Críticas" value={summary.critical} tone="crit" detail="Activas, prioridad inmediata" />
+          <Metric icon="ph ph-siren" label="En incidentes" value={summary.investigating} tone="warn" detail="Escaladas a un incidente abierto" />
+          <Metric icon="ph-fill ph-check-circle" label="Atendidas" value={summary.resolved} tone="ok" detail="Descartadas o con incidente cerrado" />
         </div>
       </div>
 

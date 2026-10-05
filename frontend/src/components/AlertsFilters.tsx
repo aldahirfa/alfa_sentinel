@@ -1,14 +1,14 @@
 import type { Severity } from "../types/dashboard";
-import type { AlertStatus, RuleOption } from "../types/alerts";
-import { STATUS_LABEL } from "../lib/alertStatus";
+import type { AlertStatusFilter, RuleOption } from "../types/alerts";
+import { STATUS_FILTER_LABEL } from "../lib/alertStatus";
 
 interface Props {
   search: string;
   onSearchChange: (v: string) => void;
   severity: Severity | "";
   onSeverityChange: (v: Severity | "") => void;
-  status: AlertStatus | "";
-  onStatusChange: (v: AlertStatus | "") => void;
+  status: AlertStatusFilter | "";
+  onStatusChange: (v: AlertStatusFilter | "") => void;
   since: "24h" | "7d" | "30d" | "";
   onSinceChange: (v: "24h" | "7d" | "30d" | "") => void;
   rule: string;
@@ -30,7 +30,7 @@ const SEVERITY_OPTIONS: { value: Severity | ""; label: string; tone?: string }[]
   { value: "CRÍTICO", label: "Crítico", tone: "var(--crit)" },
 ];
 
-const STATUS_OPTIONS: (AlertStatus | "")[] = ["", "NEW", "ACKNOWLEDGED", "ESCALATED", "CLOSED", "FALSE_POSITIVE"];
+const STATUS_OPTIONS: (AlertStatusFilter | "")[] = ["", "NEW", "ESCALATED", "DISCARDED"];
 const SINCE_OPTIONS: { value: "24h" | "7d" | "30d" | ""; label: string }[] = [
   { value: "", label: "Todo" },
   { value: "24h", label: "24 h" },
@@ -140,13 +140,13 @@ export default function AlertsFilters({
           <span className="text-[9px] font-semibold" style={{ color: "var(--tx-mute)" }}>Estado</span>
           <select
             value={status}
-            onChange={(e) => onStatusChange(e.target.value as AlertStatus | "")}
+            onChange={(e) => onStatusChange(e.target.value as AlertStatusFilter | "")}
             className="bg-transparent border-0 outline-none cursor-pointer text-[10px] font-semibold"
             style={{ color: "var(--tx-dim)" }}
           >
             <option value="">Todos</option>
             {STATUS_OPTIONS.filter((o) => o).map((opt) => (
-              <option key={opt} value={opt}>{STATUS_LABEL[opt as AlertStatus]}</option>
+              <option key={opt} value={opt}>{STATUS_FILTER_LABEL[opt as AlertStatusFilter]}</option>
             ))}
           </select>
         </label>

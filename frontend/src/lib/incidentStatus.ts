@@ -22,6 +22,12 @@ export const INCIDENT_CLASSIFICATION_LABEL: Record<IncidentClassification, strin
   UNDETERMINED: "No determinado",
 };
 
+// Opciones que se ofrecen ("Posible amenaza" ya no: se pisaba con "No
+// determinado"; queda en el diccionario solo para incidentes viejos).
+export const INCIDENT_CLASSIFICATION_OPTIONS: IncidentClassification[] = [
+  "CONFIRMED", "FALSE_POSITIVE", "LEGITIMATE_ACTIVITY", "UNDETERMINED",
+];
+
 // status_bucket unifica incidents.status y alerts.status en un solo
 // eje visual (ver STATUS_BUCKET_LABELS_ES en el servidor) -- es un
 // estado de flujo de trabajo, no de severidad, así que usa la misma

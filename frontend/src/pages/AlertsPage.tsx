@@ -6,7 +6,7 @@ import AlertsTable from "../components/AlertsTable";
 import AlertsPagination from "../components/AlertsPagination";
 import AlertDrawer from "../components/AlertDrawer";
 import { fetchAlerts } from "../api/client";
-import type { AlertStatus, AlertsResponse } from "../types/alerts";
+import type { AlertStatusFilter, AlertsResponse } from "../types/alerts";
 import type { Severity } from "../types/dashboard";
 import { useRowFlash } from "../hooks/useRowFlash";
 import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
@@ -23,7 +23,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
-  const [status, setStatus] = useState<AlertStatus | "">("");
+  const [status, setStatus] = useState<AlertStatusFilter | "">("");
   const [since, setSince] = useState<"24h" | "7d" | "30d" | "">("");
   const [rule, setRule] = useState("");
   const [view, setView] = useState<"activas" | "todos">("activas");
