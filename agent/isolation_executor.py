@@ -94,7 +94,7 @@ def _has_elevated_privileges():
     return False, f"Aislamiento de red no implementado para este SO: {system}"
 
 
-def _run(command):
+def _run(command, timeout=COMMAND_TIMEOUT_SECONDS):
     """Corre un comando real del SO, sin usar shell=True (los
     argumentos van armados a mano, nunca interpolando texto externo).
     Devuelve (ok: bool, detalle: str) -- nunca lanza, para que el
@@ -106,17 +106,33 @@ def _run(command):
             command,
             capture_output=True,
             text=True,
-            timeout=COMMAND_TIMEOUT_SECONDS,
+            timeout=timeout,
             check=True,
         )
         return True, (result.stdout or "").strip()
     except FileNotFoundError:
         return False, f"Comando no disponible en este sistema: {command[0]}"
     except subprocess.TimeoutExpired:
-        return False, f"Comando agotó el tiempo límite ({COMMAND_TIMEOUT_SECONDS}s): {' '.join(command)}"
+        return False, f"Comando agotó el tiempo límite ({timeout}s): {_shorten(' '.join(command))}"
     except subprocess.CalledProcessError as error:
-        detail = (error.stderr or error.stdout or str(error)).strip()
-        return False, f"Comando falló ({' '.join(command)}): {detail}"
+        detail = _first_line(error.stderr or error.stdout or str(error))
+        return False, f"Comando falló ({_shorten(' '.join(command))}): {detail}"
+
+
+def _first_line(text):
+    """Solo la línea que explica el error. netsh, al fallar, imprime además
+    toda su ayuda (más de 2000 caracteres): el reporte al servidor se
+    rechazaba por largo (422), la orden quedaba "en proceso" y el agente la
+    reintentaba cada 15 s sin fin (2026-10-06)."""
+
+    for line in (text or "").splitlines():
+        if line.strip():
+            return _shorten(line.strip())
+    return ""
+
+
+def _shorten(text, limit=300):
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _run_allow_failure(command):
@@ -360,35 +376,69 @@ _WIN_ACTION_VALUES = {"Allow", "Block", "NotConfigured"}
 WIN_DEFAULT_PROFILE = {"Enabled": "True", "In": "Block", "Out": "Allow"}
 
 
-def _powershell(script):
-    return _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
+def _powershell(script, timeout=COMMAND_TIMEOUT_SECONDS):
+    return _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], timeout=timeout)
+
+
+# Último motivo por el que no se pudo leer el firewall (para el mensaje).
+_win_read_error = ""
+
+# El estado de los perfiles se lee del REGISTRO, no con Get-NetFirewallProfile
+# (2026-10-06): en Windows Sandbox esa clase no existe ("Clase no válida") y
+# el aislamiento se reportaba como fallido aunque las reglas se aplicaran.
+# Es el almacén local que escribe netsh; los valores son números, así que no
+# depende del idioma. Valor ausente = "NotConfigured", igual que muestra
+# Get-NetFirewallProfile.
+WIN_POLICY_KEY = r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy"
+WIN_PROFILE_KEYS = {"Domain": "DomainProfile", "Private": "StandardProfile", "Public": "PublicProfile"}
+WIN_READ_ATTEMPTS = 3
 
 
 def _win_read_profiles():
-    """Estado actual de cada perfil del firewall. Se lee con PowerShell
-    (valores en inglés siempre, sin importar el idioma de Windows)."""
+    """Estado actual de cada perfil del firewall:
+    {"Domain": {"Enabled", "In", "Out"}, ...} con los valores de
+    Get-NetFirewallProfile ("True"/"False"/"NotConfigured" y
+    "Block"/"Allow"/"NotConfigured")."""
 
-    ok, output = _powershell(
-        "Get-NetFirewallProfile | ForEach-Object { [pscustomobject]@{ "
-        "Name = \"$($_.Name)\"; Enabled = \"$($_.Enabled)\"; "
-        "In = \"$($_.DefaultInboundAction)\"; Out = \"$($_.DefaultOutboundAction)\" } } "
-        "| ConvertTo-Json -Compress"
-    )
-    if not ok:
-        return None
-    try:
-        data = json.loads(output)
-    except ValueError:
-        return None
-    if isinstance(data, dict):
-        data = [data]
+    global _win_read_error
+    for _ in range(WIN_READ_ATTEMPTS):
+        profiles, _win_read_error = _win_read_profiles_once()
+        if profiles is not None:
+            return profiles
+    return None
+
+
+def _win_registry_values(subkey):
+    """{nombre: valor} de una clave de perfil. Aparte para que las pruebas
+    puedan simular el registro."""
+
+    import winreg
+
+    values = {}
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, WIN_POLICY_KEY + "\\" + subkey) as key:
+        for name in ("EnableFirewall", "DefaultInboundAction", "DefaultOutboundAction"):
+            try:
+                values[name] = winreg.QueryValueEx(key, name)[0]
+            except OSError:
+                pass
+    return values
+
+
+def _win_read_profiles_once():
+    enabled = {1: "True", 0: "False"}
+    action = {1: "Block", 0: "Allow"}
     profiles = {}
-    for item in data:
-        name = item.get("Name")
-        if (name in WIN_PROFILES and item.get("Enabled") in _WIN_ENABLED_VALUES
-                and item.get("In") in _WIN_ACTION_VALUES and item.get("Out") in _WIN_ACTION_VALUES):
-            profiles[name] = {"Enabled": item["Enabled"], "In": item["In"], "Out": item["Out"]}
-    return profiles if len(profiles) == len(WIN_PROFILES) else None
+    try:
+        for name, subkey in WIN_PROFILE_KEYS.items():
+            values = _win_registry_values(subkey)
+            profiles[name] = {
+                "Enabled": enabled.get(values.get("EnableFirewall"), "NotConfigured"),
+                "In": action.get(values.get("DefaultInboundAction"), "NotConfigured"),
+                "Out": action.get(values.get("DefaultOutboundAction"), "NotConfigured"),
+            }
+    except OSError as error:
+        return None, f"no se pudo leer el registro del firewall ({WIN_POLICY_KEY}): {error}"
+    return profiles, ""
 
 
 def _win_save_state():
@@ -400,7 +450,7 @@ def _win_save_state():
         return True, ""
     profiles = _win_read_profiles()
     if profiles is None:
-        return False, "No se pudo leer la configuración actual del firewall (Get-NetFirewallProfile) para poder restaurarla después."
+        return False, f"No se pudo leer la configuración actual del firewall (registro de Windows) para poder restaurarla después: {_win_read_error}"
     with open(ISOLATION_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump({"windows_profiles": profiles}, f)
     return True, ""
@@ -447,6 +497,11 @@ def _win_other_addresses(server_ips):
             parts = [piece for part in parts
                      for piece in (part.address_exclude(server_net) if server_net.subnet_of(part) else [part])]
         networks.extend(parts)
+    # netsh rechaza un prefijo /0 ("::/0": "One or more of the address
+    # prefixes is invalid") y el aislamiento entero fallaba en Windows
+    # (2026-10-06). Se reemplaza por sus dos mitades /1, que cubren lo mismo.
+    networks = [half for net in networks
+                for half in (net.subnets(new_prefix=1) if net.prefixlen == 0 else [net])]
     return ",".join(str(net) for net in networks)
 
 
@@ -501,7 +556,8 @@ def _isolate_windows(server_ips, port):
         return False, f"Los comandos terminaron sin error pero no se pudieron confirmar las reglas: {', '.join(missing)}."
     profiles = _win_read_profiles()
     if profiles is None or any(p["Enabled"] != "True" or p["In"] != "Block" or p["Out"] != "Block" for p in profiles.values()):
-        return False, f"Los comandos terminaron sin error pero el estado de los perfiles no se pudo confirmar: {profiles}"
+        detail = profiles if profiles is not None else _win_read_error
+        return False, f"Los comandos terminaron sin error pero el estado de los perfiles no se pudo confirmar: {detail}"
 
     allowed = ", ".join(f"{ip}:{port}/tcp" for ip in server_ips)
     return True, (
@@ -510,19 +566,28 @@ def _isolate_windows(server_ips, port):
     )
 
 
+# Valores de Get-NetFirewallProfile -> parámetros de netsh, para restaurar.
+WIN_NETSH_STATE = {"True": "on", "False": "off", "NotConfigured": "notconfigured"}
+WIN_NETSH_IN = {"Block": "blockinbound", "Allow": "allowinbound", "NotConfigured": "notconfigured"}
+WIN_NETSH_OUT = {"Block": "blockoutbound", "Allow": "allowoutbound", "NotConfigured": "notconfigured"}
+
+
 def _release_windows():
     _win_delete_rules(WIN_RULES + (WIN_LEGACY_RULE_ALLOW_IN,))
 
     saved = _win_load_state()
     target = saved or {name: dict(WIN_DEFAULT_PROFILE) for name in WIN_PROFILES}
-    script = "; ".join(
-        f"Set-NetFirewallProfile -Name {name} -Enabled {p['Enabled']} "
-        f"-DefaultInboundAction {p['In']} -DefaultOutboundAction {p['Out']}"
-        for name, p in target.items()
-    )
-    ok, detail = _powershell(script)
-    if not ok:
-        return False, detail
+    # Con netsh y no con Set-NetFirewallProfile: en Windows Sandbox esa
+    # clase no existe (ver WIN_POLICY_KEY).
+    for name, p in target.items():
+        perfil = f"{name.lower()}profile"
+        ok, detail = _run(["netsh", "advfirewall", "set", perfil, "state", WIN_NETSH_STATE[p["Enabled"]]])
+        if not ok:
+            return False, detail
+        politica = f"{WIN_NETSH_IN[p['In']]},{WIN_NETSH_OUT[p['Out']]}"
+        ok, detail = _run(["netsh", "advfirewall", "set", perfil, "firewallpolicy", politica])
+        if not ok:
+            return False, detail
 
     leftover = [name for name in WIN_RULES if _win_rule_exists(name)]
     if leftover:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import IncidentesSummaryCards from "../components/IncidentesSummaryCards";
 import IncidentesFilters from "../components/IncidentesFilters";
@@ -9,16 +9,17 @@ import { fetchIncidentes } from "../api/client";
 import type { CombinedItem, IncidentesResponse, ItemKind, StatusBucket } from "../types/incidentes";
 import type { Severity } from "../types/dashboard";
 import { useRowFlash } from "../hooks/useRowFlash";
-import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 const DEBOUNCE_MS = 300;
 
 interface Props {
+  active: boolean;
   initialSelection?: { kind: ItemKind; id: number } | null;
   onViewAlert: (id: number) => void;
 }
 
-export default function IncidentesPage({ initialSelection = null, onViewAlert }: Props) {
+export default function IncidentesPage({ active, initialSelection = null, onViewAlert }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusBucket | "">("");
@@ -33,7 +34,8 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
   const [selected, setSelected] = useState<{ kind: ItemKind; id: number } | null>(null);
   const selectedKey = selected ? `${selected.kind}:${selected.id}` : null;
   const flashKey = useRowFlash(selectedKey);
-  const { refreshToken } = useGlobalAlertsContext();
+  const liveTick = useLiveRefresh(active);
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     if (initialSelection != null) setSelected(initialSelection);
@@ -48,29 +50,36 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
     setPage(1);
   }, [search, status, severity, since, rule, view]);
 
-  function load() {
-    let cancelled = false;
-    setLoading(true);
+  // 'silent': recarga en segundo plano (useLiveRefresh), sin "cargando"
+  // y sin reemplazar la tabla por un error si falla una vez. Solo se
+  // aplica la respuesta del pedido más reciente.
+  function load(silent = false) {
+    const seq = ++requestSeq.current;
+    if (!silent) setLoading(true);
     fetchIncidentes({ search, status, severity, since, rule, view, page })
       .then((res) => {
-        if (!cancelled) {
+        if (seq === requestSeq.current) {
           setData(res);
           setError(null);
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar la lista de incidentes.");
+        if (seq === requestSeq.current && !silent) setError("No se pudo cargar la lista de incidentes.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (seq === requestSeq.current) setLoading(false);
       });
-    return () => { cancelled = true; };
   }
 
   useEffect(() => {
-    return load();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, severity, since, rule, view, page, refreshToken]);
+  }, [search, status, severity, since, rule, view, page]);
+
+  useEffect(() => {
+    if (liveTick) load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
 
   const hasFilters = Boolean(search || status || severity || since || rule);
 
@@ -117,7 +126,7 @@ export default function IncidentesPage({ initialSelection = null, onViewAlert }:
         </>
       )}
 
-      <IncidentDrawer selected={selected} assignableUsers={data?.filters.assignable_users ?? []} onClose={() => setSelected(null)} onChanged={load} onViewAlert={onViewAlert} />
+      <IncidentDrawer selected={selected} refreshKey={liveTick} assignableUsers={data?.filters.assignable_users ?? []} onClose={() => setSelected(null)} onChanged={() => load(true)} onViewAlert={onViewAlert} />
     </main>
   );
 }

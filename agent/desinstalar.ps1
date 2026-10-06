@@ -9,6 +9,15 @@ $TaskName = "ALFA-Sentinel"
 
 if ((Read-Host "¿Desinstalar el agente ALFA-Sentinel de este equipo? [s/N]") -ne "s") { Write-Host "Cancelado."; exit 0 }
 
+# El guardián primero: si no, tomaría la detención del agente como un ataque
+# y aislaría el equipo (ver guardian.ps1).
+$GuardianTaskName = "ALFA-Sentinel-Guardian"
+Stop-ScheduledTask -TaskName $GuardianTaskName -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $GuardianTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*ALFA-Sentinel*guardian.ps1*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 # Por si quedó algún proceso del agente vivo.

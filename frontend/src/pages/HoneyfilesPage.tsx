@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import HoneyfilesSummaryCards from "../components/HoneyfilesSummaryCards";
 import HoneyfilesFilters from "../components/HoneyfilesFilters";
@@ -8,10 +8,11 @@ import DeployHoneyfileWizard from "../components/DeployHoneyfileWizard";
 import { fetchHoneyfiles } from "../api/client";
 import type { HoneyfileStatus, HoneyfilesResponse } from "../types/honeyfiles";
 import { useRowFlash } from "../hooks/useRowFlash";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 const DEBOUNCE_MS = 300;
 
-export default function HoneyfilesPage() {
+export default function HoneyfilesPage({ active }: { active: boolean }) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<HoneyfileStatus | "">("");
@@ -21,6 +22,8 @@ export default function HoneyfilesPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const flashId = useRowFlash(selectedId);
+  const liveTick = useLiveRefresh(active);
+  const requestSeq = useRef(0);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -29,29 +32,36 @@ export default function HoneyfilesPage() {
     return () => clearTimeout(id);
   }, [searchInput]);
 
-  function load() {
-    let cancelled = false;
-    setLoading(true);
+  // 'silent': recarga en segundo plano (useLiveRefresh), sin "cargando"
+  // y sin reemplazar la tabla por un error si falla una vez. Solo se
+  // aplica la respuesta del pedido más reciente.
+  function load(silent = false) {
+    const seq = ++requestSeq.current;
+    if (!silent) setLoading(true);
     fetchHoneyfiles({ search, status, os })
       .then((res) => {
-        if (!cancelled) {
+        if (seq === requestSeq.current) {
           setData(res);
           setError(null);
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar la lista de honeyfiles.");
+        if (seq === requestSeq.current && !silent) setError("No se pudo cargar la lista de honeyfiles.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (seq === requestSeq.current) setLoading(false);
       });
-    return () => { cancelled = true; };
   }
 
   useEffect(() => {
-    return load();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, status, os]);
+
+  useEffect(() => {
+    if (liveTick) load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
 
   useEffect(() => {
     if (!toast) return;
@@ -111,7 +121,7 @@ export default function HoneyfilesPage() {
           loading={loading} hasFilters={hasFilters} onSelect={setSelectedId} selectedId={selectedId} flashId={flashId} />
       )}
 
-      <HoneyfileDrawer honeyfileId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} />
+      <HoneyfileDrawer honeyfileId={selectedId} refreshKey={liveTick} onClose={() => setSelectedId(null)} onChanged={() => load(true)} />
       <DeployHoneyfileWizard
         open={wizardOpen}
         availableAgents={data?.available_agents ?? []}

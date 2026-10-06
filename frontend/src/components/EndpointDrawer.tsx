@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchEndpointDrawer } from "../api/client";
 import type { EndpointDrawerData } from "../types/endpoints";
 import { severityPillStyle } from "../lib/severity";
@@ -10,6 +10,9 @@ import AgentRulesModal from "./AgentRulesModal";
 
 interface Props {
   endpointId: number | null;
+  // Cambia cuando la página se recarga en vivo (useLiveRefresh): el panel
+  // abierto vuelve a pedir sus datos sin vaciarse.
+  refreshKey?: number;
   onClose: () => void;
 }
 
@@ -33,7 +36,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default function EndpointDrawer({ endpointId, onClose }: Props) {
+export default function EndpointDrawer({ endpointId, refreshKey = 0, onClose }: Props) {
   const [render, setRender] = useState(false);
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<EndpointDrawerData | null>(null);
@@ -56,6 +59,20 @@ export default function EndpointDrawer({ endpointId, onClose }: Props) {
       return () => clearTimeout(t);
     }
   }, [endpointId]);
+
+  const endpointIdRef = useRef(endpointId);
+  endpointIdRef.current = endpointId;
+
+  useEffect(() => {
+    if (!refreshKey || endpointId === null) return;
+    const requested = endpointId;
+    let cancelled = false;
+    fetchEndpointDrawer(requested)
+      .then((res) => { if (!cancelled && endpointIdRef.current === requested) setData(res); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!render) return;

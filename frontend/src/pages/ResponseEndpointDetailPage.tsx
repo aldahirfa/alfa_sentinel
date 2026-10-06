@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import { fetchResponseEndpointDetail } from "../api/responseClient";
 import type { ResponseEndpointDetail } from "../types/respuesta";
@@ -10,6 +10,8 @@ import RiskMeter from "../components/RiskMeter";
 
 interface Props {
   agentId: number;
+  // Cambia cuando la página se recarga en vivo (useLiveRefresh).
+  refreshKey?: number;
   onBack: () => void;
   onViewIncident: (id: number) => void;
 }
@@ -36,7 +38,7 @@ function osIcon(os: string): string {
   return "ph-fill ph-desktop";
 }
 
-export default function ResponseEndpointDetailPage({ agentId, onBack, onViewIncident }: Props) {
+export default function ResponseEndpointDetailPage({ agentId, refreshKey = 0, onBack, onViewIncident }: Props) {
   const [data, setData] = useState<ResponseEndpointDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +51,20 @@ export default function ResponseEndpointDetailPage({ agentId, onBack, onViewInci
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar el detalle del endpoint."))
       .finally(() => setLoading(false));
   }, [agentId]);
+
+  const agentIdRef = useRef(agentId);
+  agentIdRef.current = agentId;
+
+  useEffect(() => {
+    if (!refreshKey) return;
+    const requested = agentId;
+    let cancelled = false;
+    fetchResponseEndpointDetail(requested)
+      .then((res) => { if (!cancelled && agentIdRef.current === requested) setData(res); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const containment = containmentStyle(data?.endpoint.isolation_status ?? null);
 

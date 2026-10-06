@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import EndpointsSummaryCards from "../components/EndpointsSummaryCards";
 import EndpointsFilters from "../components/EndpointsFilters";
@@ -9,11 +9,12 @@ import { fetchEndpoints } from "../api/client";
 import type { ConnStatus, EndpointsResponse } from "../types/endpoints";
 import type { Severity } from "../types/dashboard";
 import { useRowFlash } from "../hooks/useRowFlash";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 const PAGE_SIZE = 10;
 const DEBOUNCE_MS = 300;
 
-export default function EndpointsPage() {
+export default function EndpointsPage({ active }: { active: boolean }) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ConnStatus | "">("");
@@ -25,6 +26,8 @@ export default function EndpointsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const flashId = useRowFlash(selectedId);
+  const liveTick = useLiveRefresh(active);
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput), DEBOUNCE_MS);
@@ -35,24 +38,36 @@ export default function EndpointsPage() {
     setPage(1);
   }, [search, status, risk, osFamily]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  // 'silent': recarga en segundo plano (useLiveRefresh), sin "cargando"
+  // y sin reemplazar la tabla por un error si falla una vez. Solo se
+  // aplica la respuesta del pedido más reciente.
+  function load(silent = false) {
+    const seq = ++requestSeq.current;
+    if (!silent) setLoading(true);
     fetchEndpoints({ search, status, risk, os_family: osFamily, page, page_size: PAGE_SIZE })
       .then((res) => {
-        if (!cancelled) {
+        if (seq === requestSeq.current) {
           setData(res);
           setError(null);
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar la lista de endpoints.");
+        if (seq === requestSeq.current && !silent) setError("No se pudo cargar la lista de endpoints.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (seq === requestSeq.current) setLoading(false);
       });
-    return () => { cancelled = true; };
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, status, risk, osFamily, page]);
+
+  useEffect(() => {
+    if (liveTick) load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
 
   const hasFilters = Boolean(search || status || risk || osFamily);
 
@@ -94,7 +109,7 @@ export default function EndpointsPage() {
         </>
       )}
 
-      <EndpointDrawer endpointId={selectedId} onClose={() => setSelectedId(null)} />
+      <EndpointDrawer endpointId={selectedId} refreshKey={liveTick} onClose={() => setSelectedId(null)} />
     </main>
   );
 }

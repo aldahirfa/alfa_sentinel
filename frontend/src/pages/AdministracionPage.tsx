@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import AdminTabs from "../components/AdminTabs";
 import type { AdminTab } from "../components/AdminTabs";
@@ -8,8 +8,10 @@ import ConfigPanel from "../components/ConfigPanel";
 import AuditLogPanel from "../components/AuditLogPanel";
 import { fetchAgentSettings, fetchAuditLogs, fetchUsers } from "../api/client";
 import type { AuditLogsResponse, UsersResponse } from "../types/admin";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 interface Props {
+  active: boolean;
   isAdmin: boolean;
 }
 
@@ -20,7 +22,7 @@ const TAB_META: Record<AdminTab, { eyebrow: string; title: string; description: 
   auditoria: { eyebrow: "Trazabilidad", title: "Registro de actividad", description: "Consulta acciones administrativas y eventos relevantes realizados dentro del sistema." },
 };
 
-export default function AdministracionPage({ isAdmin }: Props) {
+export default function AdministracionPage({ active, isAdmin }: Props) {
   const [tab, setTab] = useState<AdminTab>("usuarios");
   const [usersData, setUsersData] = useState<UsersResponse | null>(null);
   const [usersLoading, setUsersLoading] = useState(true);
@@ -43,6 +45,25 @@ export default function AdministracionPage({ isAdmin }: Props) {
     setAuditLoading(true);
     fetchAuditLogs(auditPage).then(setAuditData).finally(() => setAuditLoading(false));
   }, [auditPage]);
+
+  // Recarga en vivo de la pestaña visible. Configuración no se recarga: no
+  // debe pisar un valor que el usuario está escribiendo.
+  const liveTick = useLiveRefresh(active);
+  const auditPageRef = useRef(auditPage);
+  auditPageRef.current = auditPage;
+
+  useEffect(() => {
+    if (!liveTick) return;
+    if (tab === "usuarios") {
+      fetchUsers().then(setUsersData).catch(() => {});
+    } else if (tab === "auditoria") {
+      const requested = auditPage;
+      fetchAuditLogs(requested)
+        .then((res) => { if (auditPageRef.current === requested) setAuditData(res); })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
 
   const meta = TAB_META[tab];
 

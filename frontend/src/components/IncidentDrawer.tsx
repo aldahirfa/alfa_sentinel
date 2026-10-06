@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   assignIncident,
   classifyIncident,
@@ -22,6 +22,9 @@ import {
 
 interface Props {
   selected: { kind: ItemKind; id: number } | null;
+  // Cambia cuando la página se recarga en vivo (useLiveRefresh): el panel
+  // abierto vuelve a pedir sus datos sin vaciarse.
+  refreshKey?: number;
   assignableUsers: AssignableUser[];
   onClose: () => void;
   onChanged: () => void;
@@ -54,7 +57,7 @@ const selectStyle: React.CSSProperties = {
   color: "var(--tx)",
 };
 
-export default function IncidentDrawer({ selected, assignableUsers, onClose, onChanged, onViewAlert }: Props) {
+export default function IncidentDrawer({ selected, refreshKey = 0, assignableUsers, onClose, onChanged, onViewAlert }: Props) {
   const [render, setRender] = useState(false);
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<IncidenteDrawerData | null>(null);
@@ -88,6 +91,23 @@ export default function IncidentDrawer({ selected, assignableUsers, onClose, onC
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
+
+  const selectedKey = selected ? `${selected.kind}:${selected.id}` : null;
+  const selectedKeyRef = useRef(selectedKey);
+  selectedKeyRef.current = selectedKey;
+
+  // Recarga en vivo: no toca la clasificación elegida para cerrar ni los
+  // errores de acción, solo los datos mostrados.
+  useEffect(() => {
+    if (!refreshKey || !selected || saving) return;
+    const requested = selectedKey;
+    let cancelled = false;
+    fetchIncidenteDrawer(selected.kind, selected.id)
+      .then((res) => { if (!cancelled && selectedKeyRef.current === requested) setData(res); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!render) return;

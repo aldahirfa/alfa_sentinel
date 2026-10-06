@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import ReportsSummaryCards from "../components/ReportsSummaryCards";
 import GenerateReportForm from "../components/GenerateReportForm";
@@ -6,37 +6,47 @@ import ReportsHistoryTable from "../components/ReportsHistoryTable";
 import ReportsPagination from "../components/ReportsPagination";
 import { fetchReportes } from "../api/client";
 import type { ReportsResponse } from "../types/reports";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
-export default function ReportsPage() {
+export default function ReportsPage({ active }: { active: boolean }) {
   const [page, setPage] = useState(1);
+  const liveTick = useLiveRefresh(active);
+  const requestSeq = useRef(0);
   const [data, setData] = useState<ReportsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  function load() {
-    let cancelled = false;
-    setLoading(true);
+  // 'silent': recarga en segundo plano (useLiveRefresh), sin "cargando"
+  // y sin reemplazar la tabla por un error si falla una vez. Solo se
+  // aplica la respuesta del pedido más reciente.
+  function load(silent = false) {
+    const seq = ++requestSeq.current;
+    if (!silent) setLoading(true);
     fetchReportes(page)
       .then((res) => {
-        if (!cancelled) {
+        if (seq === requestSeq.current) {
           setData(res);
           setError(null);
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar el historial de informes.");
+        if (seq === requestSeq.current && !silent) setError("No se pudo cargar el historial de informes.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (seq === requestSeq.current) setLoading(false);
       });
-    return () => { cancelled = true; };
   }
 
   useEffect(() => {
-    return load();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  useEffect(() => {
+    if (liveTick) load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
 
   useEffect(() => {
     if (!toast) return;

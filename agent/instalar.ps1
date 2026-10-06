@@ -16,6 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Dest = Join-Path $env:ProgramFiles "ALFA-Sentinel"
 $TaskName = "ALFA-Sentinel"
+$GuardianTaskName = "ALFA-Sentinel-Guardian"
 $Src = $PSScriptRoot
 
 function Paso($n, $texto) { Write-Host "`n[$n] $texto" -ForegroundColor White }
@@ -109,10 +110,16 @@ do {
 
 # --- 3. Copia ------------------------------------------------------------
 Paso "3/6" "Copiando el agente a $Dest"
+# El guardián se detiene ANTES que el agente: si no, tomaría la detención
+# del agente por la actualización como un ataque y aislaría el equipo.
+try { Stop-ScheduledTask -TaskName $GuardianTaskName -ErrorAction Stop } catch { }
+Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*ALFA-Sentinel*guardian.ps1*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 robocopy $Src $Dest /E /NFL /NDL /NJH /NJS /NP `
-    /XD .venv __pycache__ logs honeyfiles test_endpoint test_files `
+    /XD .venv __pycache__ logs honeyfiles test_endpoint test_files estado `
     /XF agent_credential.json agent_config.json isolation_state.json *.pyc | Out-Null
 if ($LASTEXITCODE -ge 8) { Falla "No se pudieron copiar los archivos del agente." }
 $config = [ordered]@{ server_url = $Servidor; env_mode = "production"; protected_user = $Usuario; extra_monitored_paths = $Extras } | ConvertTo-Json -Compress
@@ -176,9 +183,31 @@ if ((Get-ScheduledTask -TaskName $TaskName).State -eq "Running") {
     Falla "El agente no arrancó. Revisa $Dest\logs\agente.log"
 }
 
+# Guardián (guardian.ps1): si el agente es terminado sin un cierre normal
+# (lo que hizo LockBit en las pruebas), aísla el equipo y avisa al servidor.
+# Al iniciar el equipo y, si no está corriendo, cada minuto.
+$guardianAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Dest\guardian.ps1`"" `
+    -WorkingDirectory $Dest
+$guardianTriggers = @(
+    (New-ScheduledTaskTrigger -AtStartup),
+    (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1))
+)
+Register-ScheduledTask -TaskName $GuardianTaskName -Action $guardianAction -Trigger $guardianTriggers `
+    -Principal $taskPrincipal -Settings $settings `
+    -Description "Guardián de ALFA-Sentinel: aísla el equipo si el agente es terminado de forma inesperada" -Force | Out-Null
+Start-ScheduledTask -TaskName $GuardianTaskName
+Start-Sleep -Seconds 3
+if ((Get-ScheduledTask -TaskName $GuardianTaskName).State -eq "Running") {
+    Ok "Guardián en ejecución"
+} else {
+    Falla "El guardián no arrancó. Revisa $Dest\logs\guardian.log"
+}
+
 Write-Host "`n==============================================" -ForegroundColor Green
 Write-Host "   Instalación completa" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "El equipo aparecerá 'En línea' en la consola en unos segundos."
 Write-Host "  Registro:    $Dest\logs\agente.log"
+Write-Host "  Guardián:    $Dest\logs\guardian.log"
 Write-Host "  Desinstalar: $Dest\desinstalar.bat"

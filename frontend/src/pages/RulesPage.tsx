@@ -4,12 +4,16 @@ import RulesSummaryCards from "../components/RulesSummaryCards";
 import RuleCard from "../components/RuleCard";
 import { fetchRules } from "../api/client";
 import type { HeuristicRule, RulesResponse } from "../types/rules";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
-export default function RulesPage() {
+export default function RulesPage({ active }: { active: boolean }) {
   const [data, setData] = useState<RulesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const liveTick = useLiveRefresh(active);
 
+  // La primera carga muestra error si falla; las recargas en vivo
+  // (liveTick > 0) conservan lo que ya se ve.
   useEffect(() => {
     let cancelled = false;
     fetchRules()
@@ -20,13 +24,13 @@ export default function RulesPage() {
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar la lista de reglas heurísticas.");
+        if (!cancelled && !liveTick) setError("No se pudo cargar la lista de reglas heurísticas.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [liveTick]);
 
   function handleRuleChanged(updated: HeuristicRule) {
     setData((prev) => {

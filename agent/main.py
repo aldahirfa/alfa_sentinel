@@ -1,4 +1,5 @@
 import argparse
+import atexit
 import os
 import signal
 import sys
@@ -11,7 +12,8 @@ import transport
 
 from process_monitor import get_running_processes
 from file_monitor import start_file_monitor
-from client import enroll_agent, authenticate_agent, get_rule_policy
+import guard_state
+from client import enroll_agent, authenticate_agent, get_rule_policy, send_alert
 from honeyfile_deployer import apply_honeyfile_policy
 from honeyfile_sync import HoneyfileSyncThread, SYNC_INTERVAL_SECONDS
 from isolation_sync import IsolationSyncThread, SYNC_INTERVAL_SECONDS as ISOLATION_SYNC_INTERVAL_SECONDS
@@ -87,6 +89,11 @@ if __name__ == "__main__":
     cli_args = parse_args()
     if cli_args.service:
         redirect_output_to_log()
+    # Cierre normal vs. terminación forzada: ver guard_state.py.
+    guard_state.clear_clean_stop()
+    atexit.register(guard_state.mark_clean_stop)
+    if cli_args.service:
+        guard_state.start_pulse()
     print("Agente iniciado")
     apply_cli_overrides(cli_args)
 
@@ -133,6 +140,27 @@ if __name__ == "__main__":
         print()
         print(f"Iniciando heartbeat periódico (cada {HEARTBEAT_INTERVAL_SECONDS}s)...")
         heartbeat_sync = HeartbeatThread(existing_credential).start()
+
+        # La sincronización de aislamiento arranca acá, ANTES que el resto
+        # (2026-10-06): la contención no puede depender de que terminen de
+        # iniciarse los honeyfiles, las reglas o el monitor de archivos. En
+        # una prueba, el agente volvió tras ser terminado, quedó trabado en
+        # ese arranque y la orden de aislamiento siguió "en proceso".
+        print(f"Iniciando sincronización de aislamiento (cada {int(ISOLATION_SYNC_INTERVAL_SECONDS)}s)...")
+        isolation_sync = IsolationSyncThread(existing_credential).start()
+
+        # El guardián detectó que mataron al agente y no pudo avisar en ese
+        # momento: se avisa ahora (alerta CRÍTICA, incidente y aislamiento).
+        killed = guard_state.pending_killed_report()
+        if killed is not None:
+            print()
+            print("⚠ El guardián registró que este agente fue terminado de forma inesperada. Avisando al servidor...")
+            response = send_alert(existing_credential, guard_state.killed_alert_payload(killed))
+            if response is not None and response.status_code < 400:
+                guard_state.forget_killed_report()
+                print("  Aviso enviado.")
+        else:
+            guard_state.forget_killed_report()
 
         print()
         print("Procesos en ejecución:")
@@ -227,10 +255,6 @@ if __name__ == "__main__":
             watched_roots,
             watched_extra_dirs
         ).start()
-
-        print()
-        print(f"Iniciando sincronización de aislamiento (cada {int(ISOLATION_SYNC_INTERVAL_SECONDS)}s)...")
-        isolation_sync = IsolationSyncThread(existing_credential).start()
 
         try:
             if cli_args.service:

@@ -121,7 +121,8 @@ class FakeIptables:
 
 
 class FakeWindowsFirewall:
-    """Simula netsh advfirewall y Get/Set-NetFirewallProfile."""
+    """Simula netsh advfirewall y el registro de perfiles del firewall
+    (el agente lee los perfiles del registro y los restaura con netsh)."""
 
     def __init__(self, profiles=None):
         self.rules = {}
@@ -149,6 +150,15 @@ class FakeWindowsFirewall:
             return _FakeResult(0)
 
         assert command[:2] == ["netsh", "advfirewall"], command
+        if command[2] == "set" and command[3].endswith("profile") and command[3] != "allprofiles":
+            name = {"domainprofile": "Domain", "privateprofile": "Private", "publicprofile": "Public"}[command[3]]
+            if command[4] == "state":
+                self.profiles[name]["Enabled"] = {"on": "True", "off": "False", "notconfigured": "NotConfigured"}[command[5]]
+            else:
+                inbound, outbound = command[5].split(",")
+                self.profiles[name]["In"] = {"blockinbound": "Block", "allowinbound": "Allow", "notconfigured": "NotConfigured"}[inbound]
+                self.profiles[name]["Out"] = {"blockoutbound": "Block", "allowoutbound": "Allow", "notconfigured": "NotConfigured"}[outbound]
+            return _FakeResult(0)
         if command[2:4] == ["set", "allprofiles"]:
             if command[4] == "state":
                 for p in self.profiles.values():
@@ -171,6 +181,17 @@ class FakeWindowsFirewall:
             return _FakeResult(0, f"Nombre de regla: {name}") if name in self.rules else _FakeResult(1, "", "No hay reglas que coincidan.")
         raise AssertionError(f"Comando no simulado: {command}")
 
+    def registry_values(self, subkey):
+        name = {"DomainProfile": "Domain", "StandardProfile": "Private", "PublicProfile": "Public"}[subkey]
+        p = self.profiles[name]
+        values = {}
+        if p["Enabled"] != "NotConfigured":
+            values["EnableFirewall"] = 1 if p["Enabled"] == "True" else 0
+        for key, field in (("DefaultInboundAction", "In"), ("DefaultOutboundAction", "Out")):
+            if p[field] != "NotConfigured":
+                values[key] = 1 if p[field] == "Block" else 0
+        return values
+
 
 class _Simulated:
     """Instala un firewall simulado, fija el SO y privilegios, y
@@ -180,7 +201,8 @@ class _Simulated:
         self.fake, self.system = fake, system
 
     def __enter__(self):
-        self.saved = (ie.subprocess.run, ie.platform.system, ie._has_elevated_privileges, ie.ISOLATION_STATE_FILE)
+        self.saved = (ie.subprocess.run, ie.platform.system, ie._has_elevated_privileges, ie.ISOLATION_STATE_FILE,
+                      ie._win_registry_values)
         fake = self.fake
 
         def fake_run(command, capture_output=True, text=True, timeout=None, check=False):
@@ -193,10 +215,12 @@ class _Simulated:
         ie.platform.system = lambda: self.system
         ie._has_elevated_privileges = lambda: (True, "privilegios fabricados para la prueba")
         ie.ISOLATION_STATE_FILE = os.path.join(tempfile.mkdtemp(), "isolation_state.json")
+        ie._win_registry_values = getattr(fake, "registry_values", ie._win_registry_values)
         return fake
 
     def __exit__(self, *a):
-        ie.subprocess.run, ie.platform.system, ie._has_elevated_privileges, ie.ISOLATION_STATE_FILE = self.saved
+        (ie.subprocess.run, ie.platform.system, ie._has_elevated_privileges, ie.ISOLATION_STATE_FILE,
+         ie._win_registry_values) = self.saved
 
 
 class _RealRun:
@@ -325,8 +349,14 @@ with _Simulated(FakeWindowsFirewall({k: dict(v) for k, v in original_profiles.it
     check("MH-09: Windows bloquea toda conexión entrante (regla de bloqueo, pisa reglas 'permitir' previas)",
           fw.rules.get("ALFA_SENTINEL_BLOCK_IN", {}).get("action") == "block" and fw.rules["ALFA_SENTINEL_BLOCK_IN"].get("remoteip") == "any")
     others = fw.rules.get("ALFA_SENTINEL_BLOCK_OUT_OTROS", {}).get("remoteip", "")
+    # Todo IPv6 como "::/1,8000::/1": netsh rechaza los prefijos /0 ("::/0"
+    # hacía fallar el aislamiento real en Windows; el firewall simulado de
+    # esta prueba lo aceptaba, por eso antes se exigía justamente "::/0").
     check("MH-09: Windows bloquea salida a toda IP que no sea el servidor (incluido IPv6)",
-          "::/0" in others and not any(ipaddress.ip_address(SERVER) in ipaddress.ip_network(n) for n in others.split(",") if ":" not in n), others[:80])
+          "::/1" in others.split(",") and "8000::/1" in others.split(",")
+          and not any(ipaddress.ip_address(SERVER) in ipaddress.ip_network(n) for n in others.split(",") if ":" not in n), others[:80])
+    check("MH-09: Windows no usa prefijos /0 (netsh los rechaza)",
+          not any(n.endswith("/0") for n in others.split(",")), others[-60:])
     check("MH-09: Windows bloquea el servidor en los demás puertos TCP y en UDP",
           fw.rules.get("ALFA_SENTINEL_BLOCK_OUT_SERVIDOR_TCP", {}).get("remoteport") == "1-7999,8001-65535"
           and fw.rules.get("ALFA_SENTINEL_BLOCK_OUT_SERVIDOR_UDP", {}).get("protocol") == "UDP")

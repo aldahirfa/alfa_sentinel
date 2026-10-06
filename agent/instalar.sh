@@ -93,7 +93,7 @@ mkdir -p "$DEST"
 tar -C "$SRC" \
     --exclude=.venv --exclude=__pycache__ --exclude=agent_credential.json --exclude=agent_config.json \
     --exclude=isolation_state.json --exclude=logs --exclude=honeyfiles --exclude=test_endpoint \
-    --exclude=test_files --exclude='*.pyc' -cf - . | tar -C "$DEST" -xf -
+    --exclude=test_files --exclude=estado --exclude='*.pyc' -cf - . | tar -C "$DEST" -xf -
 # JSON armado con Python: las rutas pueden traer espacios o comillas.
 SERVIDOR="$SERVIDOR" USUARIO="$USUARIO" EXTRAS="$EXTRAS" python3 - "$DEST/agent_config.json" <<'PYEOF'
 import json, os, sys
@@ -104,7 +104,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as f:
     json.dump(config, f, ensure_ascii=False)
 PYEOF
 chown -R root:root "$DEST"
-chmod 755 "$DEST"
+chmod 755 "$DEST" "$DEST/guardian.sh"
 chmod 600 "$DEST/agent_config.json"
 verde "✓ Agente copiado"
 
@@ -146,6 +146,13 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$DEST
 ExecStart=$DEST/.venv/bin/python $DEST/main.py --service
+# Guardián: si el agente muere sin un cierre normal (lo que hizo LockBit en
+# las pruebas), aísla el equipo y avisa al servidor. Ver guardian.sh.
+ExecStopPost=/bin/bash $DEST/guardian.sh
+# Agente congelado (vivo pero sin responder): el agente avisa a systemd cada
+# 10 s (guard_state.py); si deja de hacerlo, systemd lo reinicia.
+WatchdogSec=90
+NotifyAccess=main
 Restart=always
 RestartSec=10
 User=root

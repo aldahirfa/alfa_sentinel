@@ -168,7 +168,15 @@ def get_isolation_status(credential):
         return None
 
 
+# Máximo que acepta el servidor para 'result' (IsolationStatusReport en
+# server/main.py). Un reporte más largo se rechazaba (422) y la orden quedaba
+# "en proceso" para siempre.
+ISOLATION_RESULT_MAX_CHARS = 2000
+
+
 def report_isolation_status(credential, isolation_id, status, result):
+    if result and len(result) > ISOLATION_RESULT_MAX_CHARS:
+        result = result[:ISOLATION_RESULT_MAX_CHARS - 1] + "…"
     try:
         response = transport.post(
             config.ISOLATION_STATUS_REPORT_URL,

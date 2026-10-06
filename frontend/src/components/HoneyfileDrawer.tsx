@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchHoneyfileDetail, toggleHoneyfileStatus } from "../api/client";
 import { CONN_STATUS_LABEL } from "../lib/endpointStatus";
 import type { HoneyfileDetail } from "../types/honeyfiles";
@@ -6,6 +6,9 @@ import { fileTypeIcon, honeyfileStatusPillStyle, HONEYFILE_STATUS_LABEL } from "
 
 interface Props {
   honeyfileId: number | null;
+  // Cambia cuando la página se recarga en vivo (useLiveRefresh): el panel
+  // abierto vuelve a pedir sus datos sin vaciarse.
+  refreshKey?: number;
   onClose: () => void;
   onChanged: () => void;
 }
@@ -35,7 +38,7 @@ function Field({ label, value, mono }: { label: string; value: React.ReactNode; 
   );
 }
 
-export default function HoneyfileDrawer({ honeyfileId, onClose, onChanged }: Props) {
+export default function HoneyfileDrawer({ honeyfileId, refreshKey = 0, onClose, onChanged }: Props) {
   const [render, setRender] = useState(false);
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<HoneyfileDetail | null>(null);
@@ -64,6 +67,20 @@ export default function HoneyfileDrawer({ honeyfileId, onClose, onChanged }: Pro
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [honeyfileId]);
+
+  const honeyfileIdRef = useRef(honeyfileId);
+  honeyfileIdRef.current = honeyfileId;
+
+  useEffect(() => {
+    if (!refreshKey || honeyfileId === null || saving) return;
+    const requested = honeyfileId;
+    let cancelled = false;
+    fetchHoneyfileDetail(requested)
+      .then((res) => { if (!cancelled && honeyfileIdRef.current === requested) setData(res); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!render) return;

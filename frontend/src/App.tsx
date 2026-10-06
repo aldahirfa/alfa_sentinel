@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import type { Page } from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -19,7 +19,9 @@ import { ApiError, fetchDashboardOverview, fetchMe } from "./api/client";
 import type { DashboardOverview } from "./types/dashboard";
 import type { ItemKind } from "./types/incidentes";
 
-const POLL_INTERVAL_MS = 20_000;
+// Panel de control y contadores del menú lateral. Antes cada 20 s; ahora
+// 5 s, igual que el resto de las pantallas (ver hooks/useLiveRefresh.ts).
+const POLL_INTERVAL_MS = 5_000;
 const THEME_KEY = "alfa_sentinel_theme";
 
 type Theme = "dark" | "light";
@@ -103,20 +105,27 @@ export default function App() {
     });
   }, []);
 
+  const hasDataRef = useRef(false);
+
   const load = useCallback(() => {
     fetchDashboardOverview()
       .then((res) => {
+        hasDataRef.current = true;
         setData(res);
         setLoadError(null);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
           setNeedsLogin(true);
-        } else {
+        } else if (!hasDataRef.current) {
+          // Solo en la carga inicial: un fallo momentáneo durante la
+          // actualización en vivo no debe tapar toda la consola.
           setLoadError("No se pudo cargar el panel de control.");
         }
       });
+  }, []);
 
+  const loadMe = useCallback(() => {
     fetchMe()
       .then((me) => {
         setUserName(me.full_name || me.username);
@@ -128,9 +137,17 @@ export default function App() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [load]);
+    loadMe();
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const id = setInterval(refreshIfVisible, POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [load, loadMe]);
 
   useEffect(() => {
     let newUrl = "/";
@@ -207,6 +224,7 @@ export default function App() {
         onSuccess={() => {
           setNeedsLogin(false);
           load();
+          loadMe();
         }}
       />
     );
@@ -274,32 +292,33 @@ export default function App() {
           )}
           {mountedPages.has("endpoints") && (
             <div className={pageVisibility("endpoints")} aria-hidden={page !== "endpoints"}>
-              <EndpointsPage />
+              <EndpointsPage active={page === "endpoints"} />
             </div>
           )}
           {mountedPages.has("alerts") && (
             <div className={pageVisibility("alerts")} aria-hidden={page !== "alerts"}>
-              <AlertsPage initialAlertSelection={alertsInitialSelection} onViewIncident={openIncident} />
+              <AlertsPage active={page === "alerts"} initialAlertSelection={alertsInitialSelection} onViewIncident={openIncident} />
             </div>
           )}
           {mountedPages.has("incidentes") && (
             <div className={pageVisibility("incidentes")} aria-hidden={page !== "incidentes"}>
-              <IncidentesPage initialSelection={incidentesInitialSelection} onViewAlert={openAlert} />
+              <IncidentesPage active={page === "incidentes"} initialSelection={incidentesInitialSelection} onViewAlert={openAlert} />
             </div>
           )}
           {mountedPages.has("honeyfiles") && (
             <div className={pageVisibility("honeyfiles")} aria-hidden={page !== "honeyfiles"}>
-              <HoneyfilesPage />
+              <HoneyfilesPage active={page === "honeyfiles"} />
             </div>
           )}
           {mountedPages.has("reglas") && (
             <div className={pageVisibility("reglas")} aria-hidden={page !== "reglas"}>
-              <RulesPage />
+              <RulesPage active={page === "reglas"} />
             </div>
           )}
           {mountedPages.has("respuesta") && (
             <div className={pageVisibility("respuesta")} aria-hidden={page !== "respuesta"}>
               <RespuestaPage
+                active={page === "respuesta"}
                 endpointId={respuestaEndpointId}
                 onOpenEndpoint={openResponseEndpoint}
                 onBack={closeResponseEndpoint}
@@ -309,12 +328,12 @@ export default function App() {
           )}
           {mountedPages.has("reportes") && (
             <div className={pageVisibility("reportes")} aria-hidden={page !== "reportes"}>
-              <ReportsPage />
+              <ReportsPage active={page === "reportes"} />
             </div>
           )}
           {mountedPages.has("administracion") && (
             <div className={pageVisibility("administracion")} aria-hidden={page !== "administracion"}>
-              <AdministracionPage isAdmin={isAdmin} />
+              <AdministracionPage active={page === "administracion"} isAdmin={isAdmin} />
             </div>
           )}
           {mountedPages.has("perfil") && (

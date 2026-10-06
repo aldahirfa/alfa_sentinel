@@ -730,7 +730,9 @@ INSERT INTO event_types (name, description, category) VALUES
     ('file_created',  'Archivo creado',              'file'),
     ('file_modified', 'Archivo modificado',          'file'),
     ('file_deleted',  'Archivo eliminado',           'file'),
-    ('file_renamed',  'Archivo renombrado o movido', 'file');
+    ('file_renamed',  'Archivo renombrado o movido', 'file'),
+    -- Señal de contexto de HR-06 (server/main.py, CONTEXT_ONLY_RULE_NAMES).
+    ('cpu_high',      'Consumo de CPU elevado sostenido (señal de contexto, HR-06)', 'process');
 
 -- Bandas de severidad -- rangos 0-24.99 / 25-49.99 / 50-74.99 / 75-100.
 -- 'name' es BAJO/MEDIO/ALTO/CRÍTICO (renombrado 2026-08-16, corrección
@@ -877,6 +879,13 @@ INSERT INTO heuristic_rules (name, description, event_type_id, metric_type_id, w
         NULL,
         (SELECT id FROM metric_types WHERE name = 'CORRELACION_MULTIPLES_INDICADORES'),
         15.00, 2.00, NULL, TRUE
+    ),
+    (
+        'Agente Detenido Inesperadamente',
+        'HR-13 -- Agente detenido de forma inesperada: el guardián del equipo detectó que el proceso del agente fue terminado sin un cierre normal (no fue un apagado, una actualización ni una desinstalación). Muchos ransomware, como LockBit, terminan los programas de seguridad antes de cifrar. Señal crítica por sí sola: el guardián aísla el equipo en el acto y el servidor abre un incidente.',
+        NULL,
+        NULL,
+        100.00, 1.00, NULL, TRUE
     );
 
 -- Único parámetro global real hoy (ver sección 23, SYSTEM SETTINGS).

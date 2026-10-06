@@ -9,6 +9,8 @@ from client import send_event, send_alert
 
 from adapters import get_process_for_file_event, open_files_index, enrich_pid
 
+from isolation_executor import execute_isolation
+
 import os
 import queue
 import threading
@@ -74,6 +76,10 @@ DEDUP_WINDOW_SECONDS = 2.0
 # ya cerró el archivo y el resultado sería engañoso.
 ATTRIBUTION_MAX_AGE_SECONDS = 30.0
 
+# Ver FileActivityHandler._isolate_now: no repetir el aislamiento local por
+# cada archivo de una misma ráfaga.
+LOCAL_ISOLATION_COOLDOWN_SECONDS = 60.0
+
 
 class FileActivityHandler(FileSystemEventHandler):
 
@@ -83,6 +89,9 @@ class FileActivityHandler(FileSystemEventHandler):
         self.honeyfile_monitor = honeyfile_monitor
         self.credential = credential
         self._last_technical_event = {}  # (file_path, event_type) -> último timestamp real
+
+        self._isolation_lock = threading.Lock()
+        self._last_local_isolation = 0.0
 
         self._event_queue = queue.Queue()  # (file_path, event_type, timestamp, evaluar_proceso)
         self._alert_queue = queue.Queue()  # payloads para send_alert
@@ -217,12 +226,36 @@ class FileActivityHandler(FileSystemEventHandler):
         )
 
         if matched_rules:
+            if "Acceso Honeyfile" in matched_rules:
+                self._isolate_now()
             self._queue_alert(matched_rules, file_count)
 
         # Atribución de proceso (HR-05/HR-11) y telemetría: en el hilo de
         # atribución, para no frenar la evaluación de los eventos que
         # siguen llegando.
         self._event_queue.put((file_path, event_type, extension, timestamp, evaluate_process))
+
+    def _isolate_now(self):
+        """Aislamiento local inmediato al tocar un honeyfile (2026-10-06).
+        Antes se esperaba la orden del servidor (hasta ~15 s, el intervalo
+        de isolation_sync.py) y un ransomware rápido puede terminar el
+        agente en ese tiempo. El servidor igual ordena el aislamiento por
+        su lado (HR-03 vale 100 -> CRÍTICO); al recibir esa orden el agente
+        la vuelve a aplicar (es idempotente) y confirma el resultado, y la
+        liberación sigue siendo desde la consola."""
+
+        now = time.time()
+        with self._isolation_lock:
+            if now - self._last_local_isolation < LOCAL_ISOLATION_COOLDOWN_SECONDS:
+                return
+            self._last_local_isolation = now
+
+        def run():
+            print("⚠ HONEYFILE ACTIVADO -- aislando el equipo de inmediato, sin esperar al servidor...")
+            ok, detail = execute_isolation("NETWORK")
+            print(f"{'✓' if ok else '✗'} Aislamiento local: {detail}")
+
+        threading.Thread(target=run, name="alfa-aislamiento-local", daemon=True).start()
 
     def _queue_alert(self, matched_rules, file_count):
         """El agente no decide severidad/score/título compuesto: manda

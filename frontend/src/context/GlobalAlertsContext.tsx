@@ -33,6 +33,29 @@ const POLL_INTERVAL_MS = 3_000;
 const MAX_VISIBLE = 4;
 
 const FLOATING_SEVERITIES = new Set(["ALTO", "CRÍTICO"]);
+
+// Tarjetas que el usuario cerró en esta sesión del navegador ("id:severidad"):
+// al recargar la consola no vuelven a aparecer. Una escalada (nueva
+// severidad) sí vuelve a flotar.
+const DISMISSED_STORAGE_KEY = "alfa_sentinel_alertas_cerradas";
+
+function loadDismissed(): Set<string> {
+  try {
+    return new Set(JSON.parse(sessionStorage.getItem(DISMISSED_STORAGE_KEY) ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissed(values: Set<string>) {
+  try {
+    sessionStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify([...values].slice(-200)));
+  } catch {
+    // sin almacenamiento: solo se pierde el recuerdo entre recargas
+  }
+}
+
+const noticeId = (key: string) => key.split(":").slice(0, 2).join(":");
 const SEVERITY_RANK: Record<string, number> = { BAJO: 0, MEDIO: 1, ALTO: 2, CRÍTICO: 3 };
 
 export interface FloatingAlert extends OpenAlert {
@@ -97,8 +120,11 @@ export function GlobalAlertsProvider({ children }: { children: ReactNode }) {
   // abrir/recargar la consola no debe hacer flashear de golpe todo lo
   // que ya existía, solo lo que cambia DESPUÉS de tener una base real.
   const baselineSetRef = useRef(false);
+  const dismissedRef = useRef<Set<string>>(loadDismissed());
 
   const dismiss = useCallback((key: string) => {
+    dismissedRef.current.add(noticeId(key));
+    saveDismissed(dismissedRef.current);
     setVisible((current) => {
       const next = current.filter((item) => item.key !== key);
       const promoted = queueRef.current.shift();
@@ -145,7 +171,17 @@ export function GlobalAlertsProvider({ children }: { children: ReactNode }) {
 
       seenRef.current.set(alert.id, next);
 
-      if (isBaseline) continue; // sin flash/refresco inicial de lo que ya existía
+      // Al abrir o recargar la consola: las ALTO/CRÍTICO que siguen sin
+      // atender (/alerts/open solo trae esas) flotan igual, sin sonido
+      // (2026-10-06: una alerta CRÍTICA creada con la consola cerrada no
+      // aparecía nunca). El resto de lo que ya existía no hace flash.
+      if (isBaseline) {
+        const id = `${alert.id}:${alert.severity}`;
+        if (FLOATING_SEVERITIES.has(alert.severity) && !dismissedRef.current.has(id)) {
+          enqueue({ ...alert, key: `${id}:${Date.now()}` });
+        }
+        continue;
+      }
 
       if (isNew || severityChanged || incidentChanged || isolationChanged) {
         anyChange = true;

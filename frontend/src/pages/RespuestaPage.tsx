@@ -1,43 +1,57 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import RespuestaSummaryCards from "../components/RespuestaSummaryCards";
 import ResponseEndpointsTable from "../components/ResponseEndpointsTable";
 import ResponseEndpointDetailPage from "./ResponseEndpointDetailPage";
 import { fetchResponseEndpoints } from "../api/responseClient";
 import type { ResponseEndpointsResponse } from "../types/respuesta";
-import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 interface Props {
+  active: boolean;
   endpointId: number | null;
   onOpenEndpoint: (agentId: number) => void;
   onBack: () => void;
   onViewIncident: (id: number) => void;
 }
 
-export default function RespuestaPage({ endpointId, onOpenEndpoint, onBack, onViewIncident }: Props) {
+export default function RespuestaPage({ active, endpointId, onOpenEndpoint, onBack, onViewIncident }: Props) {
   const [data, setData] = useState<ResponseEndpointsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { refreshToken } = useGlobalAlertsContext();
+  const liveTick = useLiveRefresh(active);
+  const requestSeq = useRef(0);
 
+  // 'silent': recarga en segundo plano (useLiveRefresh), sin "cargando"
+  // y sin reemplazar la tabla por un error si falla una vez. Solo se
+  // aplica la respuesta del pedido más reciente.
   function load(silent = false) {
+    const seq = ++requestSeq.current;
     if (!silent) setLoading(true);
     return fetchResponseEndpoints()
       .then((res) => {
-        setData(res);
-        setError(null);
+        if (seq === requestSeq.current) {
+          setData(res);
+          setError(null);
+        }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar la información de respuesta."))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (seq === requestSeq.current && !silent) {
+          setError(err instanceof Error ? err.message : "No se pudo cargar la información de respuesta.");
+        }
+      })
+      .finally(() => {
+        if (seq === requestSeq.current) setLoading(false);
+      });
   }
 
   useEffect(() => {
-    if (endpointId === null) load(true);
+    if (endpointId === null) load(data !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshToken, endpointId]);
+  }, [liveTick, endpointId]);
 
   if (endpointId !== null) {
-    return <ResponseEndpointDetailPage agentId={endpointId} onBack={onBack} onViewIncident={onViewIncident} />;
+    return <ResponseEndpointDetailPage agentId={endpointId} refreshKey={liveTick} onBack={onBack} onViewIncident={onViewIncident} />;
   }
 
   return (

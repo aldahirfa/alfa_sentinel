@@ -1,4 +1,5 @@
 import threading
+import traceback
 
 from client import send_heartbeat
 from system_info import get_system_info
@@ -24,20 +25,32 @@ class HeartbeatThread:
 
     def _run(self):
         while not self._stop_event.is_set():
-            system_info = get_system_info()
-            response = send_heartbeat(self.credential, system_info)
-
-            if response is not None and response.status_code == 200:
-                data = response.json()
-                print(
-                    "Heartbeat enviado: "
-                    f"agent_id={data.get('agent_id')} | "
-                    f"IP={system_info.get('ip_address') or 'no disponible'} | "
-                    f"SO={system_info.get('os')} {system_info.get('os_version') or ''}".rstrip()
-                )
+            # Corregido 2026-10-06: sin este try, un solo error inesperado
+            # mataba el hilo en silencio y el resto del agente seguía
+            # funcionando -- la consola mostraba "Última conexión: hace 1 h"
+            # con eventos de hace minutos (pasó en DESKTOP-5A3JTJG). Los
+            # demás hilos (honeyfiles, aislamiento, CPU) ya lo tenían.
+            try:
+                self._send_once()
+            except Exception:
+                print("⚠ Error enviando el heartbeat (se reintenta en el próximo ciclo):")
+                traceback.print_exc()
 
             if self._stop_event.wait(self.interval_seconds):
                 break
+
+    def _send_once(self):
+        system_info = get_system_info()
+        response = send_heartbeat(self.credential, system_info)
+
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            print(
+                "Heartbeat enviado: "
+                f"agent_id={data.get('agent_id')} | "
+                f"IP={system_info.get('ip_address') or 'no disponible'} | "
+                f"SO={system_info.get('os')} {system_info.get('os_version') or ''}".rstrip()
+            )
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { discardAlert, fetchAlertDrawer, reopenAlert } from "../api/client";
 import type { AlertDiscardReason, IncidenteDrawerData, AlertStatus } from "../types/alerts";
 import { severityPillStyle, SEVERITY_VAR } from "../lib/severity";
@@ -8,6 +8,9 @@ import EscalateAlertModal from "./EscalateAlertModal";
 
 interface Props {
   alertId: number | null;
+  // Cambia cuando la página se recarga en vivo (useLiveRefresh): el panel
+  // abierto vuelve a pedir sus datos sin vaciarse.
+  refreshKey?: number;
   onClose: () => void;
   onChanged: () => void;
   onViewIncident: (id: number) => void;
@@ -38,7 +41,7 @@ function Field({ label, value, mono = false }: { label: string; value: React.Rea
   );
 }
 
-export default function AlertDrawer({ alertId, onClose, onChanged, onViewIncident }: Props) {
+export default function AlertDrawer({ alertId, refreshKey = 0, onClose, onChanged, onViewIncident }: Props) {
   const [render, setRender] = useState(false);
   const [entered, setEntered] = useState(false);
   const [data, setData] = useState<IncidenteDrawerData | null>(null);
@@ -88,6 +91,20 @@ export default function AlertDrawer({ alertId, onClose, onChanged, onViewInciden
       return () => clearTimeout(t);
     }
   }, [alertId]);
+
+  const alertIdRef = useRef(alertId);
+  alertIdRef.current = alertId;
+
+  useEffect(() => {
+    if (!refreshKey || alertId === null) return;
+    const requested = alertId;
+    let cancelled = false;
+    fetchAlertDrawer(requested)
+      .then((res) => { if (!cancelled && alertIdRef.current === requested) setData(res); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!render) return;

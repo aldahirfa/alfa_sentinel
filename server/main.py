@@ -283,6 +283,47 @@ def _stop_presence_sweeper():
     _presence_stop.set()
 
 
+# HR-13 (2026-10-06): la reporta el guardián del agente (agent/guardian.ps1,
+# agent/guardian.sh) cuando el proceso del agente muere sin un cierre normal.
+# En una prueba real, LockBit terminó el agente ANTES de cifrar: sin esta
+# regla no había ni alerta ni aislamiento. Peso 100 -> CRÍTICO -> incidente
+# y orden de aislamiento por el flujo normal de report_alert.
+AGENT_KILLED_RULE_NAME = "Agente Detenido Inesperadamente"
+
+
+@app.on_event("startup")
+def _ensure_agent_killed_rule():
+    """Crea la regla en bases ya existentes (las nuevas la traen en
+    database/schema.sql). No pisa una regla que ya esté."""
+
+    try:
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO heuristic_rules (name, description, weight, threshold, window_seconds, is_active)
+                    VALUES (%s, %s, 100.00, 1.00, NULL, TRUE)
+                    ON CONFLICT (name) DO NOTHING;
+                    """,
+                    (AGENT_KILLED_RULE_NAME, AGENT_KILLED_RULE_DESCRIPTION)
+                )
+                connection.commit()
+        finally:
+            connection.close()
+    except Exception as error:  # la base puede no estar lista todavía
+        print(f"[reglas] no se pudo asegurar la regla '{AGENT_KILLED_RULE_NAME}': {error}")
+
+
+AGENT_KILLED_RULE_DESCRIPTION = (
+    "HR-13 -- Agente detenido de forma inesperada: el guardián del equipo detectó que el "
+    "proceso del agente fue terminado sin un cierre normal (no fue un apagado, una "
+    "actualización ni una desinstalación). Muchos ransomware, como LockBit, terminan los "
+    "programas de seguridad antes de cifrar. Señal crítica por sí sola: el guardián aísla "
+    "el equipo en el acto y el servidor abre un incidente."
+)
+
+
 def log_audit(cursor, user_id, action, entity_type=None, entity_id=None, description=None):
     """Bitácora de auditoría real (2026-08-12) -- antes 'audit_logs'
     existía en el schema pero ningún endpoint escribía ahí. Se llama
@@ -7772,6 +7813,21 @@ def report_event(
 
             agent_id = resolve_agent_id(cursor, x_agent_credential)
 
+            # Un agente que manda eventos está vivo aunque su heartbeat
+            # falle (2026-10-06: la consola mostraba "Última conexión hace
+            # 1 h" con eventos de hace minutos). Como mucho una vez cada
+            # 10 s, para no escribir la fila del agente en cada evento de
+            # una ráfaga. Solo eventos: las alertas también las puede
+            # mandar el guardián cuando el agente ya murió.
+            cursor.execute(
+                """
+                UPDATE agents SET last_seen_at = CURRENT_TIMESTAMP, status = 'ONLINE'
+                WHERE id = %s
+                  AND (last_seen_at IS NULL OR last_seen_at < CURRENT_TIMESTAMP - INTERVAL '10 seconds');
+                """,
+                (agent_id,)
+            )
+
             # 'events.event_type' pasó a ser 'event_type_id' (FK a la
             # tabla catálogo 'event_types'). El agente sigue mandando
             # el nombre como texto -- se traduce acá. Si no matchea
@@ -7933,7 +7989,76 @@ DEFERRED_RULE_NAMES = set()
 #   tramos fijos (2/3/4+ reglas -> +5/+10/+15), no lee estas columnas.
 #   Editarlas no cambiaría ningún cálculo, así que se bloquea para no
 #   sugerir un control que no hace nada.
-FIXED_SCORING_RULE_NAMES = {"Acceso Honeyfile", "Correlacion Multiples Indicadores"}
+# - 'Agente Detenido Inesperadamente' (HR-13): igual que el honeyfile, su
+#   weight=100 garantiza CRÍTICO y aislamiento; bajarlo rompería esa garantía.
+FIXED_SCORING_RULE_NAMES = {"Acceso Honeyfile", "Correlacion Multiples Indicadores", AGENT_KILLED_RULE_NAME}
+
+# Señales de contexto (2026-10-06): el CPU alto por sí solo no indica
+# ransomware (un instalador, un navegador o un equipo con pocos recursos
+# lo provocan a diario) y llenaba la bandeja: 29 de 32 alertas eran solo
+# HR-06. Ahora una señal de contexto NO crea una alerta propia:
+#  - si el equipo ya tiene un episodio abierto, se suma a esa alerta;
+#  - si no, queda en el historial del equipo (evento 'cpu_high') y se
+#    suma a la próxima alerta de ese equipo si llega dentro de
+#    EPISODE_WINDOW_SECONDS. Cifrar archivos sí consume CPU, así que en
+#    un ataque real la señal sigue aportando su peso y su correlación.
+CONTEXT_ONLY_RULE_NAMES = {"Consumo CPU Elevado"}
+CONTEXT_EVENT_TYPE = "cpu_high"
+
+
+def _record_context_signal(cursor, agent_id, description):
+    """Guarda la señal en 'events'. El detalle (proceso, PID, promedio)
+    va en el texto y NO en process_id/process_name: esas columnas se usan
+    para mostrar el proceso responsable de una alerta, y un proceso con
+    CPU alto no es por eso el responsable de la actividad de archivos."""
+
+    cursor.execute(
+        """
+        INSERT INTO event_types (name, description, category)
+        VALUES (%s, 'Consumo de CPU elevado sostenido (señal de contexto, HR-06)', 'process')
+        ON CONFLICT (name) DO NOTHING;
+        """,
+        (CONTEXT_EVENT_TYPE,)
+    )
+    cursor.execute(
+        """
+        INSERT INTO events (agent_id, event_type_id, file_path)
+        VALUES (%s, (SELECT id FROM event_types WHERE name = %s), %s);
+        """,
+        (agent_id, CONTEXT_EVENT_TYPE, description)
+    )
+
+
+def _recent_context_rules(cursor, agent_id, already_matched):
+    """Reglas de contexto con señal registrada en este equipo dentro de
+    EPISODE_WINDOW_SECONDS, activas para él y no reportadas ya en este
+    pedido. Mismo formato que 'matched' en report_alert: (id, nombre, peso)."""
+
+    cursor.execute(
+        """
+        SELECT 1 FROM events
+        JOIN event_types ON event_types.id = events.event_type_id
+        WHERE events.agent_id = %s
+          AND event_types.name = %s
+          AND events.detected_at >= NOW() - (%s || ' seconds')::INTERVAL
+        LIMIT 1;
+        """,
+        (agent_id, CONTEXT_EVENT_TYPE, EPISODE_WINDOW_SECONDS)
+    )
+    if cursor.fetchone() is None:
+        return []
+
+    pending = sorted(CONTEXT_ONLY_RULE_NAMES - already_matched)
+    if not pending:
+        return []
+    cursor.execute(
+        _effective_agent_rules_cte() + """
+        SELECT id, name, effective_weight FROM effective_rules
+        WHERE name = ANY(%(names)s) AND effective_is_active = TRUE;
+        """,
+        {"agent_id": agent_id, "names": pending}
+    )
+    return cursor.fetchall()
 
 
 @app.post("/agent/alerts")
@@ -7998,6 +8123,7 @@ def report_alert(
                 )
 
             is_honeyfile = any(name == "Acceso Honeyfile" for _, name, _ in matched)
+            context_only = all(name in CONTEXT_ONLY_RULE_NAMES for _, name, _ in matched)
 
             # ¿Actualiza una alerta existente del mismo episodio, o
             # crea una nueva? -- corregido 2026-08-17 (ver PENDIENTES.md,
@@ -8035,6 +8161,30 @@ def report_alert(
             )
             existing = cursor.fetchone()
             alert_id = existing[0] if existing else None
+
+            # Señal de contexto sin episodio abierto (ver
+            # CONTEXT_ONLY_RULE_NAMES): no se crea alerta, queda en el
+            # historial del equipo para sumarse si aparece actividad
+            # sospechosa dentro de la ventana del episodio.
+            if alert_id is None and context_only:
+                _record_context_signal(cursor, agent_id, alert.description)
+                connection.commit()
+                return {
+                    "message": "Señal de contexto registrada (sin alerta)",
+                    "alert_id": None,
+                    "risk_score": None,
+                    "severity": None,
+                    "incident_id": None,
+                    "incident_created": False,
+                    "isolation_requested": False,
+                }
+
+            # Actividad sospechosa real: se le suma la señal de CPU si se
+            # registró hace poco en este equipo.
+            if not context_only:
+                matched = matched + _recent_context_rules(
+                    cursor, agent_id, {name for _, name, _ in matched}
+                )
 
             if alert_id is None:
                 cursor.execute(
@@ -8156,12 +8306,15 @@ def report_alert(
             severity_row = cursor.fetchone()
             severity_id, severity_name = severity_row if severity_row else (None, "BAJO")
 
+            # Una señal de contexto que se suma a un episodio abierto no
+            # reemplaza la descripción de la actividad que lo originó.
             cursor.execute(
                 """
-                UPDATE alerts SET severity_id = %s, risk_score = %s, description = %s
+                UPDATE alerts SET severity_id = %s, risk_score = %s,
+                       description = COALESCE(%s, description)
                 WHERE id = %s RETURNING incident_id;
                 """,
-                (severity_id, final_score, alert.description, alert_id)
+                (severity_id, final_score, None if context_only else alert.description, alert_id)
             )
             incident_id = cursor.fetchone()[0]
 

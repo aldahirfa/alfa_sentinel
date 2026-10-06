@@ -1,4 +1,7 @@
+import json
 import os
+import subprocess
+import sys
 
 import psutil
 
@@ -83,21 +86,57 @@ def find_process_for_open_file(file_path):
     return None
 
 
-def open_files_index():
+# Límite para un recorrido completo de archivos abiertos (ver open_files_index).
+OPEN_FILES_SCAN_TIMEOUT_SECONDS = 20
+
+# El recorrido corre en un proceso aparte: el mismo código de abajo, sin
+# depender de ningún módulo del agente.
+_SCAN_SCRIPT = r"""
+import json, os, sys, psutil
+index = {}
+for process in psutil.process_iter(["pid"]):
+    try:
+        open_files = process.open_files()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        continue
+    except Exception:
+        continue
+    for open_file in open_files:
+        index.setdefault(os.path.normcase(os.path.abspath(open_file.path)), process.pid)
+sys.stdout.write(json.dumps(index))
+"""
+
+
+def open_files_index(timeout=OPEN_FILES_SCAN_TIMEOUT_SECONDS):
     """Un solo recorrido de procesos (el mismo de find_process_for_open_file)
     que devuelve {ruta normalizada: pid} con TODOS los archivos abiertos
     en este momento. En Windows cada recorrido tarda varios segundos
     (medido: ~18 s con ~170 procesos), así que file_monitor.py lo hace una
-    vez por lote de eventos en vez de una vez por evento (2026-10-05)."""
+    vez por lote de eventos en vez de una vez por evento (2026-10-05).
 
-    index = {}
+    Corre en un PROCESO APARTE con límite de tiempo (2026-10-06): en una
+    prueba con RanSim el agente quedó congelado 27 minutos (sin heartbeat,
+    sin eventos, sin detectar un honeyfile) con el proceso vivo. La consulta
+    de archivos abiertos de Windows puede quedar trabada con ciertos tipos
+    de handle, y dentro del agente se llevaba consigo a todos los hilos. Si
+    el recorrido no termina a tiempo se descarta: ese lote de eventos queda
+    sin proceso atribuido (lo mismo que cuando no se puede atribuir)."""
 
-    for process in psutil.process_iter(["pid"]):
-        try:
-            open_files = process.open_files()
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
-        for open_file in open_files:
-            index.setdefault(os.path.normcase(os.path.abspath(open_file.path)), process.pid)
-
-    return index
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _SCAN_SCRIPT],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"⚠ El recorrido de archivos abiertos superó {timeout} s y se descartó (lote sin atribución de proceso).")
+        return {}
+    except OSError as error:
+        print(f"⚠ No se pudo recorrer los archivos abiertos: {error}")
+        return {}
+    if result.returncode != 0:
+        print(f"⚠ El recorrido de archivos abiertos falló: {(result.stderr or '').strip()[-300:]}")
+        return {}
+    try:
+        return {path: int(pid) for path, pid in json.loads(result.stdout or "{}").items()}
+    except (ValueError, AttributeError):
+        return {}

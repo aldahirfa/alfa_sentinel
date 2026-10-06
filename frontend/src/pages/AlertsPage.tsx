@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ModuleIntro from "../components/ModuleIntro";
 import AlertsSummaryCards from "../components/AlertsSummaryCards";
 import AlertsFilters from "../components/AlertsFilters";
@@ -9,17 +9,18 @@ import { fetchAlerts } from "../api/client";
 import type { AlertStatusFilter, AlertsResponse } from "../types/alerts";
 import type { Severity } from "../types/dashboard";
 import { useRowFlash } from "../hooks/useRowFlash";
-import { useGlobalAlertsContext } from "../context/GlobalAlertsContext";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 const PAGE_SIZE = 15;
 const DEBOUNCE_MS = 300;
 
 interface Props {
+  active: boolean;
   initialAlertSelection?: { id: number } | null;
   onViewIncident: (id: number) => void;
 }
 
-export default function AlertsPage({ initialAlertSelection = null, onViewIncident }: Props) {
+export default function AlertsPage({ active, initialAlertSelection = null, onViewIncident }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
@@ -33,7 +34,8 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const flashId = useRowFlash(selectedId);
-  const { refreshToken } = useGlobalAlertsContext();
+  const liveTick = useLiveRefresh(active);
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     if (initialAlertSelection != null) setSelectedId(initialAlertSelection.id);
@@ -48,26 +50,34 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
     setPage(1);
   }, [search, severity, status, since, rule, view]);
 
-  function load() {
-    let cancelled = false;
-    setLoading(true);
+  // 'silent': recarga en segundo plano (useLiveRefresh), sin "cargando"
+  // y sin reemplazar la tabla por un error si falla una vez. Solo se
+  // aplica la respuesta del pedido más reciente.
+  function load(silent = false) {
+    const seq = ++requestSeq.current;
+    if (!silent) setLoading(true);
     fetchAlerts({ search, severity, status, since, rule, view, page, page_size: PAGE_SIZE })
       .then((res) => {
-        if (!cancelled) {
+        if (seq === requestSeq.current) {
           setData(res);
           setError(null);
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar la lista de alertas.");
+        if (seq === requestSeq.current && !silent) setError("No se pudo cargar la lista de alertas.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (seq === requestSeq.current) setLoading(false);
       });
-    return () => { cancelled = true; };
   }
 
-  useEffect(load, [search, severity, status, since, rule, view, page, refreshToken]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => load(), [search, severity, status, since, rule, view, page]);
+
+  useEffect(() => {
+    if (liveTick) load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
 
   const hasFilters = Boolean(search || severity || status || since || rule);
 
@@ -113,7 +123,7 @@ export default function AlertsPage({ initialAlertSelection = null, onViewInciden
         </>
       )}
 
-      <AlertDrawer alertId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} onViewIncident={onViewIncident} />
+      <AlertDrawer alertId={selectedId} refreshKey={liveTick} onClose={() => setSelectedId(null)} onChanged={() => load(true)} onViewIncident={onViewIncident} />
     </main>
   );
 }

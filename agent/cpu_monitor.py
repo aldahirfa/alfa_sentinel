@@ -1,3 +1,4 @@
+import os
 import threading
 from collections import deque
 from time import time
@@ -28,6 +29,28 @@ SAMPLE_INTERVAL_SECONDS = 2.0
 # sentido como indicio de ransomware. Se excluye de la evaluación
 # completa: nunca entra a matched_rules, nunca genera una alerta.
 IDLE_PROCESS_PID = 0
+
+
+def _own_pids():
+    """El propio agente nunca se evalúa (2026-10-06): sus picos de CPU
+    (atribución de procesos, envío de eventos) generaban alertas
+    "Consumo de CPU elevado -- python.exe" sobre sí mismo (probable
+    origen de 24 de las 32 alertas que había en la bandeja). Incluye sus
+    procesos hijos
+    (netsh/iptables del aislamiento) y, si lo lanzó el python.exe del
+    .venv de Windows (un lanzador que arranca el intérprete real como
+    hijo), también ese padre."""
+
+    pids = {os.getpid()}
+    try:
+        me = psutil.Process()
+        pids.update(child.pid for child in me.children(recursive=True))
+        parent = me.parent()
+        if parent is not None and parent.name().lower().startswith("python"):
+            pids.add(parent.pid)
+    except psutil.Error:
+        pass
+    return pids
 
 
 class CpuMonitor:
@@ -110,14 +133,16 @@ class CpuMonitor:
     def _sample_once(self):
         now = time()
         seen_pids = set()
+        own_pids = _own_pids()
 
         for process in psutil.process_iter(["pid", "name", "exe"]):
 
             pid = process.pid
 
             # Sección 12: nunca evaluar HR-06 para el proceso ocioso
-            # del SO -- ni siquiera se le toma la muestra.
-            if pid == IDLE_PROCESS_PID:
+            # del SO -- ni siquiera se le toma la muestra. Tampoco para
+            # el propio agente (ver _own_pids).
+            if pid == IDLE_PROCESS_PID or pid in own_pids:
                 continue
 
             try:
